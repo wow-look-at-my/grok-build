@@ -30,13 +30,16 @@ use crate::session::helpers::prepared_compaction_history::{
     PreparedCompactionHistory, build_compaction_chat_history,
 };
 use crate::session::helpers::session_compact::{
-    COMPACT_FAILED_PREFIX, CompactFailure, CompactOutput, generate_session_compact,
+    COMPACT_FAILED_PREFIX, CompactCallUsage, CompactFailure, CompactOutput,
+    generate_session_compact,
 };
 
 #[derive(Default)]
 struct SamplerState {
     last_success: Option<CompactOutput>,
     last_attempted_items: Option<Vec<ConversationItem>>,
+    /// One entry per transport attempt that is not yet billed, failed attempts included.
+    unbilled_calls: Vec<CompactCallUsage>,
 }
 
 impl SamplerState {
@@ -108,6 +111,16 @@ impl ShellCompactionSampler {
     pub(crate) fn take_last_attempted_items(&self) -> Option<Vec<ConversationItem>> {
         self.state.lock().unwrap().last_attempted_items.take()
     }
+
+    /// Take the usage of every attempt since the last take, for the caller to bill.
+    pub(crate) fn take_unbilled_calls(&self) -> Vec<CompactCallUsage> {
+        std::mem::take(&mut self.state.lock().unwrap().unbilled_calls)
+    }
+
+    /// The model the compaction requests name, which is the model to price them at.
+    pub(crate) fn model(&self) -> &str {
+        &self.sampling_config.model
+    }
 }
 
 #[async_trait]
@@ -131,7 +144,9 @@ impl CompactionSampler for ShellCompactionSampler {
         );
         self.state.lock().unwrap().record_attempt(&chat_history);
 
-        match generate_session_compact(
+        let started = std::time::Instant::now();
+        let mut reported = Default::default();
+        let result = generate_session_compact(
             chat_history,
             self.compaction_tool_tokens,
             self.tools.clone(),
@@ -143,9 +158,18 @@ impl CompactionSampler for ShellCompactionSampler {
             self.wall_clock_budget_secs,
             self.tool_choice,
             &self.cancel,
+            &mut reported,
         )
-        .await
-        {
+        .await;
+        self.state
+            .lock()
+            .unwrap()
+            .unbilled_calls
+            .push(CompactCallUsage {
+                reported,
+                api_duration_ms: Some(started.elapsed().as_millis() as u64),
+            });
+        match result {
             Ok(output) => {
                 let response = output.content.clone();
                 self.state.lock().unwrap().last_success = Some(output);

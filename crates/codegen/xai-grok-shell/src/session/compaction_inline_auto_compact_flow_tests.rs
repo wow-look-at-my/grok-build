@@ -2348,3 +2348,106 @@ async fn goal_turn_context_length_400_compacts_instead_of_pausing() {
         })
         .await;
 }
+
+/// Fill the conversation with enough history for a compaction to summarize.
+fn seed_compactable_conversation(actor: &SessionActor) {
+    let filler = "x".repeat(8_000);
+    actor.chat_state_handle.replace_conversation(vec![
+        ConversationItem::system("sys"),
+        ConversationItem::user(format!("u0 {filler}")),
+        ConversationItem::assistant(format!("a0 {filler}")),
+        ConversationItem::user("final query"),
+    ]);
+}
+
+/// A compaction call bills the session ledger as a side call, at the price the provider reported.
+/// The completion notice carries the new total, because a compaction at idle has no turn end to carry it.
+#[tokio::test(flavor = "current_thread")]
+async fn compaction_call_bills_the_session_ledger_at_the_reported_price() {
+    const TICKS: i64 = 4_200_000;
+    let local = tokio::task::LocalSet::new();
+    local
+        .run_until(async {
+            let (gateway_tx, mut gateway_rx) = mpsc::unbounded_channel();
+            let (persistence_tx, _persistence_rx) = mpsc::unbounded_channel();
+            let actor =
+                Arc::new(create_test_actor(50_000, 200_000, 85, gateway_tx, persistence_tx).await);
+            let server =
+                route_compaction_to_mock_server(&actor, "Summary of prior work. ".repeat(30)).await;
+            server.set_messages_cost_usd_ticks(Some(TICKS));
+            let mut cfg = actor.chat_state_handle.get_sampling_config().await.unwrap();
+            cfg.api_backend = crate::sampling::ApiBackend::Messages;
+            actor.chat_state_handle.update_sampling_config(cfg);
+            seed_compactable_conversation(&actor);
+
+            let result = actor.run_compact(None).await;
+            assert!(result.is_ok(), "compaction should succeed: {result:?}");
+            assert_eq!(server.messages_request_count(), 1);
+
+            let ledger = actor
+                .chat_state_handle
+                .try_get_session_usage()
+                .await
+                .expect("session ledger");
+            assert_eq!(ledger.totals.cost_usd_ticks, Some(TICKS));
+            assert_eq!(ledger.totals.model_calls, 1);
+            assert_eq!(ledger.totals.input_tokens, 10);
+            assert_eq!(ledger.totals.output_tokens, 5);
+            assert_eq!(
+                ledger.main_loop_model_calls, 0,
+                "a compaction call is not a main-loop round"
+            );
+
+            let mut notified_total = None;
+            while let Ok(message) = gateway_rx.try_recv() {
+                if let xai_acp_lib::AcpClientMessage::ExtNotification(args) = message
+                    && let Ok(notification) = serde_json::from_str::<
+                        crate::extensions::notification::SessionNotification,
+                    >(args.request.params.get())
+                    && let crate::extensions::notification::SessionUpdate::AutoCompactCompleted {
+                        session_cost_usd_ticks,
+                        ..
+                    } = notification.update
+                {
+                    notified_total = Some(session_cost_usd_ticks);
+                }
+            }
+            assert_eq!(
+                notified_total,
+                Some(Some(TICKS)),
+                "AutoCompactCompleted must carry the session total"
+            );
+        })
+        .await;
+}
+
+/// A provider that reports usage and no price still lands the call's tokens in the session ledger.
+#[tokio::test(flavor = "current_thread")]
+async fn compaction_call_usage_without_a_price_lands_in_the_session_ledger() {
+    let local = tokio::task::LocalSet::new();
+    local
+        .run_until(async {
+            let (gateway_tx, _gateway_rx) = mpsc::unbounded_channel();
+            let (persistence_tx, _persistence_rx) = mpsc::unbounded_channel();
+            let actor =
+                Arc::new(create_test_actor(50_000, 200_000, 85, gateway_tx, persistence_tx).await);
+            let server =
+                route_compaction_to_mock_server(&actor, "Summary of prior work. ".repeat(30)).await;
+            seed_compactable_conversation(&actor);
+
+            let result = actor.run_compact(None).await;
+            assert!(result.is_ok(), "compaction should succeed: {result:?}");
+            assert!(server.has_chat_completion_request());
+
+            let ledger = actor
+                .chat_state_handle
+                .try_get_session_usage()
+                .await
+                .expect("session ledger");
+            assert_eq!(ledger.totals.model_calls, 1);
+            assert_eq!(ledger.totals.input_tokens, 10);
+            assert!(ledger.totals.output_tokens > 0);
+            assert_eq!(ledger.main_loop_model_calls, 0);
+        })
+        .await;
+}

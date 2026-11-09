@@ -13,8 +13,9 @@ use crate::session::helpers::CompactionStateContext;
 use crate::session::helpers::compaction_context::CompactionInputs;
 use crate::session::helpers::compaction_context::to_system_reminder;
 use crate::session::helpers::session_compact::{
-    COMPACT_FAILED_PREFIX, CompactOutput, CompactionOutcome, build_compaction_prompt,
-    generate_session_compact, is_context_length_error, retain_session_asset_files,
+    COMPACT_FAILED_PREFIX, CompactCallUsage, CompactOutput, CompactionOutcome,
+    build_compaction_prompt, generate_session_compact, is_context_length_error,
+    retain_session_asset_files,
 };
 use crate::session::persistence::PersistenceMsg;
 use crate::session::two_pass::{
@@ -183,7 +184,9 @@ impl SessionActor {
             .wall_clock_budget_secs;
         let hosted_tools = self.hosted_tools_for_turn();
         let (cancel, _cancel_scope) = self.compaction.cancel.enter();
-        match generate_session_compact(
+        let started = std::time::Instant::now();
+        let mut reported = Default::default();
+        let result = generate_session_compact(
             history,
             compaction_tool_tokens,
             tools,
@@ -195,9 +198,17 @@ impl SessionActor {
             wall_clock_budget_secs,
             self.compaction.tool_choice,
             &cancel,
+            &mut reported,
         )
-        .await
-        {
+        .await;
+        self.record_compaction_call(
+            &sampling_config.model,
+            CompactCallUsage {
+                reported,
+                api_duration_ms: Some(started.elapsed().as_millis() as u64),
+            },
+        );
+        match result {
             Ok(out) => Some(out),
             Err(e) => {
                 tracing::warn!(error = ?e, "two_pass: summarization sample failed");
@@ -709,6 +720,7 @@ impl SessionActor {
             summary_preview: None,
             breakdown: report.breakdown,
             report_path: report.report_path,
+            session_cost_usd_ticks: self.reported_session_cost_ticks().await,
         })
         .await;
         self.emit_status_snapshot_detached();
@@ -1332,15 +1344,18 @@ impl SessionActor {
         let mut compact_summary: Option<String> =
             two_pass_output.as_ref().map(|o| o.content.clone());
         while compact_summary.is_none() {
-            match xai_grok_compaction::sample_full_replace_summary(
+            let sampled = xai_grok_compaction::sample_full_replace_summary(
                 &sampler,
                 &request_turns,
                 user_context.as_deref(),
                 &fr_config,
                 &observer,
             )
-            .await
-            {
+            .await;
+            for call in sampler.take_unbilled_calls() {
+                self.record_compaction_call(sampler.model(), call);
+            }
+            match sampled {
                 Ok(summary) => {
                     compact_summary = Some(summary.summary);
                     break;
@@ -2626,6 +2641,7 @@ impl SessionActor {
                     summary_preview: None,
                     breakdown: report.breakdown,
                     report_path: report.report_path,
+                    session_cost_usd_ticks: self.reported_session_cost_ticks().await,
                 })
                 .await;
                 self.emit_status_snapshot_detached();

@@ -7,7 +7,7 @@ use futures_util::stream::{BoxStream, Stream};
 use xai_grok_sampling_types::ollama::OllamaChatChunk;
 use xai_grok_sampling_types::{
     AssistantItem, ConversationItem, ConversationResponse, ResponseModelMetadata, SamplingError,
-    StopReason, TokenUsage, ToolCall, rs,
+    StopReason, ToolCall, rs,
 };
 
 use crate::events::{SamplingChannel, SamplingErrorInfo, SamplingEvent};
@@ -43,9 +43,7 @@ pub fn stream_ollama<'a>(
 
         let mut final_model: Option<String> = None;
         let mut final_done_reason: Option<String> = None;
-        let mut prompt_tokens: u32 = 0;
-        let mut cached_prompt_tokens: u32 = 0;
-        let mut completion_tokens: u32 = 0;
+        let mut call_usage = super::usage::CallUsage::default();
 
         let mut chunk_index: u64 = 0;
         let mut message_chunk_count: u64 = 0;
@@ -76,6 +74,11 @@ pub fn stream_ollama<'a>(
                     return;
                 }
             };
+
+            // Read before the fields below move out of `chunk`.
+            let done_usage = chunk
+                .done
+                .then(|| super::usage::CallUsage::from_ollama_done(&chunk));
 
             // Ollama reports a mid-stream failure as a line carrying only `error`.
             if let Some(message) = chunk.error {
@@ -183,11 +186,7 @@ pub fn stream_ollama<'a>(
 
             if chunk.done {
                 final_done_reason = chunk.done_reason.clone();
-                prompt_tokens = chunk.prompt_eval_count.unwrap_or(prompt_tokens);
-                cached_prompt_tokens = chunk
-                    .prompt_eval_cached_count
-                    .unwrap_or(cached_prompt_tokens);
-                completion_tokens = chunk.eval_count.unwrap_or(completion_tokens);
+                call_usage = done_usage.unwrap_or_default();
                 // The model load is not generation.
                 if let Some(load_ns) = chunk.load_duration.filter(|&ns| ns > 0) {
                     tracing::debug!(
@@ -221,16 +220,7 @@ pub fn stream_ollama<'a>(
             }
         };
 
-
-        let usage = (prompt_tokens > 0 || completion_tokens > 0).then(|| TokenUsage {
-            prompt_tokens,
-            completion_tokens,
-            total_tokens: prompt_tokens.saturating_add(completion_tokens),
-            reasoning_tokens: 0,
-            // Ollama counts the prefix its runner reused, which is the same quantity a cache-read is elsewhere.
-            cached_prompt_tokens,
-            cache_creation_prompt_tokens: 0,
-        });
+        let usage = call_usage.usage;
 
         let mut items: Vec<ConversationItem> = Vec::new();
         if !assistant_thinking.trim().is_empty() {

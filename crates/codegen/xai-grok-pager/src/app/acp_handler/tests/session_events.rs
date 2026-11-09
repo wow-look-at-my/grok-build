@@ -20,6 +20,7 @@
             summary_preview: None,
             breakdown: None,
             report_path: None,
+            session_cost_usd_ticks: None,
         };
         let _ = handle(make_ext_session_notification("sess-todo", completed), &mut app);
 
@@ -172,6 +173,7 @@
             summary_preview: None,
             breakdown: None,
             report_path: None,
+            session_cost_usd_ticks: None,
         };
         assert!(apply_child_view_session_event(&mut agent, &completed, false));
         assert!(
@@ -259,6 +261,7 @@
             summary_preview: None,
             breakdown: None,
             report_path: None,
+            session_cost_usd_ticks: None,
         };
         assert!(apply_child_view_session_event(&mut agent, &completed, false));
         assert!(
@@ -969,6 +972,7 @@
             summary_preview: None,
             breakdown: None,
             report_path: None,
+            session_cost_usd_ticks: None,
         };
         assert!(apply_session_event(&update, &mut session, &mut scrollback, false));
         assert_eq!(
@@ -1008,6 +1012,7 @@
             summary_preview: None,
             breakdown: None,
             report_path: None,
+            session_cost_usd_ticks: None,
         };
         assert!(apply_session_event(&update, &mut session, &mut scrollback, false));
         session.finish_turn(&mut scrollback,
@@ -1035,6 +1040,7 @@
             summary_preview: None,
             breakdown: None,
             report_path: None,
+            session_cost_usd_ticks: None,
         };
         assert!(apply_session_event(&update, &mut session, &mut scrollback, false));
         match last_session_event(&scrollback) {
@@ -1062,6 +1068,7 @@
             summary_preview: None,
             breakdown: None,
             report_path: None,
+            session_cost_usd_ticks: None,
         };
         assert!(apply_session_event(
             &update,
@@ -1109,6 +1116,7 @@
             summary_preview: None,
             breakdown: None,
             report_path: None,
+            session_cost_usd_ticks: None,
         };
         assert_eq!(compaction_context_refresh(&completed), Some(21_502));
         let failed = XaiSessionUpdate::AutoCompactFailed { error: "e".into() };
@@ -1147,6 +1155,7 @@
             summary_preview: None,
             breakdown: None,
             report_path: None,
+            session_cost_usd_ticks: None,
         };
         let changed = handle_child_session_notification(update, child_sid, &mut agent, false, None);
         assert!(changed);
@@ -1224,6 +1233,7 @@
             summary_preview: None,
             breakdown: None,
             report_path: None,
+            session_cost_usd_ticks: None,
         };
         let changed = handle_child_session_notification(update, child_sid, &mut agent, false, None);
         // No child_view means nothing visible changed, so it must not trigger a redraw

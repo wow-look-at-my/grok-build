@@ -123,6 +123,7 @@ async fn chat_completions_compaction_extracts_summary_after_reasoning_delta() {
         0,
         crate::util::config::CompactionToolChoice::Auto,
         &tokio_util::sync::CancellationToken::new(),
+        &mut Default::default(),
     )
     .await
     .unwrap_or_else(|_| panic!("compaction must succeed"));
@@ -244,6 +245,7 @@ async fn chat_completions_compaction_does_not_panic_on_reasoning_sibling() {
         0,
         crate::util::config::CompactionToolChoice::Auto,
         &tokio_util::sync::CancellationToken::new(),
+        &mut Default::default(),
     )
     .await;
 
@@ -310,6 +312,7 @@ async fn chat_completions_below_trigger_preserves_images_and_tools() {
         0,
         crate::util::config::CompactionToolChoice::Auto,
         &tokio_util::sync::CancellationToken::new(),
+        &mut Default::default(),
     )
     .await
     .unwrap_or_else(|_| panic!("compaction with tools must succeed"));
@@ -328,6 +331,7 @@ async fn chat_completions_below_trigger_preserves_images_and_tools() {
         0,
         crate::util::config::CompactionToolChoice::Auto,
         &tokio_util::sync::CancellationToken::new(),
+        &mut Default::default(),
     )
     .await
     .unwrap_or_else(|_| panic!("compaction without tools must succeed"));
@@ -472,6 +476,7 @@ async fn responses_below_trigger_preserves_images_and_tools() {
         0,
         crate::util::config::CompactionToolChoice::Auto,
         &tokio_util::sync::CancellationToken::new(),
+        &mut Default::default(),
     )
     .await
     .unwrap_or_else(|_| panic!("Responses compaction with tools must succeed"));
@@ -489,6 +494,7 @@ async fn responses_below_trigger_preserves_images_and_tools() {
         0,
         crate::util::config::CompactionToolChoice::Auto,
         &tokio_util::sync::CancellationToken::new(),
+        &mut Default::default(),
     )
     .await
     .unwrap_or_else(|_| panic!("Responses compaction without tools must succeed"));
@@ -579,6 +585,7 @@ async fn stalled_compaction_stream_times_out_as_transient() {
         0,
         crate::util::config::CompactionToolChoice::Auto,
         &tokio_util::sync::CancellationToken::new(),
+        &mut Default::default(),
     )
     .await;
 
@@ -665,6 +672,7 @@ async fn completed_then_stalled_stream_errors_no_salvage() {
         0,
         crate::util::config::CompactionToolChoice::Auto,
         &tokio_util::sync::CancellationToken::new(),
+        &mut Default::default(),
     )
     .await;
 
@@ -753,6 +761,7 @@ async fn substantial_partial_errors_no_salvage() {
         0,
         crate::util::config::CompactionToolChoice::Auto,
         &tokio_util::sync::CancellationToken::new(),
+        &mut Default::default(),
     )
     .await;
 
@@ -838,6 +847,7 @@ async fn thin_partial_retries_on_stall() {
         0,
         crate::util::config::CompactionToolChoice::Auto,
         &tokio_util::sync::CancellationToken::new(),
+        &mut Default::default(),
     )
     .await;
 

@@ -407,15 +407,8 @@ impl SessionActor {
             extra.insert("cancellationContext".to_string(), ctx);
         }
         let extra_meta = (!extra.is_empty()).then_some(extra);
-        // Session-cumulative cost at the terminal. This is the last point in
-        // a turn where a subagent fold can still land after the final model
-        // call.
-        let session_cost_usd_ticks = self
-            .chat_state_handle
-            .try_get_session_usage()
-            .await
-            .ok()
-            .and_then(|l| l.totals.cost_usd_ticks);
+        // Session-cumulative cost at the terminal.
+        let session_cost_usd_ticks = self.reported_session_cost_ticks().await;
         self.send_xai_notification_with_extra_meta(
             crate::session::turn_completion::build_turn_completed(
                 prompt_id.clone(),

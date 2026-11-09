@@ -3,6 +3,7 @@
 
 use super::*;
 use futures_util::stream;
+use xai_grok_sampling_types::TokenUsage;
 
 fn nth<T>(xs: &[T], i: usize) -> &T {
     let Some(x) = xs.get(i) else {

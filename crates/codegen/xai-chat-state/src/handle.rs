@@ -188,6 +188,22 @@ impl ChatStateHandle {
         });
     }
 
+    /// Bill a side call such as compaction. It does not count as a main-loop round.
+    pub fn record_side_call_usage(
+        &self,
+        model_id: Option<String>,
+        usage: TokenUsage,
+        api_duration_ms: Option<u64>,
+        cost_usd_ticks: Option<i64>,
+    ) {
+        let _ = self.cmd_tx.send(ChatStateCommand::RecordSideCallUsage {
+            model_id,
+            usage,
+            api_duration_ms,
+            cost_usd_ticks,
+        });
+    }
+
     /// Apply subagent usage; returns false if the actor did not acknowledge.
     pub async fn record_subagent_usage(
         &self,
