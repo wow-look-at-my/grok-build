@@ -5,6 +5,8 @@
 ## Features
 
 - Worktrees grok creates live under the grok home again, at `~/.grok/worktrees/<repo>/<name>`. Checkouts a release wrote inside their own repository, at `.grok/worktrees/<name>`, stay where they are and keep working
+- The top-right status bar is shorter. The todo count and the goal chip are one item: `✔ 4/5` with no goal, `[Goal: 4/5]`. This holds with one, plus a state word such as `Paused` when the goal does not simply run. Context reads tokens and the percent of the auto-compact point. The cost drops the word `session`, and the cache warning takes its place while it shows. The dashboard button is `☰`, always last, and with several sessions it is the middle of the session switcher. The `plan` chip, the hovered-link URL and the `show_plan_chip` setting are gone
+- A goal never runs without todos. Consider a full goal with the planner off. That goal captures its todos first, the way a lite goal does, and a goal whose plan puts no todo on the list pauses
 
 # 1.0.41 — 2026-09-22
 

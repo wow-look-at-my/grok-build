@@ -92,11 +92,13 @@ When grouping by state, each group has a **section title** (for example `Working
 
 Expanding it sticks until you quit.
 
-Opening a row shows the agent's conversation in the **details view**. The session's own header row does the work — no extra title band: the agent's name leads it (`name │ main ~/xai`. Omitted for an unnamed session), and on the right, after the usual chips, sit `‹ 2/5 ›` (your position among the dashboard's agents. Hidden when there is only one) and `[Dashboard]`. Keys go to the attached agent. `Esc` / `Ctrl+\` (or `[Dashboard]`) return to the dashboard.
+Opening a row shows the agent's conversation in the **details view**. The session's own header row does the work — no extra title band: the agent's name leads it (`name │ main ~/xai`. Omitted for an unnamed session), and the last item on the right is `‹ 2/5 ›`: your position among the dashboard's agents. Point at the middle and it turns into the dashboard button, `☰`. With only one agent there is no position. The bare `☰` sits there instead.
+
+Keys go to the attached agent. `Esc` / `Ctrl+\` (or a click on the middle) return to the dashboard.
 
 `‹` / `›` cycle agents. The shortcuts bar shows `Ctrl+\: back to dashboard`. Gotcha: `Esc` only returns. `/exit` inside the agent closes the session (dashboard toast: "Session closed").
 
-Every session with the dashboard enabled shows `[Dashboard]` in its header, not just ones opened from the dashboard. Clicking it is the same as `Ctrl+\`. Disabling the dashboard (see the top of this page) removes the button too.
+Every session with the dashboard enabled shows the `☰` dashboard button at the right end of its header, not just ones opened from the dashboard. Clicking it is the same as `Ctrl+\`. Disabling the dashboard (see the top of this page) removes the button too.
 
 `Ctrl+X` in the details view is state-dependent. While a **turn runs** it cancels the turn (same as `Ctrl+C`, including the keep-subagents prompt) and never closes the session. Otherwise — **idle**, a slash command in flight, or a cancel still pending — `Ctrl+X` arms a confirmation: press again a bounded number of seconds. This is to close the session. This is return to the dashboard. Any other key cancels the confirmation.
 

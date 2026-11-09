@@ -101,13 +101,13 @@ fn main() -> Result<(), Box<dyn std::error::Error>> {
     );
 
     // github.com's release CDN answers a transient 5xx or drops the connection under load.
-    const FETCH_ATTEMPTS: u32 = 6;
+    const FETCH_ATTEMPTS: u32 = 21;
     let bytes: Vec<u8> = {
         let mut last = String::new();
         let mut fetched: Option<Vec<u8>> = None;
         for attempt in 0..FETCH_ATTEMPTS {
             if attempt > 0 {
-                std::thread::sleep(std::time::Duration::from_secs(2u64 << (attempt - 1)));
+                std::thread::sleep(std::time::Duration::from_secs(30));
             }
             match request::blocking::get(&url) {
                 Ok(resp) if resp.status().is_success() => {
