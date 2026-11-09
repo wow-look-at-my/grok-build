@@ -5020,20 +5020,29 @@ impl ModelInfo {
     /// Derive the legacy effort gate/default from `reasoning_efforts`. The shell's internal reads (support gate, wire default, session modes) then treat a menu-only model as supported.
     /// The single derive site; `to_acp_model_info` then just reads these fields. Idempotent (the remote path already sets them); the empty-list path leaves both legacy fields untouched.
     fn derive_reasoning_effort_fields(&mut self) {
-        if self.reasoning_efforts.is_empty() {
+        if !self.reasoning_efforts.is_empty() {
+            self.supports_reasoning_effort = true;
+        }
+        self.fill_default_reasoning_effort();
+    }
+
+    /// Give an effort-capable model a default effort when it has none. A client
+    /// that sets the model without an effort reads this default, so an empty one
+    /// shows the session with no effort. A menu is usually listed weakest first,
+    /// so its first entry is often `none`. Only the user turns reasoning off.
+    pub(crate) fn fill_default_reasoning_effort(&mut self) {
+        if !self.supports_reasoning_effort || self.reasoning_effort.is_some() {
             return;
         }
-        self.supports_reasoning_effort = true;
-        // A menu is usually listed weakest first, so its first entry is often
-        // `none`. Only the user turns reasoning off, never a default.
-        if self.reasoning_effort.is_none() {
-            self.reasoning_effort = Some(crate::agent::reasoning_policy::resolve_reasoning_effort(
-                crate::agent::reasoning_policy::ReasoningNeed::Default,
-                &crate::agent::reasoning_policy::EffortSupport::Menu(
-                    self.reasoning_efforts.clone(),
-                ),
-            ));
-        }
+        let support = if self.reasoning_efforts.is_empty() {
+            crate::agent::reasoning_policy::EffortSupport::Unlisted
+        } else {
+            crate::agent::reasoning_policy::EffortSupport::Menu(self.reasoning_efforts.clone())
+        };
+        self.reasoning_effort = Some(crate::agent::reasoning_policy::resolve_reasoning_effort(
+            crate::agent::reasoning_policy::ReasoningNeed::Default,
+            &support,
+        ));
     }
     /// Whether this model appears in the picker for the given auth mode.
     /// | `hidden` | `supported_in_api` | OAuth user | API-key user | |----------|--------------------|------------|--------------| | true | _ | hidden | hidden | | false | true | visible | visible | | false | false | visible | **hidden** |
