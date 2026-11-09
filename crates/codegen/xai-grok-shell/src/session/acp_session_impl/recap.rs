@@ -689,7 +689,7 @@ impl SessionActor {
         );
         let reasoning_effort = suggest_reasoning.effort;
         let request_model = sampling_config.model.clone();
-        let sampling_client = match xai_grok_sampler::SamplingClient::new(sampling_config) {
+        let sampling_client = match self.sampling_client(sampling_config) {
             Ok(client) => client,
             Err(e) => {
                 tracing::debug!(error = %e, "prompt suggest: sampling client unavailable");

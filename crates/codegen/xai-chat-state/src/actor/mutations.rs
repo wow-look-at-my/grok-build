@@ -479,6 +479,14 @@ impl ChatStateActor {
         );
     }
 
+    pub(super) fn record_main_loop_round(&mut self) {
+        self.state
+            .prompt_usage
+            .get_or_insert_default()
+            .record_main_loop_round();
+        self.state.session_usage.record_main_loop_round();
+    }
+
     pub(super) fn record_side_call_usage(
         &mut self,
         model_id: Option<String>,

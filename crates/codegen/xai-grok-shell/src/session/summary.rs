@@ -4,7 +4,6 @@
 //! The persistence actor just calls [`SummaryGenerator::update`]; all state transitions are internal.
 
 use crate::extensions::notification::{SessionNotification, SessionUpdate as XaiSessionUpdate};
-use crate::sampling::Client as OaiCompatClient;
 use crate::session::helpers::session_summary::generate_session_summary;
 use crate::session::info::Info;
 use crate::session::persistence::PersistenceMsg;
@@ -20,8 +19,8 @@ enum State {
 }
 
 pub(crate) struct SummaryConfig {
-    /// `None` when no title model can be reached. The title then comes from the user's own text.
-    pub(crate) sampling_client: Option<OaiCompatClient>,
+    /// The title model's config.
+    pub(crate) sampler_config: Option<xai_grok_sampler::SamplerConfig>,
     pub(crate) model: String,
     /// Channel back to the persistence actor for sequential storage writes.
     /// Weak: a strong sender here would keep the actor's own channel and task alive.
@@ -32,6 +31,8 @@ pub(crate) struct SummaryConfig {
 pub(crate) struct SummaryGenerator {
     state: State,
     config: SummaryConfig,
+    /// The session ledger the title call bills to. `None` until the session sends it.
+    ledger: Option<xai_chat_state::ChatStateHandle>,
 }
 
 impl SummaryGenerator {
@@ -39,7 +40,26 @@ impl SummaryGenerator {
         Self {
             state: State::Idle,
             config,
+            ledger: None,
         }
+    }
+
+    pub(crate) fn set_ledger(&mut self, ledger: xai_chat_state::ChatStateHandle) {
+        self.ledger = Some(ledger);
+    }
+
+    /// The title client, billed to the session ledger. With no ledger yet, the build fails loud and the title comes from the prompt.
+    fn title_client(&self) -> Option<crate::sampling::Client> {
+        let mut cfg = self.config.sampler_config.clone()?;
+        cfg.usage_sink = self
+            .ledger
+            .as_ref()
+            .map(crate::session::billed_client::session_usage_sink);
+        crate::session::billed_client::billed_sampling_client(cfg)
+            .inspect_err(|error| {
+                tracing::error!(%error, "no session title client; the title comes from the prompt");
+            })
+            .ok()
     }
 
     /// Generate a session summary from the first content chunk.
@@ -58,7 +78,7 @@ impl SummaryGenerator {
                 // Transition to Done so subsequent ContentChunk messages don't spawn duplicate title generation tasks
                 self.state = State::Done;
 
-                let sampling_client = self.config.sampling_client.clone();
+                let sampling_client = self.title_client();
                 let model = self.config.model.clone();
                 let persistence_tx = self.config.persistence_tx.clone();
 
@@ -255,14 +275,12 @@ mod tests {
     #[test]
     fn reset_returns_generator_to_idle() {
         let (tx, _rx) = tokio::sync::mpsc::unbounded_channel();
-        // A client needs a URL to build. The discard port answers nothing.
-        let sampling_client = OaiCompatClient::new(xai_grok_sampler::SamplerConfig {
-            base_url: "http://127.0.0.1:9/v1".to_owned(),
-            ..xai_grok_sampler::SamplerConfig::default()
-        })
-        .unwrap();
+        // The discard port answers nothing.
         let mut generator = SummaryGenerator::new(SummaryConfig {
-            sampling_client: Some(sampling_client),
+            sampler_config: Some(xai_grok_sampler::SamplerConfig {
+                base_url: "http://127.0.0.1:9/v1".to_owned(),
+                ..xai_grok_sampler::SamplerConfig::default()
+            }),
             model: String::new(),
             persistence_tx: tx.downgrade(),
         });

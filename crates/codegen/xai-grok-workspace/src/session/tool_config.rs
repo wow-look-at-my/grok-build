@@ -496,6 +496,8 @@ impl SessionContextFactory for WorkspaceSessionContextFactory {
             api_key_provider: None,
             auth_provider: self.auth.clone(),
             attribution_callback: None,
+            // The workspace host runs tools outside any shell session, so no session ledger exists here.
+            usage_sink: Some(xai_grok_sampler::no_session_sink("workspace tool host")),
             system_reminder_tag: xai_grok_tools::reminders::DEFAULT_REMINDER_TAG,
         }
     }
@@ -681,6 +683,7 @@ pub mod test_support {
                 api_key_provider: None,
                 auth_provider: None,
                 attribution_callback: None,
+                usage_sink: None,
                 system_reminder_tag: xai_grok_tools::reminders::DEFAULT_REMINDER_TAG,
             }
         }

@@ -38,6 +38,7 @@ mod span_timing;
 pub mod stream;
 mod stream_classify;
 pub mod types;
+pub mod usage_sink;
 
 // Public re-exports: the API consumers see
 pub use actor::SamplerActor;
@@ -48,7 +49,7 @@ pub use attribution::{
 pub use backend_detect::{
     detected_backend, effective_api_backend, is_backend_mismatch, resolve_api_backend,
 };
-pub use client::{ApiBackend, SamplingClient, user_agent_string_for};
+pub use client::{ApiBackend, DEFAULT_COLLECT_IDLE_TIMEOUT, SamplingClient, user_agent_string_for};
 pub use config::{
     AuthScheme, BearerResolver, HeaderInjector, OriginClientInfo, RequestCompression, RetryPolicy,
     SamplerConfig, SharedBearerResolver, SharedHeaderInjector,
@@ -75,4 +76,5 @@ pub use stream::{
     collect_response, stream_chat_completions, stream_messages, stream_ollama, stream_responses,
 };
 pub use types::RequestId;
+pub use usage_sink::{BilledCall, SharedUsageSink, UsageSink, no_session_sink};
 pub use xai_grok_sampling_types::ConversationGroupId;

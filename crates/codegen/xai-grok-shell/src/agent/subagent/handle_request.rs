@@ -1191,21 +1191,21 @@ pub(crate) async fn run_shell_child(
             completion_data,
         );
     }
-    let sampling_client = match crate::sampling::Client::new(effective_sampling_config.clone()) {
-        Ok(c) => c,
-        Err(e) => {
-            let msg = format!("Sampling client error: {e}");
-            return setup_failure_output(
-                &msg,
-                &request,
-                &child_session_id,
-                &subagent_meta_dir,
-                &early_gcs_ctx,
-                start_artifacts.terminal_persistence_allowed(),
-                completion_data,
-            );
-        }
-    };
+    // Fail the spawn early on a config no client can be built from. This check client sends nothing.
+    let mut check_config = effective_sampling_config.clone();
+    check_config.usage_sink = Some(xai_grok_sampler::no_session_sink("subagent config check"));
+    if let Err(e) = crate::session::billed_client::billed_sampling_client(check_config) {
+        let msg = format!("Sampling client error: {e}");
+        return setup_failure_output(
+            &msg,
+            &request,
+            &child_session_id,
+            &subagent_meta_dir,
+            &early_gcs_ctx,
+            start_artifacts.terminal_persistence_allowed(),
+            completion_data,
+        );
+    }
     #[cfg(test)]
     let persistence_dir = ctx
         .setup_failure
@@ -1240,7 +1240,7 @@ pub(crate) async fn run_shell_child(
         &child_session_info,
         persistence_dir,
         effective_model_id.clone(),
-        sampling_client,
+        effective_sampling_config.clone(),
         effective_sampling_config.model.clone(),
         if is_wake {
             crate::session::persistence::ExplicitSessionOpen::Wake

@@ -115,15 +115,14 @@ fn persisted_finishes(
         .collect()
 }
 
-fn test_persistence_sampling_client() -> crate::sampling::Client {
-    crate::sampling::Client::new(xai_grok_sampler::SamplerConfig {
+fn test_persistence_sampling_client() -> xai_grok_sampler::SamplerConfig {
+    xai_grok_sampler::SamplerConfig {
         api_key: Some("test-key".to_owned()),
         base_url: "http://localhost".to_owned(),
         model: "test-model".to_owned(),
         context_window: 256_000,
         ..Default::default()
-    })
-    .expect("sampling client")
+    }
 }
 
 async fn actor_with_goal() -> (

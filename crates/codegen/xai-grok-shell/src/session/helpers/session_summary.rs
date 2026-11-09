@@ -53,13 +53,16 @@ impl DirectSessionTitleRoute {
 
 /// Builds the title client for a daemon pinned to a direct Grok model endpoint. The route is
 /// authoritative: its credential never falls through to the configured public endpoints.
+/// `usage_sink` bills the title calls: the session's sink, or `xai_grok_sampler::no_session_sink` when no session owns the title.
 pub fn build_direct_session_title_client(
     direct: DirectSessionTitleRoute,
     client_version: Option<String>,
+    usage_sink: xai_grok_sampler::SharedUsageSink,
 ) -> crate::sampling::Result<(SamplingClient, String)> {
-    let sampling_config = direct_session_title_sampling_config(direct, client_version);
+    let mut sampling_config = direct_session_title_sampling_config(direct, client_version);
+    sampling_config.usage_sink = Some(usage_sink);
     let model = sampling_config.model.clone();
-    let client = SamplingClient::new(sampling_config)?;
+    let client = crate::session::billed_client::billed_sampling_client(sampling_config)?;
     Ok((client, model))
 }
 
@@ -187,6 +190,7 @@ pub fn title_fallback_from_user_text(user_message: &str) -> String {
 
 /// Generate the initial session title from the first user message, for the fast first-prompt path ([`crate::session::summary::SummaryGenerator`]).
 /// The title is later refreshed from the whole conversation at the early checkpoints in [`TITLE_REFRESH_TURNS`], then frozen.
+/// The client's usage sink bills the call.
 pub async fn generate_session_summary(
     user_message: String,
     client: OaiCompatClient,

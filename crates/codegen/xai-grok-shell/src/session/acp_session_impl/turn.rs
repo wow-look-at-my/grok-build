@@ -3499,8 +3499,9 @@ impl SessionActor {
             );
             self.clear_auth_compact_suppression();
             let model_duration_ms = model_timer.elapsed().as_millis() as u64;
+            let session_model = self.current_model_id().await;
             {
-                let model_id = self.current_model_id().await;
+                let model_id = session_model.clone();
                 xai_grok_telemetry::session_ctx::log_event(
                     xai_grok_telemetry::events::ModelResponseReceived {
                         model_id,
@@ -3525,9 +3526,8 @@ impl SessionActor {
                     },
                 );
             }
-            let response_cost_ticks =
-                self.record_response_token_usage(&response, Some(model_duration_ms));
-            // Read the session ledger AFTER the fold above so the client's
+            let response_cost_ticks = self.record_response_token_usage(&response, &session_model);
+            // The usage sink folded this call before the response reached here, so the client's
             // running total moves on every call, not once per turn.
             let session_cost_ticks = self
                 .chat_state_handle

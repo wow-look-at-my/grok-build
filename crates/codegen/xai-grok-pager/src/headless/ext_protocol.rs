@@ -412,6 +412,7 @@ fn decode_session_notification(method: &str, params: &str) -> ExtEvent {
         XaiUpdate::ThinkingSummary {
             stream_start_ms,
             summary,
+            ..
         } => ExtEvent::Stream(Box::new(StreamEvent::ThinkingSummary {
             stream_start_ms,
             summary,

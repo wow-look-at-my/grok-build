@@ -2336,5 +2336,8 @@ mod recap_display_only_tests;
 #[path = "acp_session_tests/reminder_policy_tests.rs"]
 mod reminder_policy_tests;
 #[cfg(test)]
+#[path = "acp_session_tests/side_call_billing_tests.rs"]
+mod side_call_billing_tests;
+#[cfg(test)]
 #[path = "acp_session_tests/thinking_summary_tests.rs"]
 mod thinking_summary_tests;

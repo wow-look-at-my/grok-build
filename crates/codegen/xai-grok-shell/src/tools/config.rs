@@ -228,6 +228,7 @@ impl ShellToolsetConfig {
             // Leaving the callback `None` here is fine; this base is only the placeholder for the "no base provided" path
             // Production `SamplerConfig`s in agent/config.rs and acp_session.rs set the real attribution callback
             attribution_callback: None,
+            usage_sink: None,
             bearer_resolver: None,
             supports_backend_search: false,
             compactions_remaining: None,
