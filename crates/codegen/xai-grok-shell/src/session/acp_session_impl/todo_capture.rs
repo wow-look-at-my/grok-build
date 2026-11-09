@@ -511,25 +511,15 @@ impl SessionActor {
             // One capture is several model calls, so a transient failure on any
             // of them would otherwise throw away the whole run's work. Same
             // bounded budget `/btw` uses.
-<<<<<<< HEAD
             let response =
                 collect_aux_call(&sampling_client, &base_request, "todo", |e, backoff| {
-=======
-            let response = collect_aux_call(
-                &self.chat_state_handle,
-                &sampling_client,
-                &base_request,
-                "todo",
-                |e, backoff| {
->>>>>>> cbcd89b2527effd2a4230bbd48f43a437baecd61
                     tracing::warn!(
                         backoff_ms = backoff.as_millis() as u64,
                         error = %e,
                         "todo capture transient failure; retrying"
                     );
-                },
-            )
-            .await?;
+                })
+                .await?;
             log_prompt_cache_usage("todo", sampling_client.api_backend(), &response);
 
             let calls: Vec<ToolCall> = response.tool_calls().to_vec();
