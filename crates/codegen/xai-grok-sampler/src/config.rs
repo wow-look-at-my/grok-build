@@ -27,7 +27,8 @@ pub enum AuthScheme {
     None,
 }
 
-/// Set by the shell: `Zstd` only toward the cli-chat-proxy that advertised it.
+/// Set by the shell. `Zstd` is the cli-chat-proxy that advertised it in its
+/// settings.
 #[derive(
     Debug, Clone, Copy, Default, PartialEq, Eq, Serialize, Deserialize, schemars::JsonSchema,
 )]
@@ -36,6 +37,7 @@ pub enum RequestCompression {
     #[default]
     None,
     Zstd,
+    Off,
 }
 
 /// All knobs that control a single sampling request.
