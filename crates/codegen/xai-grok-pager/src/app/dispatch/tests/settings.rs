@@ -1379,7 +1379,7 @@ fn issued_feature_override(effects: Vec<Effect>) -> Option<Option<bool>> {
         [] => None,
         [
             Effect::PersistFeatureOverride {
-                feature: Feature::SubagentModelInheritance,
+                feature: Feature::SubagentModelInheritance | Feature::TwoPassCompaction,
                 saved,
             },
         ] => Some(*saved),
@@ -1422,6 +1422,39 @@ fn subagent_model_inheritance_persists_overrides_and_reset_deletes_the_key() {
     assert_eq!(Some(false), app.subagent_model_inheritance.config.user);
     assert!(read_toast(&app).contains("fixed by a requirements.toml pin or an MDM policy"));
 }
+/// The two-pass compaction row persists through its own `Feature`, reads back through the registry, and settles on its own state.
+#[test]
+fn two_pass_compaction_persists_overrides_and_reads_back() {
+    use xai_grok_shell::agent::config::Feature;
+    let feature = Feature::TwoPassCompaction;
+    let mut app = test_app_with_agent();
+    let read = |app: &AppView| {
+        crate::settings::current_value_for(
+            "two_pass_compaction",
+            &app.current_ui,
+            &crate::app::dispatch::settings::ui::build_pager_snapshot(app),
+        )
+    };
+    assert_eq!(Some(crate::settings::SettingValue::Bool(true)), read(&app));
+    let effects = dispatch(Action::SetTwoPassCompaction(false), &mut app);
+    assert!(matches!(
+        effects.as_slice(),
+        [Effect::PersistFeatureOverride {
+            feature: Feature::TwoPassCompaction,
+            saved: Some(false)
+        }]
+    ));
+    assert_eq!(Some(false), app.two_pass_compaction.config.user);
+    assert_eq!(None, app.subagent_model_inheritance.config.user);
+    assert_eq!(Some(crate::settings::SettingValue::Bool(false)), read(&app));
+    assert!(read_toast(&app).contains("restart to apply"));
+    let _ = handle_feature_override_persisted(&mut app, feature, Ok(Some(false)));
+    assert!(app.two_pass_compaction.writes.is_none());
+    let effects = dispatch(Action::ClearTwoPassCompaction, &mut app);
+    assert_eq!(Some(None), issued_feature_override(effects));
+    assert_eq!(Some(crate::settings::SettingValue::Bool(true)), read(&app));
+}
+
 /// One write is on disk at a time: toggles under a pending write only queue the newest intent, the completion issues
 /// it (also after a failure) unless it already matches the disk, and a lone failure settles the mirror back on the disk.
 #[test]
@@ -1614,6 +1647,9 @@ fn move_setting_away_from_default(app: &mut AppView, key: crate::settings::Setti
         }
         "subagent_model_inheritance" => {
             let _ = dispatch(Action::SetSubagentModelInheritance(true), app);
+        }
+        "two_pass_compaction" => {
+            let _ = dispatch(Action::SetTwoPassCompaction(false), app);
         }
         "keep_text_selection" => {
             let _ = dispatch(

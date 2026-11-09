@@ -755,7 +755,7 @@ mod tests {
         local.run_until(f).await
     }
 
-    /// Contract: with every attempt failing, respawn is called at `t=1s`, `t=5s`, `t=21s`, then every steady interval.
+    /// Contract: with every attempt failing, respawn is called, then every steady interval.
     #[tokio::test(start_paused = true)]
     async fn backoff_attempts_sequence() {
         run_in_local(async {

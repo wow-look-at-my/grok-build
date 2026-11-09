@@ -8,9 +8,9 @@
 //! |--------|-------------|
 //! | `example.invalid/code/goto-definition` | Definition location(s) for symbol at position |
 //! | `example.invalid/code/goto-references` | Reference location(s) for symbol at position |
-//! | `example.invalid/code/find-definitions` | All definitions of a symbol by name |
-//! | `example.invalid/code/find-references` | All references to a symbol by name |
-//! | `example.invalid/code/status` | Indexing status |
+//! | `example.invalid/code/find-definitions` | All definitions of a symbol. This is by name |
+//! | `example.invalid/code/find-references` | All references to a symbol by name | |
+//! `example.invalid/code/status` | Indexing status |
 
 use std::path::{Path, PathBuf};
 

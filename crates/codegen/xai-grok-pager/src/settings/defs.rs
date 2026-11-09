@@ -57,9 +57,9 @@ pub(crate) const OUTPUT_RATE_FLOOR_CHILDREN: &[&str] = &[
 // ---------------------------------------------------------------------------
 // Theme choice catalogs.
 //
-// Canonical names MUST match `ThemeKind::display_name()`. Shared by `theme`,
-// `auto_dark_theme`, and `auto_light_theme`; auto-* sub-pickers drop "auto"
-// to avoid circular reference. Bounded by `MAX_PICKER_CHOICES`.
+// Canonical names MUST match `ThemeKind::display_name()`. Shared; auto-*
+// sub-pickers drop "auto" to avoid circular reference. Bounded by
+// `MAX_PICKER_CHOICES`.
 // ---------------------------------------------------------------------------
 
 /// Full theme catalog including the "auto" meta-variant; only `theme` uses it.
@@ -1580,6 +1580,27 @@ pub(crate) fn default_settings_with_subagent_rows(
                 supports_preview: false,
             },
             restart_required: false,
+        },
+        // SHELL-owned `[features].two_pass_compaction`, a registry feature row like `subagent_model_inheritance`
+        // `restart_required` because each agent latches the flag when it is built
+        SettingMeta {
+            key: "two_pass_compaction",
+            category: SettingCategory::Agent,
+            owner: SettingOwner::Shell,
+            label: "Two-pass compaction",
+            description: "Summarizes the older part of the conversation in the background before the context fills, so compaction takes less time when it fires. Turn off to always compact the whole conversation in one request.",
+            keywords: &[
+                "compaction",
+                "compact",
+                "two-pass",
+                "prefire",
+                "summary",
+                "context",
+            ],
+            kind: SettingKind::Bool {
+                default: Feature::TwoPassCompaction.default_enabled(),
+            },
+            restart_required: true,
         },
         // SHELL-owned startup-time settings (restart_required: true).
         // The running pager doesn't re-read these mid-session.

@@ -59,6 +59,7 @@ pub(crate) fn refresh_open_settings_modals(app: &mut AppView) {
     let ask_user_question_timeout_enabled_from_app = app.ask_user_question_timeout_enabled;
     let voice_stt_language_from_app = app.voice_config.language.clone();
     let subagent_model_inheritance_from_app = app.subagent_model_inheritance;
+    let two_pass_compaction_from_app = app.two_pass_compaction;
     let keep_awake_from_app = app.notification_service.sleep_inhibitor.mode();
     let context_limits_from_app = app.model_context_limits.clone();
     for agent in app.agents.values_mut() {
@@ -97,6 +98,7 @@ pub(crate) fn refresh_open_settings_modals(app: &mut AppView) {
                 ask_user_question_timeout_enabled: ask_user_question_timeout_enabled_from_app,
                 voice_stt_language: voice_stt_language_from_app.clone(),
                 subagent_model_inheritance: subagent_model_inheritance_from_app,
+                two_pass_compaction: two_pass_compaction_from_app,
                 model_windows: crate::settings::context_limits::catalog_windows(
                     &agent.session.models.available,
                 ),
@@ -215,6 +217,7 @@ pub(in crate::app::dispatch) fn dispatch_open_settings(
     let ask_user_question_timeout_enabled_from_app = app.ask_user_question_timeout_enabled;
     let voice_stt_language_from_app = app.voice_config.language.clone();
     let subagent_model_inheritance_from_app = app.subagent_model_inheritance;
+    let two_pass_compaction_from_app = app.two_pass_compaction;
     let keep_awake_from_app = app.notification_service.sleep_inhibitor.mode();
 
     let Some(agent) = app.agents.get_mut(&id) else {
@@ -260,6 +263,7 @@ pub(in crate::app::dispatch) fn dispatch_open_settings(
         ask_user_question_timeout_enabled: ask_user_question_timeout_enabled_from_app,
         voice_stt_language: voice_stt_language_from_app,
         subagent_model_inheritance: subagent_model_inheritance_from_app,
+        two_pass_compaction: two_pass_compaction_from_app,
         model_windows: crate::settings::context_limits::catalog_windows(
             &agent.session.models.available,
         ),
@@ -408,7 +412,9 @@ pub(in crate::app::dispatch) fn dispatch_confirm_reset_setting(
             if current_value.as_ref() == Some(&default_value)
                 && !matches!(
                     action,
-                    Action::SetCodingDataSharing { .. } | Action::ClearSubagentModelInheritance
+                    Action::SetCodingDataSharing { .. }
+                        | Action::ClearSubagentModelInheritance
+                        | Action::ClearTwoPassCompaction
                 )
             {
                 tracing::debug!(
@@ -619,6 +625,7 @@ pub(crate) fn build_pager_snapshot(app: &AppView) -> crate::settings::PagerLocal
         ask_user_question_timeout_enabled: app.ask_user_question_timeout_enabled,
         voice_stt_language: app.voice_config.language.clone(),
         subagent_model_inheritance: app.subagent_model_inheritance,
+        two_pass_compaction: app.two_pass_compaction,
         model_windows: agent_model_windows(app),
         model_routes: agent_model_routes(app),
         current_model_id: agent_current_model_id(app),
@@ -726,6 +733,7 @@ pub(in crate::app::dispatch) fn action_for_reset(
         ("subagent_model_inheritance", SettingValue::Bool(_)) => {
             Some(Action::ClearSubagentModelInheritance)
         }
+        ("two_pass_compaction", SettingValue::Bool(_)) => Some(Action::ClearTwoPassCompaction),
         ("keep_text_selection", SettingValue::Enum(s)) => {
             crate::appearance::TextSelection::from_canonical(s).map(Action::SetKeepTextSelection)
         }

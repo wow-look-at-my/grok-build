@@ -70,7 +70,7 @@ pub fn parse_token_amount(input: &str) -> Result<Option<u64>, String> {
     Ok(Some(tokens))
 }
 
-/// A token count in short form: `1M`, `350k`, `1.5M`, `131.1k`.
+/// A token count in short form.
 pub fn short_tokens(tokens: u64) -> String {
     fn trimmed(value: f64, decimals: usize) -> String {
         let text = format!("{value:.decimals$}");

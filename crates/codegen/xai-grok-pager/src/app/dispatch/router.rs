@@ -76,11 +76,11 @@ use super::session::load::{
 };
 use super::session::modal::{dispatch_rename_session, dispatch_reset_session_title};
 use super::settings::setters::{
-    clear_default_model, clear_subagent_model_inheritance, preview_auto_dark_theme,
-    preview_auto_light_theme, preview_theme, set_ask_user_question_timeout_enabled,
-    set_auto_dark_theme, set_auto_light_theme, set_collapsed_edit_blocks,
-    set_combine_queued_prompts, set_compact_mode, set_confirm_before_rewind,
-    set_contextual_hint_export_copy, set_contextual_hint_image_input,
+    clear_default_model, clear_subagent_model_inheritance, clear_two_pass_compaction,
+    preview_auto_dark_theme, preview_auto_light_theme, preview_theme,
+    set_ask_user_question_timeout_enabled, set_auto_dark_theme, set_auto_light_theme,
+    set_collapsed_edit_blocks, set_combine_queued_prompts, set_compact_mode,
+    set_confirm_before_rewind, set_contextual_hint_export_copy, set_contextual_hint_image_input,
     set_contextual_hint_plan_mode, set_contextual_hint_send_now, set_contextual_hint_small_screen,
     set_contextual_hint_ssh_wrap, set_contextual_hint_undo, set_contextual_hint_word_select,
     set_default_model, set_default_selected_permission, set_display_refresh_auto_cadence,
@@ -94,7 +94,8 @@ use super::settings::setters::{
     set_stop_gate_unfinished_todos, set_subagent_model, set_subagent_model_inheritance, set_theme,
     set_thinking_summaries, set_thinking_summary_history_min_count,
     set_thinking_summary_history_window_secs, set_timeline, set_timestamps, set_ttft_timeout_secs,
-    set_voice_capture_mode, set_voice_keybind_enabled, set_voice_stt_language,
+    set_two_pass_compaction, set_voice_capture_mode, set_voice_keybind_enabled,
+    set_voice_stt_language,
 };
 use super::settings::ui::{
     dispatch_confirm_reset_setting, dispatch_open_command_palette, dispatch_open_howto_guides,
@@ -1121,6 +1122,8 @@ fn dispatch_inner(action: Action, app: &mut AppView) -> Vec<Effect> {
         }
         Action::SetSubagentModelInheritance(v) => set_subagent_model_inheritance(app, v),
         Action::ClearSubagentModelInheritance => clear_subagent_model_inheritance(app),
+        Action::SetTwoPassCompaction(v) => set_two_pass_compaction(app, v),
+        Action::ClearTwoPassCompaction => clear_two_pass_compaction(app),
         Action::SetKeepTextSelection(v) => set_keep_text_selection(app, v),
         Action::SetScrollSpeed(v) => set_scroll_speed(app, v),
         Action::SetScrollMode(v) => set_scroll_mode(app, v),

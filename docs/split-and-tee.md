@@ -19,7 +19,7 @@ It does things.
 - Calls from one response normally run concurrently. `execute_tool_calls_with_chains` runs every later member of a chain in its own batch, after the member before it finished. Calls that are not in a chain keep the old behaviour.
 - `&&` skips the rest of the and-list when a member fails, and `;` does not. A member that moved to the background stops the rest of its chain, because a later command will run beside it and not after it. A skipped member gets its own row and a "Not run: ..." result (`chain_step`, `skip_chain_call`).
 - Only the grok_build bash tool is split (`ToolKind::Execute` + `ToolNamespace::GrokBuild`), and only when `is_background` is false. The argument names come from the template renderer, so renamed parameters still work.
-- Each call runs in its own shell. The terminal keeps the cwd, exported variables, options, functions and aliases between calls, and nothing else. So `split_command_list` (`bash/command_plan.rs`) refuses any list that needs one shell. That covers an unexported assignment, `$?`/`$!` after the first command, and a stateful builtin (`set`, `source`, `exec`, `read`, ...). It also covers `||`, `&`, a heredoc, a subshell, a group and every compound command. A refused command runs unchanged.
+- Each call runs in its own shell. The terminal keeps the cwd, exported variables, options, functions and aliases between calls, and nothing else. So `split_command_list` (`bash/command_plan.rs`) refuses any list that needs one shell. That covers an unexported assignment, `$?`/`$!` after the first command, and a stateful builtin. It also covers `||`, `&`, a heredoc, a subshell, a group and every compound command. A refused command runs unchanged.
 
 ## 2. Every stage of a pipe keeps its output
 
@@ -38,7 +38,7 @@ cargo test 2>&1 | grep FAIL | sort
 
 ## 3. A trailing `| tail` is a view
 
-A last stage that is a bare `tail` over the pipe (`tail`, `-N`, `-n N`, `-nN`, `--lines=N`, `-n +N`) is taken out of the pipe. The command runs without it. The whole output is kept, and the result shows those lines of it. Tail reads all of its input anyway. As a result, the command costs the same. The exit code is then the real command's, not tail's.
+A last stage that is a bare `tail` over the pipe is taken out of the pipe. The command runs without it. The whole output is kept, and the result shows those lines of it. Tail reads all of its input anyway. As a result, the command costs the same. The exit code is then the real command's, not tail's.
 
 The footer says so.
 
@@ -54,4 +54,4 @@ The result footer (`bash/capture_report.rs`) lists every stage with its exit cod
 Read it with get_task_output("task_ids": ["<id>"], "stage": 1, "tail": 100). ...
 ```
 
-`get_task_output` takes `stage`, `head`, `tail` and `grep` (`task_output/view.rs`), and these work with the mode off too. They read the whole log on disk, not the preview. Its tool call id reads a finished foreground call, through `<session>/terminal/<id>.log`, even though the terminal no longer tracks it. An id that is not a plain file name is refused.
+They read the whole log on disk, not the preview. Its tool call id reads a finished foreground call, through `<session>/terminal/<id>.log`, even though the terminal no longer tracks it. An id that is not a plain file name is refused.

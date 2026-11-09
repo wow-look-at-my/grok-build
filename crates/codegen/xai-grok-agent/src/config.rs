@@ -358,10 +358,9 @@ pub fn grok_build_hashline_toolset(
     }
 }
 /// Read-only toolset for the **explore** subagent. Genuinely read-only over
-/// the workspace: `read_file` (Read), `list_dir` (Glob), `grep` (Grep).
-/// `run_terminal_command` (Bash) is intentionally omitted so exploration
-/// cannot mutate the workspace - the read-only guarantee is enforced by the
-/// toolset, not merely by the prompt.
+/// the workspace. `run_terminal_command` (Bash) is intentionally omitted so
+/// exploration cannot mutate the workspace - the read-only guarantee is
+/// enforced by the toolset, not merely by the prompt.
 fn explore_toolset() -> ToolServerConfig {
     ToolServerConfig {
         tools: vec![

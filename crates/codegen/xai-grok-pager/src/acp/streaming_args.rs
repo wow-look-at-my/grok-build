@@ -83,7 +83,6 @@ impl StreamingArgsTail {
                             len: 0,
                         }
                     }
-                    // `\"`, `\\`, `\/` and anything a provider invents: the character itself is what the model wrote.
                     other => self.emit(other),
                 }
             }

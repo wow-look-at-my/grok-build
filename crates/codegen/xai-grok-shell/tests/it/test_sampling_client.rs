@@ -445,12 +445,11 @@ async fn chat_completions_upgrade_folds_reconstructed_reasoning_into_request() {
 /// Upgrade path, grok-build / Responses API: a legacy session whose assistant
 /// carries inline `reasoning: {text, encrypted, id}` must and on load. This
 /// also covers reconstruct a sibling Reasoning item that round-trips back to
-/// the Responses API as a **typed** `reasoning` input item. `summary`,
-/// `encrypted_content`, and `id` all preserved. It NOT flattened to a string.
+/// the Responses API as a **typed** `reasoning` input item. It NOT flattened
+/// to a string. This is the byte-stable SGLang-prefix path; it must not go
+/// through `reasoning_item_text`. The recorded `model_id` is the model the
+/// client sends to: a blob replays verbatim only to the model that minted it.
 /// This is the byte-stable SGLang-prefix path; it must not go through
-/// `reasoning_item_text`. The recorded `model_id` is the model the client
-/// sends to: a blob replays verbatim only to the model that minted it. This
-/// is the byte-stable SGLang-prefix path; it must not go through
 /// `reasoning_item_text`. The recorded `model_id` is the model the client
 /// sends to: a blob replays verbatim only to the model that minted it.
 #[tokio::test]

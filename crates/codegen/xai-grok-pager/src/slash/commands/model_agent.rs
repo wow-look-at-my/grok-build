@@ -1,5 +1,5 @@
-//! `/sonnet`, `/haiku` and `/opus` (typed as `@sonnet` and so on): spawn a background
-//! subagent on that model family without a turn of the main agent.
+
+// model_agent.rs holds MODEL_AGENT_FAMILIES.
 
 use crate::app::actions::Action;
 use crate::slash::command::{CommandExecCtx, CommandResult, SlashCommand};
@@ -83,10 +83,9 @@ fn split_effort(args: &str) -> (Option<&'static str>, &str) {
     }
 }
 
-/// Rewrite a prompt that starts with `@sonnet`, `@haiku` or `@opus` to its
-/// slash command. The mention must be the first token and must stand alone:
-/// `@sonnet-notes.md` stays a file reference. The rest of the text is kept as
-/// typed.
+/// Rewrite a prompt that starts to its slash command. The mention must be the
+/// first token and must stand alone: `@sonnet-notes.md` stays a file
+/// reference. The rest of the text is kept as typed.
 pub fn rewrite_model_mention(text: &str) -> Option<String> {
     let trimmed = text.trim_start();
     let after_at = trimmed.strip_prefix('@')?;

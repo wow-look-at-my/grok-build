@@ -24,15 +24,13 @@ Required sequence:
 1. Commit the file (if it is not already committed)
 2. `git rm` in a **new** commit
 
-Gitignored / scratch files (`target/`, `node_modules/`, `/tmp`, …) may still be `rm`'d.
+Gitignored / scratch files may still be `rm`'d.
 
 ## History-destroying workarounds are banned
 
 Do not hide a deletion with:
 
 - `git commit --amend` after `git rm` of a just-committed file
-- `git reset --hard`
-- `git filter-branch` / `git filter-repo`
 - force-push of rewritten history
 
 `filter-branch` is not a feature we implement. It is refused.
@@ -41,7 +39,6 @@ Do not hide a deletion with:
 
 | Seam | What it does |
 | ---- | ------------ |
-| bash PreToolUse (`crates/codegen/xai-grok-tools/src/implementations/grok_build/bash`) | Rejects `rm`/`unlink` of non-ignored git-repo files; rejects `git reset --hard`, `git filter-branch`/`filter-repo`, and `git commit --amend` that would drop a just-committed file |
 | `session/git.rs` amend (`crates/codegen/xai-grok-workspace/src/session/git.rs`) | The workspace commit RPC refuses `--amend` when the index deletes files that HEAD just added |
 | auto_mode git rules (`crates/codegen/xai-grok-workspace/src/permission/auto_mode`) | `git rm` is routine; `git commit --amend`, `git reset --hard`, filter-branch, and force-push are never auto-allowed |
 

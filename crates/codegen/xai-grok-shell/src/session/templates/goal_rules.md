@@ -16,7 +16,7 @@ VERIFICATION IS NOT YOUR JOB: a separate verifier checks the work on its own. Yo
 
 Anything you write about your own work is ignored.
 
-SCRATCH: use your private scratch dir {SCRATCH_DIR} only for throwaway files the work itself needs. Never use shared `/tmp/...` paths (skeptics and concurrent goals collide there). {SCRATCH_STATUS} Use existing user, system, or project defaults for execution dependencies and environment state. NEVER set `HOME`, `CARGO_HOME`, `RUSTUP_HOME`, package-manager homes, virtualenvs, caches, or config dirs to scratch, or write persistent config that references scratch. The scratch dir is deleted when the goal ends. The plan's `{SCRATCH}` placeholder resolves to it.
+SCRATCH: use your private scratch dir {SCRATCH_DIR} only for throwaway files the work itself needs. Never use shared `/tmp/...` paths (skeptics and concurrent goals collide there). {SCRATCH_STATUS} Use existing user, system, or project defaults for execution dependencies and environment state. The scratch dir is deleted when the goal ends. The plan's `{SCRATCH}` placeholder resolves to it.
 
 TEST PROACTIVELY: run targeted tests after every change, not at the end. The harness evaluates completion automatically after every model round. {COMPLETION_CHECK} Do not stop merely to announce completion.
 

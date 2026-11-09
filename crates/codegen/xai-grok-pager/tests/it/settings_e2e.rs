@@ -32,6 +32,7 @@ const ALL_SETTINGS_EXERCISED: &[&str] = &[
     "remember_tool_approvals",
     "toolset.ask_user_question.timeout_enabled",
     "subagent_model_inheritance",
+    "two_pass_compaction",
     "keep_text_selection",
     "theme",
     "auto_dark_theme",
@@ -282,6 +283,12 @@ fn assert_set_bool_action(outcome: SettingsKeyOutcome, key: &str, expected: bool
             assert_eq!(
                 b, expected,
                 "SetSubagentModelInheritance value differs from expected"
+            )
+        }
+        ("two_pass_compaction", Action::SetTwoPassCompaction(b)) => {
+            assert_eq!(
+                b, expected,
+                "SetTwoPassCompaction value differs from expected"
             )
         }
 
@@ -571,6 +578,15 @@ fn mouse_click_on_split_and_tee_commands_indicator_toggles_in_one_click() {
         row_y,
     );
     assert_set_bool_action(outcome, "split_and_tee_commands", true);
+}
+
+/// The `[features]` row defaults on, so Space toggles it off.
+#[test]
+fn space_on_two_pass_compaction_dispatches_typed_setter() {
+    let mut s = make_state();
+    navigate_to(&mut s, "two_pass_compaction");
+    let outcome = handle_settings_key(&mut s, &press(KeyCode::Char(' ')));
+    assert_set_bool_action(outcome, "two_pass_compaction", false);
 }
 
 #[test]
@@ -980,6 +996,21 @@ fn mouse_click_on_subagent_model_inheritance_indicator_toggles_in_one_click() {
     assert_set_bool_action(outcome, "subagent_model_inheritance", true);
 }
 
+/// Value-column click toggles two-pass compaction in one click.
+#[test]
+fn mouse_click_on_two_pass_compaction_indicator_toggles_in_one_click() {
+    let mut s = make_state();
+    synth_rects(&mut s);
+    let row_y = row_idx_for(&s, "two_pass_compaction") as u16;
+    let outcome = handle_settings_mouse(
+        &mut s,
+        MouseEventKind::Down(crossterm::event::MouseButton::Left),
+        72,
+        row_y,
+    );
+    assert_set_bool_action(outcome, "two_pass_compaction", false);
+}
+
 /// Value-column click toggles the Ask-Question timeout in one click.
 #[test]
 fn mouse_click_on_ask_user_question_timeout_indicator_toggles_in_one_click() {
@@ -1314,9 +1345,6 @@ fn filter_backspace_broadens_visible_set() {
     assert_eq!(s.query(), "st");
     let _ = handle_settings_key(&mut s, &press(KeyCode::Backspace)); // query becomes "s"
     assert_eq!(s.query(), "s");
-    // "s" matches compact_mode ("messages" in its description),
-    // show_timestamps ("show"/"timestamps"), and simple_mode
-    // ("simple"/"ascii").
     let setting_count_at_s = s
         .filtered_indices()
         .iter()
@@ -2015,6 +2043,7 @@ fn registry_kind_membership_through_pr_14() {
             "remember_tool_approvals",
             "toolset.ask_user_question.timeout_enabled",
             "subagent_model_inheritance",
+            "two_pass_compaction",
             "show_tips",
             "voice_keybind_enabled",
             // Per-tip contextual-hint children (hidden from the top-level list, toggled inside the group sub-sheet) are still Bool settings
@@ -2200,6 +2229,7 @@ fn defaults_round_trip_through_registry() {
             "remember_tool_approvals" => SettingValue::Bool(true),
             "toolset.ask_user_question.timeout_enabled" => SettingValue::Bool(true),
             "subagent_model_inheritance" => SettingValue::Bool(false),
+            "two_pass_compaction" => SettingValue::Bool(true),
             "keep_text_selection" => SettingValue::Enum("flash"),
             "theme" => SettingValue::Enum("groknight"),
             "auto_dark_theme" => SettingValue::Enum("groknight"),
@@ -2326,6 +2356,7 @@ fn settings_value_payload_matches_kind() {
             | SettingsKeyOutcome::Action(Action::SetRememberToolApprovals(_))
             | SettingsKeyOutcome::Action(Action::SetAskUserQuestionTimeoutEnabled(_))
             | SettingsKeyOutcome::Action(Action::SetSubagentModelInheritance(_))
+            | SettingsKeyOutcome::Action(Action::SetTwoPassCompaction(_))
             | SettingsKeyOutcome::Action(Action::SetShowTips(_))
             | SettingsKeyOutcome::Action(Action::SetRespectManualFolds(_))
             | SettingsKeyOutcome::Action(Action::SetShowThinkingBlocks(_))
@@ -5390,9 +5421,9 @@ fn default_selected_permission_mouse_click_on_indicator_opens_picker_in_one_clic
     }
 }
 
-/// `/privacy` takes no arguments: it opens the settings page and nothing else. The alias parser it used to carry
-/// (`opt-in`, `share`, `out`, …) is gone. The ambiguous forms (`on`/`off`) risked landing on the opposite of the
-/// intent.
+/// `/privacy` takes no arguments: it opens the settings page and nothing
+/// else. The ambiguous forms (`on`/`off`) risked landing on the opposite of
+/// the intent.
 #[test]
 fn pr9_privacy_slash_command_takes_no_arguments() {
     use xai_grok_pager::slash::commands::builtin_commands;

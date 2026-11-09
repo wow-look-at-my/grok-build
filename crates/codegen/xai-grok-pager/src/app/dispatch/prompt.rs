@@ -690,6 +690,7 @@ pub(super) fn dispatch_send_prompt_submission(
     let ask_user_question_timeout_enabled_from_app = app.ask_user_question_timeout_enabled;
     let voice_stt_language_from_app = app.voice_config.language.clone();
     let subagent_model_inheritance_from_app = app.subagent_model_inheritance;
+    let two_pass_compaction_from_app = app.two_pass_compaction;
     let keep_awake_from_app = app.notification_service.sleep_inhibitor.mode();
     let context_limits_from_app = app.model_context_limits.clone();
     let login_method_id_from_app = app.login_method_id.as_ref().map(|id| id.0.to_string());
@@ -731,7 +732,6 @@ pub(super) fn dispatch_send_prompt_submission(
         agent.show_toast(crate::slash::mid_text_hoist::MID_TEXT_GOAL_NOTICE);
         return prelude;
     }
-    // A leading `@sonnet`, `@haiku` or `@opus` runs as its slash command, so it spawns at once.
     let hoisted = if is_plain_submission {
         crate::slash::commands::model_agent::rewrite_model_mention(&slash_input).or_else(|| {
             crate::slash::mid_text_hoist::hoist_mid_text_command(
@@ -825,6 +825,7 @@ pub(super) fn dispatch_send_prompt_submission(
                     ask_user_question_timeout_enabled: ask_user_question_timeout_enabled_from_app,
                     voice_stt_language: voice_stt_language_from_app,
                     subagent_model_inheritance: subagent_model_inheritance_from_app,
+                    two_pass_compaction: two_pass_compaction_from_app,
                     model_windows: crate::settings::context_limits::catalog_windows(
                         &agent.session.models.available,
                     ),
