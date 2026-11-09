@@ -96,15 +96,6 @@ impl AgentView {
         }
         self.plan_file_path().is_some_and(|path| path.is_file())
     }
-    /// Whether the "plan" status-bar chip should be rendered.
-    /// plan mode is active, or always when the user has set
-    /// Hidden by default once the user exits plan mode.
-    pub(super) fn should_show_plan_chip(
-        &self,
-        appearance: &crate::appearance::AppearanceConfig,
-    ) -> bool {
-        (self.plan_mode_active || appearance.show_plan_chip) && self.plan_preview_available()
-    }
     /// Take the review and restore every UI field. Callers answer or cancel
     /// the returned view and, when needed, write the verdict row.
     pub(crate) fn unmount_plan_review(&mut self) -> Option<PlanApprovalViewState> {
@@ -1192,31 +1183,6 @@ mod plan_chip_tests {
         );
         agent.post_turn_plan_review = true;
         agent
-    }
-    #[test]
-    fn plan_chip_hidden_after_exit_by_default() {
-        let mut agent = make_agent();
-        agent.plan_mode_active = false;
-        let appearance = AppearanceConfig::default();
-        assert!(!appearance.show_plan_chip);
-        assert!(!agent.should_show_plan_chip(&appearance));
-    }
-    #[test]
-    fn plan_chip_visible_while_plan_mode_active() {
-        let mut agent = make_agent();
-        agent.plan_mode_active = true;
-        let appearance = AppearanceConfig::default();
-        assert!(!agent.should_show_plan_chip(&appearance));
-    }
-    #[test]
-    fn plan_chip_visible_when_config_overrides() {
-        let mut agent = make_agent();
-        agent.plan_mode_active = false;
-        let appearance = AppearanceConfig {
-            show_plan_chip: true,
-            ..Default::default()
-        };
-        assert!(!agent.should_show_plan_chip(&appearance));
     }
     #[test]
     fn new_agent_starts_on_the_prompt_pane() {

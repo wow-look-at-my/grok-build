@@ -1,3 +1,4 @@
+//! PTY tests of iTerm-style readline editing keys, in the prompt and in the dashboard.
 #[allow(unused_imports)]
 use super::common::*;
 
@@ -7,6 +8,8 @@ const META_F: &[u8] = b"\x1bf";
 const ALT_LEFT: &[u8] = b"\x1b[1;3D";
 const ALT_RIGHT: &[u8] = b"\x1b[1;3C";
 const ROW_TITLE: &str = "ITERMROW";
+/// The status bar's dashboard button, which only an attached session paints.
+const DASHBOARD_BUTTON: &str = "\u{2630}";
 
 fn click_visible_text(harness: &mut PtyHarness, text: &str) {
     harness
@@ -105,12 +108,12 @@ async fn iterm_raw_readline_sequences_edit_picker_and_dashboard_rename() {
         .expect("dashboard open");
     click_visible_text(&mut harness, ROW_TITLE);
     harness
-        .wait_for_text("[Dashboard]", Duration::from_secs(10))
+        .wait_for_text(DASHBOARD_BUTTON, Duration::from_secs(10))
         .expect("row click attached the dashboard overlay");
     harness
         .inject_keys(keys::ESC)
         .expect("close attached dashboard row");
-    wait_for_labels_absent(&mut harness, &["[Dashboard]"], Duration::from_secs(10));
+    wait_for_labels_absent(&mut harness, &[DASHBOARD_BUTTON], Duration::from_secs(10));
     harness
         .inject_keys(b"\x12")
         .expect("dashboard Ctrl+R rename");

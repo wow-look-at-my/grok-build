@@ -163,7 +163,8 @@ async fn context_window_limit_reaches_the_running_session() {
     harness.inject_keys(keys::ESC).expect("close settings");
     // The config watcher reloads the models and sends the window to the session.
     harness
-        .wait_for_text("/ 1.0K", TIMEOUT)
+        // Tokens over the compaction point of a 1k window.
+        .wait_for_text("14 \u{00B7} 2%", TIMEOUT)
         .unwrap_or_else(|_| {
             panic!(
                 "the context bar must show the limit\nlog:\n{}\nscreen:\n{}",

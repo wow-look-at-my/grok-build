@@ -445,7 +445,7 @@ This view is observational. The composer is hidden (zero rows). You cannot focus
 - Scroll, fold, copy, open links, and open the block viewer on the child's transcript.
 - `Ctrl+C` cancels **this child's** turn. It does not cancel the parent.
 - `Ctrl+.` / `Ctrl+X` opens the shortcuts cheatsheet for the child's keys.
-- The child view paints no `[Dashboard]` button. Inside the dashboard overlay the button is the way back.
+- The child view paints no `☰` dashboard button. Inside the dashboard overlay the button is the way back.
 - Idle `Enter` in the **block viewer** quotes the selected line into the parent composer and closes the view.
 
 **What does nothing (fail closed)**
