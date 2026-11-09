@@ -20,6 +20,7 @@
             summary_preview: None,
             breakdown: None,
             report_path: None,
+            session_cost_usd_ticks: None,
         };
         let _ = handle(make_ext_session_notification("sess-todo", completed), &mut app);
 
@@ -172,6 +173,7 @@
             summary_preview: None,
             breakdown: None,
             report_path: None,
+            session_cost_usd_ticks: None,
         };
         assert!(apply_child_view_session_event(&mut agent, &completed, false));
         assert!(
@@ -259,6 +261,7 @@
             summary_preview: None,
             breakdown: None,
             report_path: None,
+            session_cost_usd_ticks: None,
         };
         assert!(apply_child_view_session_event(&mut agent, &completed, false));
         assert!(
@@ -969,6 +972,7 @@
             summary_preview: None,
             breakdown: None,
             report_path: None,
+            session_cost_usd_ticks: None,
         };
         assert!(apply_session_event(&update, &mut session, &mut scrollback, false));
         assert_eq!(
@@ -997,6 +1001,37 @@
         }
     }
 
+    /// A `/compact` at idle has no turn end, so its completion notice is what carries the new session total.
+    #[test]
+    fn apply_compaction_completed_adopts_the_session_cost_unless_replayed() {
+        let update = XaiSessionUpdate::AutoCompactCompleted {
+            tokens_before: Some(90_000),
+            tokens_after: 20_000,
+            elapsed_ms: None,
+            summary_preview: None,
+            breakdown: None,
+            report_path: None,
+            session_cost_usd_ticks: Some(7_000_000),
+        };
+
+        let mut session = make_session(Some("s1"));
+        let mut scrollback = ScrollbackState::new();
+        apply_session_event(&update, &mut session, &mut scrollback, false);
+        assert_eq!(
+            session.tracker.reported_session_cost_usd_ticks(),
+            Some(7_000_000)
+        );
+
+        let mut replayed = make_session(Some("s1"));
+        replayed.loading_replay = true;
+        apply_session_event(&update, &mut replayed, &mut scrollback, false);
+        assert_eq!(
+            replayed.tracker.reported_session_cost_usd_ticks(),
+            None,
+            "a replayed total belongs to the run that wrote it"
+        );
+    }
+
     #[test]
     fn apply_compaction_completed_falls_back_to_estimate_without_confirmation() {
         let mut session = make_session(Some("s1"));
@@ -1008,6 +1043,7 @@
             summary_preview: None,
             breakdown: None,
             report_path: None,
+            session_cost_usd_ticks: None,
         };
         assert!(apply_session_event(&update, &mut session, &mut scrollback, false));
         session.finish_turn(&mut scrollback,
@@ -1035,6 +1071,7 @@
             summary_preview: None,
             breakdown: None,
             report_path: None,
+            session_cost_usd_ticks: None,
         };
         assert!(apply_session_event(&update, &mut session, &mut scrollback, false));
         match last_session_event(&scrollback) {
@@ -1062,6 +1099,7 @@
             summary_preview: None,
             breakdown: None,
             report_path: None,
+            session_cost_usd_ticks: None,
         };
         assert!(apply_session_event(
             &update,
@@ -1109,6 +1147,7 @@
             summary_preview: None,
             breakdown: None,
             report_path: None,
+            session_cost_usd_ticks: None,
         };
         assert_eq!(compaction_context_refresh(&completed), Some(21_502));
         let failed = XaiSessionUpdate::AutoCompactFailed { error: "e".into() };
@@ -1147,6 +1186,7 @@
             summary_preview: None,
             breakdown: None,
             report_path: None,
+            session_cost_usd_ticks: None,
         };
         let changed = handle_child_session_notification(update, child_sid, &mut agent, false, None);
         assert!(changed);
@@ -1224,6 +1264,7 @@
             summary_preview: None,
             breakdown: None,
             report_path: None,
+            session_cost_usd_ticks: None,
         };
         let changed = handle_child_session_notification(update, child_sid, &mut agent, false, None);
         // No child_view means nothing visible changed, so it must not trigger a redraw

@@ -15,7 +15,7 @@ use futures_util::stream::{BoxStream, Stream};
 
 use xai_grok_sampling_types::{
     ConversationItem, ConversationResponse, ResponseModelMetadata, SamplingError, StopReason,
-    TokenUsage, messages as messages_types, rs,
+    messages as messages_types, rs,
 };
 
 use crate::doom_loop_recovery::FailedResponseCapture;
@@ -612,22 +612,10 @@ pub(crate) fn stream_responses_tracked<'a>(
             }
         };
 
-        // Billing fields (`prompt_tokens`, `completion_tokens`, `cached_prompt_tokens`, `reasoning_tokens`) are the cumulative wire values
-        // The SSE decoder (`deserialize_response_event`) has already rewritten `u.total_tokens` to `context_details.input + output`
-        let usage = response.usage.as_ref().map(|u| TokenUsage {
-            prompt_tokens: u.input_tokens,
-            completion_tokens: u.output_tokens,
-            total_tokens: u.total_tokens,
-            reasoning_tokens: u.output_tokens_details.reasoning_tokens,
-            cached_prompt_tokens: u.input_tokens_details.cached_tokens,
-            cache_creation_prompt_tokens: 0,
-        });
-
-        let cost_usd_ticks = response
-            .metadata
-            .as_mut()
-            .and_then(|m| m.remove(crate::client::COST_USD_TICKS_METADATA_KEY))
-            .and_then(|s| s.parse::<i64>().ok());
+        let super::usage::CallUsage {
+            usage,
+            cost_usd_ticks,
+        } = super::usage::CallUsage::from_responses(&mut response);
 
         let status = response.status.clone();
         // Wire reason for an incomplete response (the `INCOMPLETE_REASON_*` values above)

@@ -552,6 +552,9 @@ pub enum SessionUpdate {
         /// The Markdown report with every kept item and the summary text.
         #[serde(default, skip_serializing_if = "Option::is_none")]
         report_path: Option<String>,
+        /// The session ledger's cost total after the compaction calls, in USD ticks.
+        #[serde(default, skip_serializing_if = "Option::is_none")]
+        session_cost_usd_ticks: Option<i64>,
     },
     /// Auto-compact failed
     AutoCompactFailed {

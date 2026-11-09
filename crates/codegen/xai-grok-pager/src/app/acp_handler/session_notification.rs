@@ -2018,9 +2018,16 @@ pub(super) fn apply_session_event(
             elapsed_ms,
             breakdown,
             report_path,
+            session_cost_usd_ticks,
             ..
         } => {
             tracing::info!("Auto-compact completed: {tokens_after} tokens after");
+            // A REPLAYED total belongs to the run that wrote it.
+            if !session.loading_replay {
+                session
+                    .tracker
+                    .set_reported_session_cost(*session_cost_usd_ticks);
+            }
             session.set_compaction_activity(None);
             session.compact_held_prompt = None;
             let detail = crate::scrollback::blocks::CompactionDetail {

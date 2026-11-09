@@ -2326,6 +2326,7 @@
                     summary_preview: None,
                     breakdown: None,
                     report_path: None,
+                    session_cost_usd_ticks: None,
                 },
             ),
             &mut app,

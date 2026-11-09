@@ -7,7 +7,7 @@
 //! The **input ladder** (verbatim, then fitted, then lossy) and auto-compaction suppression stay in L5 (`compaction.rs`).
 //! Both are driven by the `context_overflow` / `deterministic` flags on [`FullReplaceError`](xai_grok_compaction::FullReplaceError).
 
-use std::sync::Mutex;
+use parking_lot::Mutex;
 use std::time::Duration;
 
 use agent_client_protocol as acp;
@@ -30,13 +30,16 @@ use crate::session::helpers::prepared_compaction_history::{
     PreparedCompactionHistory, build_compaction_chat_history,
 };
 use crate::session::helpers::session_compact::{
-    COMPACT_FAILED_PREFIX, CompactFailure, CompactOutput, generate_session_compact,
+    COMPACT_FAILED_PREFIX, CompactCallUsage, CompactFailure, CompactOutput,
+    generate_session_compact,
 };
 
 #[derive(Default)]
 struct SamplerState {
     last_success: Option<CompactOutput>,
     last_attempted_items: Option<Vec<ConversationItem>>,
+    /// One entry per transport attempt that is not yet billed, failed attempts included.
+    unbilled_calls: Vec<CompactCallUsage>,
 }
 
 impl SamplerState {
@@ -101,12 +104,22 @@ impl ShellCompactionSampler {
     }
 
     pub(crate) fn take_last_success(&self) -> Option<CompactOutput> {
-        self.state.lock().unwrap().last_success.take()
+        self.state.lock().last_success.take()
     }
 
     /// Take the exact image-budgeted items from the latest transport attempt.
     pub(crate) fn take_last_attempted_items(&self) -> Option<Vec<ConversationItem>> {
-        self.state.lock().unwrap().last_attempted_items.take()
+        self.state.lock().last_attempted_items.take()
+    }
+
+    /// Take the usage of every attempt since the last take, for the caller to bill.
+    pub(crate) fn take_unbilled_calls(&self) -> Vec<CompactCallUsage> {
+        std::mem::take(&mut self.state.lock().unbilled_calls)
+    }
+
+    /// The model the compaction requests name, which is the model to price them at.
+    pub(crate) fn model(&self) -> &str {
+        &self.sampling_config.model
     }
 }
 
@@ -129,9 +142,11 @@ impl CompactionSampler for ShellCompactionSampler {
             self.sampling_config.max_request_bytes,
             self.compaction_tool_tokens,
         );
-        self.state.lock().unwrap().record_attempt(&chat_history);
+        self.state.lock().record_attempt(&chat_history);
 
-        match generate_session_compact(
+        let started = std::time::Instant::now();
+        let mut reported = Default::default();
+        let result = generate_session_compact(
             chat_history,
             self.compaction_tool_tokens,
             self.tools.clone(),
@@ -143,12 +158,17 @@ impl CompactionSampler for ShellCompactionSampler {
             self.wall_clock_budget_secs,
             self.tool_choice,
             &self.cancel,
+            &mut reported,
         )
-        .await
-        {
+        .await;
+        self.state.lock().unbilled_calls.push(CompactCallUsage {
+            reported,
+            api_duration_ms: Some(started.elapsed().as_millis() as u64),
+        });
+        match result {
             Ok(output) => {
                 let response = output.content.clone();
-                self.state.lock().unwrap().last_success = Some(output);
+                self.state.lock().last_success = Some(output);
                 Ok(LlmCompactionOutput {
                     response,
                     thinking: String::new(),
@@ -238,22 +258,22 @@ impl ShellFullReplaceObserver {
     /// Cumulative number of attempts so far (across all input-ladder stages).
     /// Read mid-loop to label the `input_overflow` retry event.
     pub(crate) fn attempt_count(&self) -> u32 {
-        self.state.lock().unwrap().attempts
+        self.state.lock().attempts
     }
 
     /// Lets the L5 loop tell retries exhausted on degenerate summaries apart from retries exhausted on empty output.
     pub(crate) fn degenerate_seen(&self) -> bool {
-        self.state.lock().unwrap().degenerate_rejections > 0
+        self.state.lock().degenerate_rejections > 0
     }
 
     /// The most recent rendered error/diagnostic detail, for `last_error`.
     pub(crate) fn last_error_message(&self) -> Option<String> {
-        self.state.lock().unwrap().last_error_msg.clone()
+        self.state.lock().last_error_msg.clone()
     }
 
     /// The cumulative attempt count spans all input-ladder stages because the same observer instance is shared across every per-stage call.
     pub(crate) fn into_telemetry(self) -> FullReplaceTelemetry {
-        let s = self.state.into_inner().unwrap();
+        let s = self.state.into_inner();
         FullReplaceTelemetry {
             attempts: s.attempts,
             attempt_details: s.attempt_details,
@@ -267,7 +287,7 @@ impl ShellFullReplaceObserver {
 
 impl FullReplaceObserver for ShellFullReplaceObserver {
     fn on_attempt(&self, _attempt: u32, outcome: &FullReplaceAttemptOutcome<'_>) {
-        let mut s = self.state.lock().unwrap();
+        let mut s = self.state.lock();
         // The shared `attempt` resets per ladder stage; keep a cumulative count so artifact rows match the pre-migration numbering
         s.attempts += 1;
         let attempt = s.attempts;

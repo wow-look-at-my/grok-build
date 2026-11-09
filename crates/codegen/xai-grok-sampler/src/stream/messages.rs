@@ -12,7 +12,7 @@ use futures_util::stream::{BoxStream, Stream};
 use xai_grok_sampling_types::messages::{self, MessageStreamEvent};
 use xai_grok_sampling_types::{
     AssistantItem, ConversationItem, ConversationResponse, ResponseModelMetadata, SamplingError,
-    StopReason, TokenUsage, ToolCall, rs,
+    StopReason, ToolCall, rs,
 };
 
 use crate::events::{SamplingChannel, SamplingErrorInfo, SamplingEvent};
@@ -31,29 +31,6 @@ pub(crate) fn messages_event_has_meaningful_content(event: &MessageStreamEvent) 
         | MessageStreamEvent::ContentBlockStop { .. }
         | MessageStreamEvent::Error { .. } => true,
     }
-}
-
-/// The price a gateway put on this call, in USD ticks. Integer ticks are
-/// authoritative when both shapes arrive, and a reported zero is unbilled
-/// rather than free — the same precedence the Chat Completions path
-/// applies. A USD float with no `i64` tick form is reported and treated as
-/// unpriced: the call stores no price that this arithmetic could not
-/// represent.
-fn wire_cost_ticks(
-    ticks: Option<i64>,
-    cost: Option<&xai_grok_sampling_types::UsageCost>,
-) -> Option<i64> {
-    xai_grok_sampling_types::reported_cost_ticks(ticks).or_else(|| {
-        xai_grok_sampling_types::usd_float_to_ticks(cost.map(|c| c.as_usd_float())).unwrap_or_else(
-            |err| {
-                tracing::error!(
-                    error = %err,
-                    "gateway reported a usage cost with no tick form; leaving the call unpriced"
-                );
-                None
-            },
-        )
-    })
 }
 
 /// The Anthropic Messages API reports content as a sequence of indexed blocks (text / thinking / tool_use), each with start / delta / stop events.
@@ -114,14 +91,7 @@ pub fn stream_messages<'a>(
 
         // Final-message-level accumulators
         let mut final_model: Option<String> = None;
-        // Anthropic Messages API `input_tokens` is the uncached portion
-        // Cache hits and writes are reported in separate buckets and must be summed for the true total prompt size
-        let mut final_input_tokens: u32 = 0;
-        let mut final_cache_read_input_tokens: u32 = 0;
-        let mut final_cache_creation_input_tokens: u32 = 0;
-        let mut final_output_tokens: u32 = 0;
-        // Cumulative for the response.
-        let mut final_cost_usd_ticks: Option<i64> = None;
+        let mut final_usage = super::usage::MessagesUsageAccumulator::default();
         let mut final_stop_reason: Option<StopReason> = None;
         let mut final_stop_message: Option<String> = None;
         let mut final_message_id: Option<String> = None;
@@ -181,14 +151,7 @@ pub fn stream_messages<'a>(
                 MessageStreamEvent::MessageStart { message } => {
                     final_message_id = Some(message.id.clone());
                     final_model = Some(message.model.clone());
-                    final_input_tokens = message.usage.input_tokens;
-                    final_cache_read_input_tokens = message.usage.cache_read_input_tokens;
-                    final_cache_creation_input_tokens = message.usage.cache_creation_input_tokens;
-                    final_cost_usd_ticks = wire_cost_ticks(
-                        message.usage.cost_in_usd_ticks,
-                        message.usage.cost.as_ref(),
-                    )
-                    .or(final_cost_usd_ticks);
+                    final_usage.observe_start(&message.usage);
                     // Yield the real id, model, and input usage before any content
                     // Partial-mode framing then emits them on the real `message_start` instead of a synthesized placeholder
                     yield SamplingEvent::ResponseStarted {
@@ -478,20 +441,7 @@ pub fn stream_messages<'a>(
                             StopReason::Stop
                         }
                     });
-                    final_output_tokens = usage.output_tokens;
-                    // Optional on the delta; preserve message_start values when omitted.
-                    if let Some(input) = usage.input_tokens {
-                        final_input_tokens = input;
-                    }
-                    if let Some(cache_read) = usage.cache_read_input_tokens {
-                        final_cache_read_input_tokens = cache_read;
-                    }
-                    if let Some(cache_creation) = usage.cache_creation_input_tokens {
-                        final_cache_creation_input_tokens = cache_creation;
-                    }
-                    final_cost_usd_ticks =
-                        wire_cost_ticks(usage.cost_in_usd_ticks, usage.cost.as_ref())
-                            .or(final_cost_usd_ticks);
+                    final_usage.observe_delta(&usage);
                 }
 
                 MessageStreamEvent::MessageStop => {
@@ -540,22 +490,10 @@ pub fn stream_messages<'a>(
 
         // ── Build the final response ─────────────────────────────────
         let model_id = final_model.unwrap_or_default();
-        // Match the OAI Responses convention: prompt_tokens holds the full prompt, cached_prompt_tokens counts cache hits only
-        let total_prompt_tokens = final_input_tokens
-            .saturating_add(final_cache_read_input_tokens)
-            .saturating_add(final_cache_creation_input_tokens);
-        let usage = if total_prompt_tokens > 0 || final_output_tokens > 0 {
-            Some(TokenUsage {
-                prompt_tokens: total_prompt_tokens,
-                completion_tokens: final_output_tokens,
-                total_tokens: total_prompt_tokens.saturating_add(final_output_tokens),
-                reasoning_tokens: 0,
-                cached_prompt_tokens: final_cache_read_input_tokens,
-                cache_creation_prompt_tokens: final_cache_creation_input_tokens,
-            })
-        } else {
-            None
-        };
+        let super::usage::CallUsage {
+            usage,
+            cost_usd_ticks: final_cost_usd_ticks,
+        } = final_usage.finish();
 
         let stop_reason = if final_stop_reason == Some(StopReason::Length) {
             // Length wins even over completed tool_use blocks

@@ -27,7 +27,7 @@ pub(in crate::app::dispatch) fn handle_setting_persisted(
 }
 
 /// One `[features]` write finished. The row that issued it settles and may issue the intent queued behind it;
-/// `subagent_model_inheritance` is the only row today.
+/// `subagent_model_inheritance` and `two_pass_compaction` are the rows.
 pub(in crate::app::dispatch) fn handle_feature_override_persisted(
     app: &mut AppView,
     feature: Feature,
@@ -41,11 +41,7 @@ pub(in crate::app::dispatch) fn handle_feature_override_persisted(
             None
         }
     };
-    let effects = if feature == app.subagent_model_inheritance.feature {
-        setters::settle_subagent_model_inheritance_write(app, persisted)
-    } else {
-        vec![]
-    };
+    let effects = setters::settle_feature_override_write(app, feature, persisted);
     ui::refresh_open_settings_modals(app);
     effects
 }

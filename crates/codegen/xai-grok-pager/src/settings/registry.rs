@@ -434,6 +434,8 @@ pub struct PagerLocalSnapshot {
     pub voice_stt_language: String,
     /// Mirrors `AppView::subagent_model_inheritance` at snapshot time.
     pub subagent_model_inheritance: FeatureOverrideState,
+    /// Mirrors `AppView::two_pass_compaction` at snapshot time.
+    pub two_pass_compaction: FeatureOverrideState,
     /// The catalog window of each model, by model id.
     pub model_windows: std::collections::BTreeMap<String, u64>,
     /// The provider or endpoint host of each model, by model id.
@@ -468,6 +470,7 @@ impl Default for PagerLocalSnapshot {
             subagent_model_inheritance: FeatureOverrideState::new(
                 Feature::SubagentModelInheritance,
             ),
+            two_pass_compaction: FeatureOverrideState::new(Feature::TwoPassCompaction),
             model_windows: std::collections::BTreeMap::new(),
             model_routes: std::collections::BTreeMap::new(),
             current_model_id: None,
@@ -810,6 +813,9 @@ pub fn current_value_for(
         // The value the shell latches at the next start, every tier included; the detail text separates the saved key from it
         "subagent_model_inheritance" => Some(SettingValue::Bool(
             pager.subagent_model_inheritance.resolve().value,
+        )),
+        "two_pass_compaction" => Some(SettingValue::Bool(
+            pager.two_pass_compaction.resolve().value,
         )),
         // default_selected_permission: maps `[ui].default_selected_permission` onto one of the four registry canonicals
         // `None` or an unrecognised value on disk falls back to `always_allow_all_sessions`, the effective default
@@ -1217,6 +1223,14 @@ mod tests {
                         *default,
                         Feature::SubagentModelInheritance.default_enabled(),
                         "subagent_model_inheritance default drifts from the FEATURES row"
+                    );
+                }
+                // two_pass_compaction: no UiConfig mirror (a `[features]` row); anchored on the FEATURES row
+                ("two_pass_compaction", SettingKind::Bool { default }) => {
+                    assert_eq!(
+                        *default,
+                        Feature::TwoPassCompaction.default_enabled(),
+                        "two_pass_compaction default drifts from the FEATURES row"
                     );
                 }
                 // ask_user_question timeout: no UiConfig mirror (lives under `[toolset]`); the default is anchored on the resolver-shared const

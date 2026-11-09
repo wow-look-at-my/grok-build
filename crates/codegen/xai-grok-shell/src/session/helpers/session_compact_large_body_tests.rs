@@ -210,6 +210,7 @@ async fn responses_large_tool_result_images_fit_transport_limit() {
         0,
         crate::util::config::CompactionToolChoice::Auto,
         &tokio_util::sync::CancellationToken::new(),
+        &mut Default::default(),
     )
     .await
     .unwrap_or_else(|_| panic!("budgeted compaction request must succeed"));
