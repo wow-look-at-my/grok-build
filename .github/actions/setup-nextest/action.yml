@@ -1,0 +1,22 @@
+name: Install cargo-nextest
+description: Install the pinned cargo-nextest release
+runs:
+  using: composite
+  steps:
+    - name: Install cargo-nextest (pinned 0.9.143)
+      shell: bash
+      run: |
+        # The release CDN can answer 504 for hours. crates.io serves the same
+        # release as source, so the fallback builds it there with --locked.
+        bin="$RUNNER_TEMP/nextest-bin"
+        mkdir -p "$bin"
+        if curl -fsSL --retry 5 --retry-delay 10 --retry-all-errors -o "$RUNNER_TEMP/nextest.tar.gz" \
+          https://github.com/nextest-rs/nextest/releases/download/cargo-nextest-0.9.143/cargo-nextest-0.9.143-x86_64-unknown-linux-gnu.tar.gz; then
+          tar -xzf "$RUNNER_TEMP/nextest.tar.gz" -C "$bin"
+        else
+          echo "::warning::GitHub release CDN refused cargo-nextest 0.9.143; building the same release from crates.io"
+          cargo install cargo-nextest --version 0.9.143 --locked --root "$RUNNER_TEMP/nextest-install"
+          cp "$RUNNER_TEMP/nextest-install/bin/cargo-nextest" "$bin/"
+        fi
+        echo "$bin" >> "$GITHUB_PATH"
+        "$bin/cargo-nextest" nextest --version

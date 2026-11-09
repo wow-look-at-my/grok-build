@@ -118,13 +118,7 @@ jobs:
           tools: api-cli slopfix
 
       # Each test runs in its own process under a per-test timeout (.config/nextest.toml), which cargo test has none of.
-      - name: Install cargo-nextest
-        run: |
-          mkdir -p "${{ runner.temp }}/nextest-bin"
-          curl -fsSL --retry 5 --retry-delay 10 --retry-all-errors -o "${{ runner.temp }}/nextest.tar.gz" \
-            https://github.com/nextest-rs/nextest/releases/download/cargo-nextest-0.9.143/cargo-nextest-0.9.143-x86_64-unknown-linux-gnu.tar.gz
-          tar -xzf "${{ runner.temp }}/nextest.tar.gz" -C "${{ runner.temp }}/nextest-bin"
-          echo "${{ runner.temp }}/nextest-bin" >> "$GITHUB_PATH"
+      - uses: ./.github/actions/setup-nextest
 
       # The archive holds every test binary plus the pager binary (.config/nextest.toml `[profile.ci.archive]`), so the test shards run without a compiler.
       - name: Build test harnesses into a nextest archive
@@ -195,13 +189,7 @@ jobs:
         with:
           tools: api-cli slopfix
 
-      - name: Install cargo-nextest
-        run: |
-          mkdir -p "${{ runner.temp }}/nextest-bin"
-          curl -fsSL --retry 5 --retry-delay 10 --retry-all-errors -o "${{ runner.temp }}/nextest.tar.gz" \
-            https://github.com/nextest-rs/nextest/releases/download/cargo-nextest-0.9.143/cargo-nextest-0.9.143-x86_64-unknown-linux-gnu.tar.gz
-          tar -xzf "${{ runner.temp }}/nextest.tar.gz" -C "${{ runner.temp }}/nextest-bin"
-          echo "${{ runner.temp }}/nextest-bin" >> "$GITHUB_PATH"
+      - uses: ./.github/actions/setup-nextest
 
       - uses: wow-look-at-my/actions@cache-download#latest
         with:
