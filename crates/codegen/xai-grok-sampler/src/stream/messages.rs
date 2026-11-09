@@ -303,10 +303,17 @@ pub fn stream_messages<'a>(
                             arguments_delta: None,
                         };
                     }
-                    // Encrypted reasoning the model chose to redact
-                    // The `RedactedThinking` wire variant exists so a stream containing one deserializes instead of failing the whole event parse
-                    // Its opaque `data` blob is not forwarded as a `SamplingEvent`; no consumer claims redacted_thinking support
-                    ContentBlock::RedactedThinking { .. } | ContentBlock::Unknown => {}
+                    // Redacted reasoning arrives whole in the start event.
+                    ContentBlock::RedactedThinking { data } => {
+                        assistant_reasoning.push(rs::ReasoningItem {
+                            id: String::new(),
+                            summary: vec![],
+                            content: None,
+                            encrypted_content: Some(messages::tag_redacted_thinking(&data)),
+                            status: None,
+                        });
+                    }
+                    ContentBlock::Unknown => {}
                     // Image / ToolResult are not expected in assistant streams.
                     _ => {}
                 },
