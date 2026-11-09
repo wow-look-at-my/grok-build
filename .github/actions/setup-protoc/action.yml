@@ -8,8 +8,8 @@ runs:
       run: |
         # bin/protoc is the source of truth for this artifact and its sha256.
         # The release CDN answers a transient 504 under load, which is not this tree's failure.
-        # One such window outlasted a fixed minute of retrying, so curl now backs off from a
-        # second and keeps trying for ten minutes; the same pinned bytes land when it clears.
+        # One such window outlasted a fixed minute of retrying. curl now backs off from one
+        # second and keeps trying for ten minutes. The pinned bytes land when it clears.
         curl -fsSL --retry 10 --retry-delay 0 --retry-max-time 600 --retry-all-errors -o "$RUNNER_TEMP/protoc.zip" \
           https://github.com/protocolbuffers/protobuf/releases/download/v29.3/protoc-29.3-linux-x86_64.zip
         echo "3e866620c5be27664f3d2fa2d656b5f3e09b5152b42f1bedbf427b333e90021a  $RUNNER_TEMP/protoc.zip" | sha256sum -c -

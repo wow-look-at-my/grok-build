@@ -121,8 +121,8 @@ jobs:
       - name: Install cargo-nextest
         run: |
           mkdir -p "${{ runner.temp }}/nextest-bin"
-          # A release CDN 504 window outlasted a fixed minute of retrying, so curl backs off from
-          # a second and keeps trying for ten minutes; the same pinned bytes land when it clears.
+          # A release CDN 504 window outlasted a fixed minute of retrying. curl now backs off
+          # from one second and keeps trying for ten minutes. The pinned bytes land when it clears.
           curl -fsSL --retry 10 --retry-delay 0 --retry-max-time 600 --retry-all-errors -o "${{ runner.temp }}/nextest.tar.gz" \
             https://github.com/nextest-rs/nextest/releases/download/cargo-nextest-0.9.143/cargo-nextest-0.9.143-x86_64-unknown-linux-gnu.tar.gz
           tar -xzf "${{ runner.temp }}/nextest.tar.gz" -C "${{ runner.temp }}/nextest-bin"
@@ -200,8 +200,8 @@ jobs:
       - name: Install cargo-nextest
         run: |
           mkdir -p "${{ runner.temp }}/nextest-bin"
-          # A release CDN 504 window outlasted a fixed minute of retrying, so curl backs off from
-          # a second and keeps trying for ten minutes; the same pinned bytes land when it clears.
+          # A release CDN 504 window outlasted a fixed minute of retrying. curl now backs off
+          # from one second and keeps trying for ten minutes. The pinned bytes land when it clears.
           curl -fsSL --retry 10 --retry-delay 0 --retry-max-time 600 --retry-all-errors -o "${{ runner.temp }}/nextest.tar.gz" \
             https://github.com/nextest-rs/nextest/releases/download/cargo-nextest-0.9.143/cargo-nextest-0.9.143-x86_64-unknown-linux-gnu.tar.gz
           tar -xzf "${{ runner.temp }}/nextest.tar.gz" -C "${{ runner.temp }}/nextest-bin"
