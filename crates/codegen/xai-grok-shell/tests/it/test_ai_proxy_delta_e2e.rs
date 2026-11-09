@@ -12,6 +12,8 @@ const MODEL: &str = "relay-model";
 const DONE: &str = "RELAY_ROUND_DONE";
 const FIRST_MARKER: &str = "FIRST_FILE_MARKER";
 const SECOND_MARKER: &str = "SECOND_FILE_MARKER";
+/// The sampler compresses no body smaller than this.
+const COMPRESSION_FLOOR: usize = 64 * 1024;
 
 /// `ai-proxy` from `$AI_PROXY`, else from `PATH`. CI installs it with the org tools.
 fn ai_proxy_binary() -> PathBuf {
@@ -202,11 +204,17 @@ api_key = "{PROVIDER_KEY}"
         wire.iter().all(|r| r.status == 200),
         "{label}: every request must succeed on its first send, with no lost base:\n{summary}"
     );
+    // A side request such as the title can stay under the floor. Its wire size is its plain size.
     assert!(
         wire.iter()
-            .all(|r| r.content_encoding.as_deref() == Some("zstd")),
-        "{label}: every request is past the floor, so every one must go out zstd-compressed:\n{summary}"
+            .all(|r| r.content_encoding.as_deref() == Some("zstd")
+                || r.wire_bytes < COMPRESSION_FLOOR),
+        "{label}: every body past the floor must go out zstd-compressed:\n{summary}"
     );
+    let wire: Vec<RecordedRequest> = wire
+        .into_iter()
+        .filter(|r| r.content_encoding.is_some())
+        .collect();
     let full = wire
         .iter()
         .find(|r| r.zstd_base.is_none())

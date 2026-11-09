@@ -49,9 +49,9 @@ use xai_grok_sampling_types::{
 use crate::config::{AuthScheme, OriginClientInfo, RequestCompression, SamplerConfig};
 use crate::events::SamplingErrorInfo;
 use crate::request_compression::{
-    BASE_HEADER, BASE_MISSING_HEADER, DELTA_HEADER, DELTA_VALUE, MAX_DELTA_WINDOW_BYTES,
-    compress_body, compress_body_against, delta_capable, note_response_headers, origin_key,
-    sha256_hex, should_compress,
+    BASE_HEADER, BASE_MISSING_HEADER, DELTA_HEADER, DELTA_VALUE, compress_body,
+    compress_body_against, delta_capable, note_response_headers, pick_delta_base,
+    remember_delta_base, should_compress,
 };
 use crate::span_timing::{ERROR, STATUS_CODE, SUCCESS, StreamSpanTiming};
 use crate::stream_classify::{chat_chunk_class, message_event_class, responses_event_class};
@@ -76,18 +76,10 @@ struct HttpRequest {
 
 /// What a delta relay keeps of one request, and how to resend it.
 struct DeltaPlan {
-    origin: String,
+    url: String,
     plain: Arc<[u8]>,
-    /// The body was encoded against the client's last base.
+    /// The body was encoded against a kept base.
     against_base: bool,
-}
-
-/// The last body a delta relay kept for this client.
-#[derive(Clone)]
-struct DeltaBase {
-    origin: String,
-    hash: String,
-    body: Arc<[u8]>,
 }
 
 impl HttpRequest {
@@ -801,8 +793,6 @@ pub struct SamplingClient {
     /// Endpoint URL builder, resolved once from `base_url` and `query_params`.
     endpoint: EndpointTemplate,
     first_use_noted: Arc<AtomicBool>,
-    /// Shared by clones, so every request of one session builds on the last.
-    delta_base: Arc<std::sync::Mutex<Option<DeltaBase>>>,
 }
 
 impl std::fmt::Debug for SamplingClient {
@@ -1196,7 +1186,6 @@ impl SamplingClient {
             header_injector: config.header_injector,
             endpoint,
             first_use_noted: Arc::new(AtomicBool::new(false)),
-            delta_base: Arc::default(),
         })
     }
 
@@ -1531,8 +1520,7 @@ impl SamplingClient {
             request.body = Some(json);
             return Ok(request);
         }
-        let delta_origin = origin_key(&request.url).filter(|_| delta_capable(&request.url));
-        let Some(origin) = delta_origin else {
+        if !delta_capable(&request.url) {
             request.body = Some(match compress_body(&json).await {
                 Some(compressed) => {
                     request
@@ -1543,10 +1531,10 @@ impl SamplingClient {
                 None => json,
             });
             return Ok(request);
-        };
+        }
 
         let plain: Arc<[u8]> = Arc::from(json);
-        let base = self.delta_base_for(&origin, plain.len());
+        let base = pick_delta_base(&request.url, &plain);
         let mut against_base = false;
         let mut body = None;
         if let Some(base) = &base {
@@ -1573,33 +1561,11 @@ impl SamplingClient {
         }
         request.body = Some(body);
         request.delta = Some(DeltaPlan {
-            origin,
+            url: request.url.clone(),
             plain,
             against_base,
         });
         Ok(request)
-    }
-
-    /// The last base a delta relay at `origin` kept, when a frame built on it
-    /// stays within the relay's decoder window.
-    fn delta_base_for(&self, origin: &str, plain_len: usize) -> Option<DeltaBase> {
-        let guard = self.delta_base.lock().ok()?;
-        guard
-            .as_ref()
-            .filter(|base| base.origin == origin)
-            .filter(|base| base.body.len() + plain_len <= MAX_DELTA_WINDOW_BYTES)
-            .cloned()
-    }
-
-    fn remember_delta_base(&self, plan: DeltaPlan) {
-        let base = DeltaBase {
-            hash: sha256_hex(&plan.plain),
-            origin: plan.origin,
-            body: plan.plain,
-        };
-        if let Ok(mut guard) = self.delta_base.lock() {
-            *guard = Some(base);
-        }
     }
 
     /// Send `request`. A body the relay accepted becomes the next base.
@@ -1618,7 +1584,7 @@ impl SamplingClient {
             && response.headers().contains_key(BASE_MISSING_HEADER);
         let response = match (resend, &plan) {
             (Some((url, auth, mut headers)), Some(plan)) if base_missing => {
-                tracing::info!(origin = %plan.origin, "delta relay lost the base; resending the full body");
+                tracing::info!(url = %plan.url, "delta relay lost the base; resending the full body");
                 headers.remove(BASE_HEADER);
                 let body = match compress_body(&plan.plain).await {
                     Some(compressed) => compressed,
@@ -1642,7 +1608,7 @@ impl SamplingClient {
             _ => response,
         };
         if let Some(plan) = plan {
-            self.remember_delta_base(plan);
+            remember_delta_base(plan.url, plan.plain);
         }
         Ok(response)
     }
@@ -4106,7 +4072,7 @@ mod tests {
                         store
                             .lock()
                             .unwrap()
-                            .insert(sha256_hex(plain), plain.clone());
+                            .insert(crate::request_compression::sha256_hex(plain), plain.clone());
                     }
                     hits.lock().unwrap().push(RelayHit {
                         wire_len: body.len(),
@@ -4148,12 +4114,6 @@ mod tests {
         use xai_grok_sampling_types::{ContentPart, ConversationItem, UserItem};
 
         let (base_url, hits, store, server) = delta_relay().await;
-        let client = SamplingClient::new(SamplerConfig {
-            base_url,
-            api_backend: ApiBackend::Messages,
-            ..minimal_config()
-        })
-        .unwrap();
         let history = incompressible_text(7, 3 * crate::request_compression::MIN_COMPRESS_BYTES);
         let user = |text: &str| {
             ConversationItem::User(UserItem {
@@ -4163,8 +4123,14 @@ mod tests {
                 ..Default::default()
             })
         };
+        // A session builds a new client for each turn, so each send does too.
         let send = |items: Vec<ConversationItem>| {
-            let client = client.clone();
+            let client = SamplingClient::new(SamplerConfig {
+                base_url: base_url.clone(),
+                api_backend: ApiBackend::Messages,
+                ..minimal_config()
+            })
+            .unwrap();
             async move {
                 client
                     .conversation_messages(ConversationRequest {

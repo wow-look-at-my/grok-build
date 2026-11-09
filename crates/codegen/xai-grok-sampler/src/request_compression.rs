@@ -1,7 +1,7 @@
 //! zstd compression of JSON request bodies.
 
-use std::collections::HashSet;
-use std::sync::RwLock;
+use std::collections::{HashSet, VecDeque};
+use std::sync::{Arc, Mutex, RwLock};
 
 use crate::config::RequestCompression;
 
@@ -19,6 +19,62 @@ pub(crate) const BASE_MISSING_HEADER: &str = "x-zstd-base-missing";
 
 /// A base plus a body past this skips the delta.
 pub(crate) const MAX_DELTA_WINDOW_BYTES: usize = 128 << 20;
+
+/// How many kept bodies the process remembers across all relays.
+const MAX_DELTA_BASES: usize = 8;
+
+/// The memory those bodies may use together.
+const MAX_DELTA_BASE_BYTES: usize = 64 << 20;
+
+/// A body a delta relay kept, under the endpoint URL it went to.
+#[derive(Clone)]
+pub(crate) struct DeltaBase {
+    url: String,
+    pub(crate) hash: String,
+    pub(crate) body: Arc<[u8]>,
+}
+
+/// Process-wide, oldest first. Each turn builds a new client, so a per-client base is gone by the next request.
+static DELTA_BASES: Mutex<VecDeque<DeltaBase>> = Mutex::new(VecDeque::new());
+
+fn common_prefix(a: &[u8], b: &[u8]) -> usize {
+    a.iter().zip(b).take_while(|(x, y)| x == y).count()
+}
+
+/// The kept body for `url` that shares the longest prefix with `plain`. The
+/// newest wins a tie. Sessions and subagents share the store, so the prefix
+/// finds the conversation `plain` continues.
+pub(crate) fn pick_delta_base(url: &str, plain: &[u8]) -> Option<DeltaBase> {
+    let bases = DELTA_BASES.lock().ok()?;
+    bases
+        .iter()
+        .enumerate()
+        .filter(|(_, base)| base.url == url)
+        .filter(|(_, base)| base.body.len() + plain.len() <= MAX_DELTA_WINDOW_BYTES)
+        .max_by_key(|(age, base)| (common_prefix(&base.body, plain), *age))
+        .map(|(_, base)| base.clone())
+}
+
+/// Keep `plain`, the body a relay at `url` now holds, as a base.
+pub(crate) fn remember_delta_base(url: String, plain: Arc<[u8]>) {
+    let Ok(mut bases) = DELTA_BASES.lock() else {
+        return;
+    };
+    let hash = sha256_hex(&plain);
+    bases.retain(|base| base.hash != hash || base.url != url);
+    bases.push_back(DeltaBase {
+        url,
+        hash,
+        body: plain,
+    });
+    let mut total: usize = bases.iter().map(|base| base.body.len()).sum();
+    while bases.len() > MAX_DELTA_BASES || (total > MAX_DELTA_BASE_BYTES && bases.len() > 1) {
+        let Some(old) = bases.pop_front() else {
+            break;
+        };
+        total -= old.body.len();
+    }
+}
 
 fn set_membership(set: &RwLock<Option<HashSet<String>>>, origin: &str, member: bool, what: &str) {
     let Ok(mut guard) = set.write() else {
@@ -110,11 +166,6 @@ fn origin_advertised_zstd(url: &str) -> bool {
 /// True when the origin of `url` keeps request bodies for deltas.
 pub(crate) fn delta_capable(url: &str) -> bool {
     contains(&ADVERTISED_DELTA, url)
-}
-
-/// `scheme://authority` of `url`, the key a delta base is held under.
-pub(crate) fn origin_key(url: &str) -> Option<String> {
-    origin_of(url)
 }
 
 /// Lowercase hex SHA-256: the name a relay keeps a body under.
@@ -234,6 +285,38 @@ mod tests {
     use super::*;
 
     const UNSEEN: &str = "https://never-advertised.invalid/v1/chat/completions";
+
+    /// Conversations take turns on one relay. Each next body is encoded
+    /// against its own conversation, not the body sent last.
+    #[test]
+    fn a_body_builds_on_the_conversation_it_continues() {
+        let url = "https://picker.invalid/up/v1/messages";
+        let other = "https://picker.invalid/other/v1/messages";
+        let main: Arc<[u8]> = Arc::from(&b"main conversation turn one"[..]);
+        let side: Arc<[u8]> = Arc::from(&b"side request about titles"[..]);
+        remember_delta_base(url.to_owned(), main.clone());
+        remember_delta_base(url.to_owned(), side.clone());
+
+        let next = b"main conversation turn one, turn two";
+        let picked = pick_delta_base(url, next).expect("a base for the url");
+        assert_eq!(picked.body, main, "the main turn builds on the main body");
+        assert_eq!(picked.hash, sha256_hex(&main));
+        assert!(
+            pick_delta_base(other, next).is_none(),
+            "a body kept under one route is never a base for another"
+        );
+
+        for n in 0..MAX_DELTA_BASES {
+            remember_delta_base(
+                url.to_owned(),
+                Arc::from(format!("filler {n}").into_bytes()),
+            );
+        }
+        assert!(
+            pick_delta_base(url, next).is_none_or(|base| base.body != main),
+            "the oldest bodies leave once the store is full"
+        );
+    }
 
     /// A config written before the rename still says "none".
     #[test]
