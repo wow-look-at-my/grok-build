@@ -100,12 +100,9 @@ fn main() -> Result<(), Box<dyn std::error::Error>> {
     Ok(())
 }
 
-/// The wait between tries of a release download that failed for a transient reason.
-const FETCH_RETRY_INTERVAL: std::time::Duration = std::time::Duration::from_secs(10);
+/// Attempts per release download.
+const FETCH_ATTEMPTS: u32 = 21;
 
-<<<<<<< HEAD
-/// Any other 4xx is the tree's answer, and it returns at once.
-=======
 /// The fixed wait between tries.
 const FETCH_RETRY_DELAY: std::time::Duration = std::time::Duration::from_secs(30);
 
@@ -117,28 +114,11 @@ const FETCH_BUDGET: std::time::Duration = std::time::Duration::from_secs(15 * 60
 
 /// Any other 4xx is the tree's answer: it returns at once. The last failure is
 /// the one the caller reports.
->>>>>>> origin/master
 fn fetch_release(
     url: &str,
     tool: &str,
     override_env: &str,
 ) -> Result<Vec<u8>, Box<dyn std::error::Error>> {
-<<<<<<< HEAD
-    loop {
-        let failure = match request::blocking::get(url) {
-            Ok(resp) => {
-                let status = resp.status();
-                if status.is_success() {
-                    return Ok(resp.bytes()?.to_vec());
-                }
-                if !status.is_server_error() && status.as_u16() != 429 {
-                    return Err(format!(
-                        "HTTP {status} downloading {tool}. Set {override_env} for offline builds."
-                    )
-                    .into());
-                }
-                format!("HTTP {status}")
-=======
     let (url, token) = release_source(url)?;
     let client = request::blocking::Client::builder()
         .timeout(FETCH_TIMEOUT)
@@ -163,17 +143,8 @@ fn fetch_release(
                     "Failed to download {tool}: {e:?}\nSet {override_env} for offline builds."
                 );
                 continue;
->>>>>>> origin/master
             }
-            Err(e) => format!("{e:?}"),
         };
-<<<<<<< HEAD
-        println!(
-            "cargo:warning=downloading {tool} failed ({failure}); retrying in {}s. Set {override_env} for offline builds.",
-            FETCH_RETRY_INTERVAL.as_secs()
-        );
-        std::thread::sleep(FETCH_RETRY_INTERVAL);
-=======
         let status = resp.status();
         if status.is_success() {
             // Reading the body belongs to the attempt. A transfer that stalls
@@ -193,8 +164,8 @@ fn fetch_release(
         if !status.is_server_error() && status.as_u16() != 429 {
             break;
         }
->>>>>>> origin/master
     }
+    Err(last.into())
 }
 
 /// With `GROK_RELEASE_MIRROR` set, a github.com release URL goes to the
