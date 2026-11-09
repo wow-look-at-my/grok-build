@@ -98,15 +98,17 @@ pub(crate) fn persist_bash_always_allow(state: &mut PermissionState, cmd: &str, 
     });
     if labeled_words_verified {
         state.allowed_bash_commands.insert(prefix.to_owned());
-    } else if words.join(" ") != prefix {
+        if !script_replays_without_prompt(cmd, state) {
+            state.allowed_bash_commands.insert(cmd.to_owned());
+        }
+    } else if words.join(" ") == prefix {
+        // The full join is argv-ambiguous, so the exact script is the only key for this selection.
+        state.allowed_bash_commands.insert(cmd.to_owned());
+    } else {
         tracing::warn!(
             %prefix,
             "always-allow label did not verify against the primary command; no grant persisted"
         );
-        return;
-    }
-    if !script_replays_without_prompt(cmd, state) {
-        state.allowed_bash_commands.insert(cmd.to_owned());
     }
 }
 

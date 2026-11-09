@@ -1421,6 +1421,7 @@ mod tests {
             "ls && npm publish",
             "ls /tmp && ./bazelw test //hw-tests/integration/...",
             "git push origin main",
+            "ls /tmp/out 2>/dev/null\nrm -rf /tmp/out && mkdir -p /tmp/out\n./bazelw test //x/... 2>&1 | tail -n 40",
         ] {
             let access = AccessKind::Bash(script.to_owned());
             let opts = p.build_options(&access);
@@ -1524,11 +1525,10 @@ mod tests {
         }
     }
 
-    /// A dump script whose dangerous/floored siblings guarantee re-prompting gets no allow row.
-    /// Its "Always allow: ls" could never stop this script, which is exactly the "always allow keeps asking" complaint.
-    /// The deny row, selection meta, and the one-shot options all remain.
+    /// A dump script whose dangerous siblings keep "Always allow: ls" from covering it still offers the allow row.
+    /// Accepting it also saves the exact script, so this script stops prompting.
     #[test]
-    fn dump_script_with_unhonorable_grant_keeps_only_the_deny_row() {
+    fn dump_script_offers_allow_and_deny_rows() {
         let script = "# Probe the outputs dir\n\
                       ls /tmp/hw-test-outputs 2>/dev/null\n\
                       \n\
@@ -1538,7 +1538,7 @@ mod tests {
         let p = prompter(ClientType::GrokPager);
         let access = AccessKind::Bash(script.to_owned());
         let opts = p.build_options(&access);
-        assert!(!has_option(&opts, "allow-always-command"));
+        assert!(has_option(&opts, "allow-always-command"));
         assert!(has_option(&opts, "reject-always-command"));
         assert!(p.bash_selection_meta(&access).is_some());
         assert!(has_option(&opts, "allow-once"));
