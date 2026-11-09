@@ -3924,6 +3924,79 @@ mod tests {
         "x".repeat(2 * crate::request_compression::MIN_COMPRESS_BYTES)
     }
 
+    /// RFC 7694: a server that answers with `Accept-Encoding: zstd` gets zstd
+    /// bodies from the next request on, on the plain and the streaming path.
+    #[tokio::test]
+    async fn server_advertised_zstd_compresses_the_next_request() {
+        use xai_grok_sampling_types::{ContentPart, ConversationItem, UserItem};
+
+        for (backend, streaming) in [
+            (ApiBackend::Messages, false),
+            (ApiBackend::ChatCompletions, true),
+        ] {
+            let seen = Arc::new(std::sync::Mutex::new(Vec::<Option<String>>::new()));
+            let (content_type, reply) = if streaming {
+                ("text/event-stream", "data: [DONE]\n\n")
+            } else {
+                ("application/json", EMPTY_MESSAGE_JSON)
+            };
+            let handler = post({
+                let seen = seen.clone();
+                move |headers: axum::http::HeaderMap| {
+                    let seen = seen.clone();
+                    async move {
+                        seen.lock()
+                            .unwrap()
+                            .push(header(&headers, CONTENT_ENCODING).map(str::to_owned));
+                        axum::response::Response::builder()
+                            .header("content-type", content_type)
+                            .header("accept-encoding", "zstd")
+                            .body(axum::body::Body::from(reply))
+                            .unwrap()
+                    }
+                }
+            });
+            let app = Router::new()
+                .route("/v1/chat/completions", handler.clone())
+                .route("/v1/messages", handler);
+            let listener = TcpListener::bind("127.0.0.1:0").await.unwrap();
+            let addr = listener.local_addr().unwrap();
+            let server = xai_spawn::spawn(async move {
+                let _ = axum::serve(listener, app).await;
+            });
+            let client = SamplingClient::new(SamplerConfig {
+                base_url: format!("http://{addr}/v1"),
+                api_backend: backend.clone(),
+                ..minimal_config()
+            })
+            .unwrap();
+            let input = large_input();
+            for _ in 0..2 {
+                let request = ConversationRequest {
+                    items: vec![ConversationItem::User(UserItem {
+                        content: vec![ContentPart::Text {
+                            text: Arc::from(input.as_str()),
+                        }],
+                        ..Default::default()
+                    })],
+                    ..Default::default()
+                };
+                let sent = if streaming {
+                    client.conversation_stream(request).await.map(drop)
+                } else {
+                    client.conversation_messages(request).await.map(drop)
+                };
+                sent.unwrap_or_else(|e| panic!("{backend:?}: {e}"));
+            }
+            server.abort();
+            assert_eq!(
+                *seen.lock().unwrap(),
+                vec![None, Some("zstd".to_owned())],
+                "{backend:?} streaming={streaming}"
+            );
+        }
+    }
+
     fn header<'a>(headers: &'a axum::http::HeaderMap, name: HeaderName) -> Option<&'a str> {
         headers.get(name).and_then(|v| v.to_str().ok())
     }
