@@ -171,10 +171,13 @@ async fn the_permission_classifier_side_query_bills_the_session_ledger() {
             session.wire_permission_auto_llm_classifier().await;
             assert!(session.permissions.has_llm_side_query());
 
+            // The heuristic pre-pass fast-Allows a routine command and never
+            // asks the model. This command stays outside that allowlist: the
+            // side query is what answers it, and that call must bill.
             let _ = session
                 .permissions
                 .request(PermissionRequest::new(
-                    AccessKind::Bash("python3 scripts/migrate_the_schema.py --apply".into()),
+                    AccessKind::Bash("terraform apply -auto-approve".into()),
                     agent_client_protocol::ToolCallUpdate::new(
                         agent_client_protocol::ToolCallId::new(std::sync::Arc::from("tc-bill")),
                         Default::default(),
