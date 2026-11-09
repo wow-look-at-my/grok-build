@@ -1276,6 +1276,7 @@ mod tests {
             &scoped,
             Some("byok-static-key"),
             "https://other.example/v1",
+            &xai_grok_sampler::no_session_sink("memory backend test"),
         )
         .await;
         assert!(
@@ -1323,6 +1324,7 @@ mod tests {
             &scoped,
             None,
             "https://api.example.invalid/v1",
+            &xai_grok_sampler::no_session_sink("memory backend test"),
         )
         .await;
         assert!(
