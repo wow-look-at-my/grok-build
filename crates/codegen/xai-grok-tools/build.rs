@@ -46,40 +46,38 @@ fn main() -> Result<(), Box<dyn std::error::Error>> {
     Ok(())
 }
 
-/// Attempts per release download.
-const FETCH_ATTEMPTS: u32 = 6;
+/// The wait between tries of a release download that failed for a transient reason.
+const FETCH_RETRY_INTERVAL: std::time::Duration = std::time::Duration::from_secs(10);
 
-/// Any other 4xx is the tree's answer: it returns at once. The last failure is
-/// the one the caller reports.
+/// Any other 4xx is the tree's answer, and it returns at once.
 fn fetch_release(
     url: &str,
     tool: &str,
     override_env: &str,
 ) -> Result<Vec<u8>, Box<dyn std::error::Error>> {
-    let mut last = String::new();
-    for attempt in 0..FETCH_ATTEMPTS {
-        if attempt > 0 {
-            std::thread::sleep(std::time::Duration::from_secs(2u64 << (attempt - 1)));
-        }
-        let resp = match request::blocking::get(url) {
-            Ok(resp) => resp,
-            Err(e) => {
-                last = format!(
-                    "Failed to download {tool}: {e:?}\nSet {override_env} for offline builds."
-                );
-                continue;
+    loop {
+        let failure = match request::blocking::get(url) {
+            Ok(resp) => {
+                let status = resp.status();
+                if status.is_success() {
+                    return Ok(resp.bytes()?.to_vec());
+                }
+                if !status.is_server_error() && status.as_u16() != 429 {
+                    return Err(format!(
+                        "HTTP {status} downloading {tool}. Set {override_env} for offline builds."
+                    )
+                    .into());
+                }
+                format!("HTTP {status}")
             }
+            Err(e) => format!("{e:?}"),
         };
-        let status = resp.status();
-        if status.is_success() {
-            return Ok(resp.bytes()?.to_vec());
-        }
-        last = format!("HTTP {status} downloading {tool}. Set {override_env} for offline builds.");
-        if !status.is_server_error() && status.as_u16() != 429 {
-            break;
-        }
+        println!(
+            "cargo:warning=downloading {tool} failed ({failure}); retrying in {}s. Set {override_env} for offline builds.",
+            FETCH_RETRY_INTERVAL.as_secs()
+        );
+        std::thread::sleep(FETCH_RETRY_INTERVAL);
     }
-    Err(last.into())
 }
 
 /// Download + embed fd as an optional vendored file-search binary, mirroring the ripgrep bundling
