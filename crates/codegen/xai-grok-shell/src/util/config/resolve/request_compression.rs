@@ -28,15 +28,15 @@ pub(crate) fn cache_remote_accept_request_encodings(
 /// is the operator kill switch, re-read whenever a sampler config is built.
 pub(crate) fn request_compression_for_url(base_url: &str) -> RequestCompression {
     if xai_grok_config::env_bool("GROK_REQUEST_COMPRESSION") == Some(false) {
-        return RequestCompression::None;
+        return RequestCompression::Off;
     }
     let origin = ZSTD_ORIGIN.read().ok().and_then(|guard| guard.clone());
     request_compression_for(base_url, origin.as_deref())
 }
 
-/// Zstd only toward the proxy that advertised it. A sibling trusted route
-/// (staging, the dev proxy) or any other host (BYOK, local models) never
-/// receives a body its server may not decode.
+/// Zstd toward the proxy that advertised it in its settings. Any other host
+/// gets `None`, and the sampler compresses toward it only after that host's
+/// own response sends `Accept-Encoding: zstd`.
 fn request_compression_for(base_url: &str, zstd_origin: Option<&str>) -> RequestCompression {
     if zstd_origin.is_some_and(|origin| crate::util::matches_trusted_base_url(base_url, origin)) {
         RequestCompression::Zstd

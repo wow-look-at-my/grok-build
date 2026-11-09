@@ -48,7 +48,7 @@ use xai_grok_sampling_types::{
 
 use crate::config::{AuthScheme, OriginClientInfo, RequestCompression, SamplerConfig};
 use crate::events::SamplingErrorInfo;
-use crate::request_compression::{compress_body, should_compress};
+use crate::request_compression::{compress_body, note_response_headers, should_compress};
 use crate::span_timing::{ERROR, STATUS_CODE, SUCCESS, StreamSpanTiming};
 use crate::stream_classify::{chat_chunk_class, message_event_class, responses_event_class};
 use xai_grok_auth::bearer_suffix;
@@ -1535,11 +1535,13 @@ impl SamplingClient {
     }
 
     async fn send(&self, request: HttpRequest) -> Result<xai_grok_net::Response> {
-        self.net_request(request)?
+        let response = self
+            .net_request(request)?
             .send()
             .await
-            .inspect_err(|e| tracing::debug!("HTTP request failed: {}", e))
-            .map_err(Into::into)
+            .inspect_err(|e| tracing::debug!("HTTP request failed: {}", e))?;
+        note_response_headers(response.url().as_str(), response.headers());
+        Ok(response)
     }
 
     async fn execute_stream_request(
@@ -1554,6 +1556,7 @@ impl SamplingClient {
             e
         })?;
         span_timing.record_response_headers();
+        note_response_headers(response.url().as_str(), response.headers());
         Ok(response)
     }
 
