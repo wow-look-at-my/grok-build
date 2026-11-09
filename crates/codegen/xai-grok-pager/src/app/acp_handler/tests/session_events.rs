@@ -1001,6 +1001,37 @@
         }
     }
 
+    /// A `/compact` at idle has no turn end, so its completion notice is what carries the new session total.
+    #[test]
+    fn apply_compaction_completed_adopts_the_session_cost_unless_replayed() {
+        let update = XaiSessionUpdate::AutoCompactCompleted {
+            tokens_before: Some(90_000),
+            tokens_after: 20_000,
+            elapsed_ms: None,
+            summary_preview: None,
+            breakdown: None,
+            report_path: None,
+            session_cost_usd_ticks: Some(7_000_000),
+        };
+
+        let mut session = make_session(Some("s1"));
+        let mut scrollback = ScrollbackState::new();
+        apply_session_event(&update, &mut session, &mut scrollback, false);
+        assert_eq!(
+            session.tracker.reported_session_cost_usd_ticks(),
+            Some(7_000_000)
+        );
+
+        let mut replayed = make_session(Some("s1"));
+        replayed.loading_replay = true;
+        apply_session_event(&update, &mut replayed, &mut scrollback, false);
+        assert_eq!(
+            replayed.tracker.reported_session_cost_usd_ticks(),
+            None,
+            "a replayed total belongs to the run that wrote it"
+        );
+    }
+
     #[test]
     fn apply_compaction_completed_falls_back_to_estimate_without_confirmation() {
         let mut session = make_session(Some("s1"));
