@@ -633,6 +633,7 @@ async fn first_turn_memory_injection_disabled_does_not_persist_to_chat_history()
                 search_source: crate::session::memory::MemorySearchSource::Tool,
                 observation_sink: crate::session::memory::noop_memory_observation_sink(),
                 embedding_credentials: crate::session::memory::EndpointScopedCredentials::none(),
+                usage_sink: xai_grok_sampler::no_session_sink("memory test"),
             };
             let (event_tx, _event_rx) = tokio::sync::mpsc::unbounded_channel::<SessionEvent>();
             let actor = Arc::new(SessionActor {

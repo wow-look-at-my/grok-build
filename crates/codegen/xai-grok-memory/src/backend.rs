@@ -139,6 +139,8 @@ pub struct MemoryBackendParams {
     pub search_source: MemorySearchSource,
     pub observation_sink: Arc<dyn MemoryObservationSink>,
     pub embedding_credentials: EndpointScopedCredentials,
+    /// Bills each embedding call: the session's sink, or `no_session_sink` where no session owns the backend.
+    pub usage_sink: xai_grok_sampler::SharedUsageSink,
 }
 
 impl MemoryBackendParams {
@@ -149,6 +151,7 @@ impl MemoryBackendParams {
             &self.embedding_credentials,
             self.embed_api_key.as_deref(),
             &self.embed_base_url,
+            &self.usage_sink,
         )
         .await
     }
@@ -159,6 +162,7 @@ async fn build_embedding_provider(
     credentials: &EndpointScopedCredentials,
     static_api_key: Option<&str>,
     base_url: &str,
+    usage_sink: &xai_grok_sampler::SharedUsageSink,
 ) -> Option<super::embedding::ApiEmbeddingProvider> {
     let config = config?;
     if config.model.as_ref().is_none_or(|m| m.is_empty()) {
@@ -182,6 +186,7 @@ async fn build_embedding_provider(
             config,
             base_url.to_owned(),
             auth,
+            usage_sink.clone(),
         );
     }
 
@@ -192,7 +197,12 @@ async fn build_embedding_provider(
     };
     // The provider can return a static key or the session, so the key goes as an API key.
     let api_key = per_call_key.or_else(|| static_api_key.map(|s| s.to_owned()))?;
-    super::embedding::ApiEmbeddingProvider::from_session(config, base_url.to_owned(), api_key)
+    super::embedding::ApiEmbeddingProvider::from_session(
+        config,
+        base_url.to_owned(),
+        api_key,
+        usage_sink.clone(),
+    )
 }
 
 /// `MemoryBackend` implementation backed by hybrid search (FTS5 + vector KNN).
@@ -207,6 +217,8 @@ pub struct MemoryBackendImpl {
     embed_base_url: String,
     /// API key for embedding requests.
     embed_api_key: Option<String>,
+    /// Bills each embedding call. Set together with `embed_config`.
+    embed_usage_sink: Option<xai_grok_sampler::SharedUsageSink>,
     /// Search scoring config (weights, min_score, max_results).
     search_config: xai_grok_config_types::MemorySearchConfig,
     /// File watcher for detecting external memory edits.
@@ -231,6 +243,7 @@ impl MemoryBackendImpl {
             embed_config: None,
             embed_base_url: String::new(),
             embed_api_key: None,
+            embed_usage_sink: None,
             search_config: xai_grok_config_types::MemorySearchConfig::default(),
             watcher: None,
             stale_claim_secs: 60,
@@ -254,10 +267,12 @@ impl MemoryBackendImpl {
         config: xai_grok_config_types::MemoryEmbeddingConfig,
         base_url: String,
         api_key: Option<String>,
+        usage_sink: xai_grok_sampler::SharedUsageSink,
     ) -> Self {
         self.embed_config = Some(config);
         self.embed_base_url = base_url;
         self.embed_api_key = api_key;
+        self.embed_usage_sink = Some(usage_sink);
         self
     }
 
@@ -286,6 +301,7 @@ impl MemoryBackendImpl {
             &self.embedding_credentials,
             self.embed_api_key.as_deref(),
             &self.embed_base_url,
+            self.embed_usage_sink.as_ref()?,
         )
         .await
     }
@@ -303,6 +319,7 @@ impl MemoryBackendImpl {
                 ec.clone(),
                 params.embed_base_url.clone(),
                 params.embed_api_key.clone(),
+                params.usage_sink.clone(),
             );
         }
         if let Some(w) = &params.watcher {
@@ -606,6 +623,7 @@ mod factory_tests {
             search_source: MemorySearchSource::Tool,
             observation_sink: noop_memory_observation_sink(),
             embedding_credentials: EndpointScopedCredentials::none(),
+            usage_sink: xai_grok_sampler::no_session_sink("memory backend test"),
         }
     }
 
@@ -1154,6 +1172,7 @@ mod factory_tests {
                 None,
                 Some(probe),
             ),
+            usage_sink: xai_grok_sampler::no_session_sink("memory backend test"),
         };
 
         let provider = params.make_embedding_provider().await;

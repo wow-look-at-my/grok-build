@@ -28,6 +28,7 @@ fn initial_injection_backend_params_use_override_min_score() {
         search_source: MemorySearchSource::Tool,
         observation_sink: crate::session::memory::noop_memory_observation_sink(),
         embedding_credentials: crate::session::memory::EndpointScopedCredentials::none(),
+        usage_sink: xai_grok_sampler::no_session_sink("memory test"),
     };
     let initial_injection = crate::config::MemoryInitialInjectionConfig {
         enabled: true,
@@ -57,6 +58,7 @@ fn initial_injection_backend_params_preserve_default_zero_min_score() {
         search_source: MemorySearchSource::Tool,
         observation_sink: crate::session::memory::noop_memory_observation_sink(),
         embedding_credentials: crate::session::memory::EndpointScopedCredentials::none(),
+        usage_sink: xai_grok_sampler::no_session_sink("memory test"),
     };
     let initial_injection = crate::config::MemoryInitialInjectionConfig {
         enabled: true,
@@ -1144,6 +1146,7 @@ async fn create_injection_ready_actor(
         search_source: MemorySearchSource::Tool,
         observation_sink: crate::session::memory::noop_memory_observation_sink(),
         embedding_credentials: crate::session::memory::EndpointScopedCredentials::none(),
+        usage_sink: xai_grok_sampler::no_session_sink("memory test"),
     });
     actor
         .chat_state_handle

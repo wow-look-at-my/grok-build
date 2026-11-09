@@ -6,7 +6,7 @@ use tokio::task::JoinHandle;
 use url::Url;
 use xai_grok_net::Auth;
 use xai_grok_net::header::{HeaderMap, HeaderValue};
-use xai_grok_net::ws::{Message, WsError, WsRequest};
+use xai_grok_net::ws::{Message, WsError};
 
 use crate::config::VoiceConfig;
 use crate::error::VoiceError;
@@ -27,6 +27,31 @@ pub struct StreamingSttSession {
     event_rx: mpsc::Receiver<StreamingSttEvent>,
     _writer_task: JoinHandle<()>,
     _reader_task: JoinHandle<()>,
+    /// The model request slot the socket holds for all of its life.
+    _slot: Option<xai_grok_sampler::request_slots::RequestSlot>,
+}
+
+/// The pager runs dictation and keeps no session ledger, so no ledger records the socket.
+const VOICE_USAGE_SINK_REASON: &str =
+    "voice dictation runs in the pager, which has no session ledger";
+
+/// The sampling client for the socket: base URL, credential and request slot all come from it.
+fn stt_client(url: &Url, auth: Auth) -> Result<xai_grok_sampler::SamplingClient, VoiceError> {
+    let host = url
+        .host_str()
+        .ok_or_else(|| VoiceError::Stt(format!("bad STT URL: {url}")))?;
+    let base_url = match url.port() {
+        Some(port) => format!("https://{host}:{port}"),
+        None => format!("https://{host}"),
+    };
+    let config = xai_grok_sampler::SamplerConfig {
+        base_url,
+        usage_sink: Some(xai_grok_sampler::no_session_sink(VOICE_USAGE_SINK_REASON)),
+        ..Default::default()
+    };
+    xai_grok_sampler::SamplingClient::new(config)
+        .map(|client| client.with_request_auth(auth))
+        .map_err(|e| VoiceError::WebSocket(format!("request: {e}")))
 }
 
 impl StreamingSttSession {
@@ -46,17 +71,22 @@ impl StreamingSttSession {
         );
         insert_optional_header(&mut headers, "User-Agent", &config.user_agent);
 
-        let request = WsRequest::new(url.as_str(), auth, headers)
-            .map_err(|e| VoiceError::WebSocket(format!("request: {e}")))?;
-        let (ws, _) = tokio::time::timeout(
+        let client = stt_client(&url, auth)?;
+        let path = match url.query() {
+            Some(query) => format!("{}?{query}", url.path()),
+            None => url.path().to_owned(),
+        };
+        // The time spent queued for a request slot does not count against the connect limit.
+        let session = xai_grok_sampler::timeout_excluding_queue(
             Duration::from_secs(15),
-            xai_grok_net::ws::connect_ws(request),
+            client.connect_websocket(&path, headers),
         )
         .await
         .map_err(|_| VoiceError::WebSocket("connect timed out".into()))?
         .map_err(|e| VoiceError::WebSocket(format!("connect: {e}")))?;
+        let slot = session.slot;
 
-        let (mut ws_write, mut ws_read) = ws.split();
+        let (mut ws_write, mut ws_read) = session.socket.split();
         let (audio_tx, mut audio_rx) = mpsc::channel::<Vec<u8>>(64);
         let (event_tx, event_rx) = mpsc::channel::<StreamingSttEvent>(64);
 
@@ -135,6 +165,7 @@ impl StreamingSttSession {
             event_rx,
             _writer_task: writer_task,
             _reader_task: reader_task,
+            _slot: slot,
         };
         session.wait_ready().await?;
         Ok(session)

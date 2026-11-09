@@ -89,6 +89,7 @@ impl MediaEndpoint {
         }
     }
 
+    #[cfg(test)]
     pub(crate) fn session_id(&self) -> Option<&str> {
         self.session_id.as_deref()
     }

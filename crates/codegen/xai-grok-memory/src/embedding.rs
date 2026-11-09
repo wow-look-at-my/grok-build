@@ -259,6 +259,60 @@ impl EmbeddingProvider for MockEmbeddingProvider {
 mod tests {
     use super::*;
 
+    #[derive(Debug, Default)]
+    struct Recorder {
+        calls: parking_lot::Mutex<Vec<xai_grok_sampler::BilledCall>>,
+    }
+
+    impl xai_grok_sampler::UsageSink for Recorder {
+        fn record_call(&self, call: xai_grok_sampler::BilledCall) {
+            self.calls.lock().push(call);
+        }
+    }
+
+    /// Each batch goes through the sampling client, which bills the call's token usage.
+    #[tokio::test]
+    async fn embed_batch_bills_each_call_to_the_sink() {
+        let server = wiremock::MockServer::start().await;
+        wiremock::Mock::given(wiremock::matchers::method("POST"))
+            .and(wiremock::matchers::path("/v1/embeddings"))
+            .and(wiremock::matchers::header("authorization", "Bearer key"))
+            .and(wiremock::matchers::header(
+                "x-xai-token-auth",
+                "xai-grok-cli",
+            ))
+            .respond_with(
+                wiremock::ResponseTemplate::new(200).set_body_json(serde_json::json!({
+                    "model": "served-embed",
+                    "data": [{ "embedding": [0.5, 0.25] }],
+                    "usage": { "prompt_tokens": 5, "total_tokens": 5 }
+                })),
+            )
+            .expect(1)
+            .mount(&server)
+            .await;
+        let recorder = std::sync::Arc::new(Recorder::default());
+        let provider = ApiEmbeddingProvider::new(
+            format!("{}/v1", server.uri()),
+            "embed-model".into(),
+            2,
+            xai_grok_net::Auth::ApiKey {
+                key: "key".into(),
+                scheme: xai_grok_net::KeyScheme::Bearer,
+            },
+            recorder.clone(),
+        );
+
+        let vectors = provider.embed_batch(&["hello"]).await.expect("embeddings");
+
+        assert_eq!(vectors, vec![vec![0.5, 0.25]]);
+        let calls = recorder.calls.lock().clone();
+        assert_eq!(calls.len(), 1, "{calls:?}");
+        let call = calls.first().expect("one call");
+        assert_eq!(call.model, "served-embed");
+        assert_eq!(call.usage.as_ref().map(|u| u.prompt_tokens), Some(5));
+    }
+
     #[tokio::test]
     async fn test_mock_embedding_deterministic() {
         let provider = MockEmbeddingProvider { dimensions: 4 };
