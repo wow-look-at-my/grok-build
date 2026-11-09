@@ -31,6 +31,7 @@ const ALL_SETTINGS_EXERCISED: &[&str] = &[
     "remember_tool_approvals",
     "toolset.ask_user_question.timeout_enabled",
     "subagent_model_inheritance",
+    "two_pass_compaction",
     "keep_text_selection",
     "theme",
     "auto_dark_theme",
@@ -275,6 +276,12 @@ fn assert_set_bool_action(outcome: SettingsKeyOutcome, key: &str, expected: bool
             assert_eq!(
                 b, expected,
                 "SetSubagentModelInheritance value differs from expected"
+            )
+        }
+        ("two_pass_compaction", Action::SetTwoPassCompaction(b)) => {
+            assert_eq!(
+                b, expected,
+                "SetTwoPassCompaction value differs from expected"
             )
         }
 
@@ -539,6 +546,15 @@ fn space_on_subagent_model_inheritance_dispatches_typed_setter() {
     navigate_to(&mut s, "subagent_model_inheritance");
     let outcome = handle_settings_key(&mut s, &press(KeyCode::Char(' ')));
     assert_set_bool_action(outcome, "subagent_model_inheritance", true);
+}
+
+/// The `[features]` row defaults on, so Space toggles it off.
+#[test]
+fn space_on_two_pass_compaction_dispatches_typed_setter() {
+    let mut s = make_state();
+    navigate_to(&mut s, "two_pass_compaction");
+    let outcome = handle_settings_key(&mut s, &press(KeyCode::Char(' ')));
+    assert_set_bool_action(outcome, "two_pass_compaction", false);
 }
 
 #[test]
@@ -946,6 +962,21 @@ fn mouse_click_on_subagent_model_inheritance_indicator_toggles_in_one_click() {
         row_y,
     );
     assert_set_bool_action(outcome, "subagent_model_inheritance", true);
+}
+
+/// Value-column click toggles two-pass compaction in one click.
+#[test]
+fn mouse_click_on_two_pass_compaction_indicator_toggles_in_one_click() {
+    let mut s = make_state();
+    synth_rects(&mut s);
+    let row_y = row_idx_for(&s, "two_pass_compaction") as u16;
+    let outcome = handle_settings_mouse(
+        &mut s,
+        MouseEventKind::Down(crossterm::event::MouseButton::Left),
+        72,
+        row_y,
+    );
+    assert_set_bool_action(outcome, "two_pass_compaction", false);
 }
 
 /// Value-column click toggles the Ask-Question timeout in one click.
@@ -1982,6 +2013,7 @@ fn registry_kind_membership_through_pr_14() {
             "remember_tool_approvals",
             "toolset.ask_user_question.timeout_enabled",
             "subagent_model_inheritance",
+            "two_pass_compaction",
             "show_tips",
             "voice_keybind_enabled",
             // Per-tip contextual-hint children (hidden from the top-level list, toggled inside the group sub-sheet) are still Bool settings
@@ -2166,6 +2198,7 @@ fn defaults_round_trip_through_registry() {
             "remember_tool_approvals" => SettingValue::Bool(true),
             "toolset.ask_user_question.timeout_enabled" => SettingValue::Bool(true),
             "subagent_model_inheritance" => SettingValue::Bool(false),
+            "two_pass_compaction" => SettingValue::Bool(true),
             "keep_text_selection" => SettingValue::Enum("flash"),
             "theme" => SettingValue::Enum("groknight"),
             "auto_dark_theme" => SettingValue::Enum("groknight"),
