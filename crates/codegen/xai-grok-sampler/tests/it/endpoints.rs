@@ -9,7 +9,7 @@ use axum::extract::ws::{Message as AxumMessage, WebSocketUpgrade};
 use axum::http::{HeaderMap, StatusCode};
 use axum::response::IntoResponse;
 use axum::routing::{any, get, post};
-use futures_util::{SinkExt, StreamExt};
+use futures_util::StreamExt;
 use parking_lot::Mutex;
 use serde_json::json;
 use tokio::net::TcpListener;
