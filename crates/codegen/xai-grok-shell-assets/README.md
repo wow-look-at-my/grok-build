@@ -143,6 +143,11 @@ export GROK_CLI_CHAT_PROXY_BASE_URL="https://grok-proxy.acme.com/v1"
 
 **Optional fields:**
 
+| Field | Default | Notes |
+|-------|---------|-------|
+| `scopes` | `["openid", "profile", "email", "offline_access"]` | `offline_access` enables silent token refresh; add custom scopes if needed |
+| `audience` | None | Required by some IdPs (e.g. Auth0) |
+
 ### External Auth Provider
 
 For environments where browser-based login is not possible (sandboxed VMs, CI runners, air-gapped networks), delegate authentication to an external binary or script. This is the recommended approach for enterprise deployments where your company runs its own auth infrastructure (SSO, device code flows, certificate auth, etc.).
@@ -150,6 +155,16 @@ For environments where browser-based login is not possible (sandboxed VMs, CI ru
 Grok is provider-agnostic — it does not know or care how your binary authenticates. It runs the command, reads a token from stdout, and stores it. Your binary is a black box that handles the entire auth flow.
 
 #### How It Works
+
+```
+┌──────────────┐     sh -c     ┌────────────────────────┐
+│     Grok     │──────────────▶│  your auth binary      │
+│              │               │                        │
+│  reads       │◀── stdout ────│  prints token          │
+│  auth.json   │               │                        │
+│              │   (stderr)    │  prints status/URLs    │──▶ user's terminal
+└──────────────┘               └────────────────────────┘
+```
 
 1. Grok runs your command via `sh -c "<command>"`
 2. Your binary does whatever auth flow it needs (SSO login, device code, cert exchange, etc.)
@@ -184,6 +199,20 @@ eyJhbGciOiJSUzI1NiIs...
 
 Use JSON if your tokens expire and you want Grok to automatically re-run the binary before expiry. The `expires_in` field (seconds until expiry) tells Grok when to proactively refresh. Without it, Grok assumes tokens last many days.
 
+#### Minimal Example
+
+```bash
+#!/bin/sh
+# Print login URL / status to stderr (user sees this)
+echo "Authenticating via Acme Corp SSO..." >&2
+echo "Visit: https://sso.acme.com/device-login?code=ABCD-1234" >&2
+
+# ... do the auth flow, get a token ...
+
+# Print ONLY the token to stdout (Grok captures this)
+echo "eyJhbGciOiJSUzI1NiIs..."
+```
+
 #### Configuration
 
 ```json
@@ -194,6 +223,13 @@ Use JSON if your tokens expire and you want Grok to automatically re-run the bin
     "auth_token_ttl": 3600
   }
 }
+```
+
+```bash
+# Or via environment variables
+export GROK_AUTH_PROVIDER_COMMAND="/usr/local/bin/my-auth-provider"
+export GROK_AUTH_PROVIDER_LABEL="Acme Corp"   # optional
+export GROK_AUTH_TOKEN_TTL=3600               # optional
 ```
 
 If your binary outputs a bare token string (not JSON with `expires_in`), set `auth_token_ttl` to the token's expected lifetime in seconds. Without it, Grok cannot detect expiry proactively and will only refresh after a 401.
@@ -243,6 +279,28 @@ Grok runs your binary on multiple different contracts, and `GROK_AUTH_EXPIRED` i
 | **Budget** | A few seconds (7s), then Grok kills the process | 300s — enough for a browser round trip or a device code |
 | **So your binary should** | Mint silently, or **exit non-zero**. Never block | Do the full SSO flow, and always mint fresh |
 
+```bash
+#!/bin/sh
+if [ "$GROK_AUTH_EXPIRED" = "1" ]; then
+    # Headless: silent refresh only. If that can't work — the SSO session
+    # lapsed, say — exit non-zero rather than block. Grok then shows the
+    # sign-in screen, which re-runs this binary with the variable unset.
+    echo "Refreshing token..." >&2
+    TOKEN=$(my-company-auth --refresh --silent) || exit 1
+else
+    # A user is attached — full interactive SSO flow.
+    echo "Authenticating via Acme Corp SSO..." >&2
+    TOKEN=$(my-company-auth --login --interactive)
+fi
+
+if [ -z "$TOKEN" ]; then
+    echo "Authentication failed" >&2
+    exit 1
+fi
+
+echo "{\"access_token\": \"$TOKEN\", \"expires_in\": 3600}"
+```
+
 Exiting promptly on `GROK_AUTH_EXPIRED=1` is what makes the handover to the sign-in screen fast. A binary that blocks instead pays the whole refresh timeout on every start with an expired token.
 
 One case stays ambiguous, and only in **leader mode** (`--leader`, or `cli.use_leader` set to `true`. Off by default): with no credential at all, the leader makes one extra try in the background just after startup. That run has the variable unset, like a sign-in. A binary that mints without help (service account, keytab, mounted token) succeeds there and the session heals itself. One that must prompt just sits, up to the 300s sign-in ceiling — nothing waits on it. The sign-in screen is already up, and its stderr goes to `~/.grok/leader.log` rather than to the user.
@@ -283,6 +341,17 @@ Enable debug logging to trace the auth flow:
 grok --debug-file /tmp/grok-auth.log -p "hello"
 tail -f /tmp/grok-auth.log
 ```
+
+Common log messages:
+
+| Log message | What it means |
+|-------------|---------------|
+| `auth: running external auth provider (headless refresh)` | Your binary is being called with `GROK_AUTH_EXPIRED=1` and a few seconds to work |
+| `auth: running external auth provider (interactive login)` | Your binary is being called on the sign-in contract: no `GROK_AUTH_EXPIRED`, stderr shown, 300s |
+| `auth: external auth provider returned fresh token` | Success — token was parsed and stored |
+| `auth: external auth provider failed` | Binary exited non-zero, or exited 0 but stdout was empty/unparseable (the `error` field has details) |
+| `auth: external auth provider timed out (likely needs interactive auth), killing` | Binary didn't exit before the 7s headless-refresh timeout and was killed. Exiting non-zero on `GROK_AUTH_EXPIRED=1` avoids this wait entirely |
+| `auth: failed to start external auth provider` | The command couldn't be spawned (e.g. binary not found) |
 
 ### Per-Model Auth Providers
 
@@ -334,9 +403,28 @@ The command inherits Grok's environment (so it sees `PATH`, `HOME`, and any othe
 
 ### Using auth.json for API Access
 
-If you authenticated with `grok login`, you can use the stored credentials to call the CLI chat proxy directly via curl.
+If you authenticated with `grok login`, you can use the stored credentials to call the CLI chat proxy directly via curl. The proxy requires specific headers that mirror what the grok CLI sends internally:
+
+```bash
+curl -s -N -X POST "https://cli-chat-proxy.grok.invalid/v1/chat/completions" \
+  -H "Content-Type: application/json" \
+  -H "Authorization: Bearer $(jq -r '."https://accounts.example.invalid/sign-in".key' ~/.grok/auth.json)" \
+  -H "X-XAI-Token-Auth: xai-grok-cli" \
+  -H "x-grok-model-override: grok-build" \
+  -d '{
+    "model": "grok-build",
+    "messages": [{"role": "user", "content": "Hello!"}],
+    "stream": true
+  }'
+```
 
 **Required headers:**
+
+| Header                           | Required | Purpose                                                                                                                                                                                   |
+| -------------------------------- | -------- | ----------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------- |
+| `Authorization: Bearer <token>`  | Yes      | Session token from `~/.grok/auth.json` (set by `grok login`)                                                                                                                              |
+| `X-XAI-Token-Auth: xai-grok-cli` | Yes      | Tells the auth middleware to validate as a CLI session token                                                                                                                              |
+| `x-grok-model-override: <model>` | Yes\*    | The proxy uses this header (not the JSON body) to route to the correct backend. \*Can be omitted for `grok-build` which is on the default route, but always safe to include. |
 
 **Streaming vs non-streaming:**
 
@@ -360,7 +448,80 @@ The TUI (Terminal User Interface) provides a full interactive coding environment
 grok [OPTIONS]
 ```
 
+### Options
+
+| Flag                       | Description                                                            |
+| -------------------------- | ---------------------------------------------------------------------- |
+| `--cwd <PATH>`             | Set working directory (default: current directory)                     |
+| `--prompt <TEXT>`          | Send an initial prompt immediately after startup                       |
+| `--rules <TEXT>`           | Append custom rules to the system prompt                               |
+| `--always-approve`         | Auto-approve all tool executions without confirmation                  |
+| `--sandbox <PROFILE>`      | OS-level filesystem/network guardrails (see [Sandbox](#sandbox))       |
+| `--light`                  | Use light theme (macOS Basic) instead of dark                          |
+| `--single-turn`            | Exit after first response (requires `--prompt`)                        |
+| `--no-memory`              | Force-disable cross-session memory (overrides all other settings)      |
+| `--subagents`              | Enable subagent/task tool support (see [Subagents](#subagents))        |
+| `--disable-web-search`     | Remove web search tool from the agent toolset                          |
+| `--agent-profile <PATH>`   | Load a custom agent definition file (see [Agent Profiles](#agent-profiles)) |
+| `--experimental-memory`    | Enable cross-session memory persistence (see [Memory](#memory))        |
+| `--allow <RULE>`           | Permission allow rule with glob patterns (repeatable). See [Permission Rules](#permission-rules-allow--deny). |
+| `--deny <RULE>`            | Permission deny rule with glob patterns (repeatable). See [Permission Rules](#permission-rules-allow--deny). |
+
+### Examples
+
+```bash
+# Start in a specific project
+grok --cwd ~/projects/my-app
+
+# Start with an initial task
+grok --prompt "Review this codebase and suggest improvements"
+
+# Add project-specific rules
+grok --rules "Always use TypeScript. Prefer functional components."
+
+# Auto-approve mode for trusted tasks
+grok --always-approve --prompt "Format all files"
+```
+
+### Keyboard Shortcuts
+
+| Key                          | Action                          |
+| ---------------------------- | ------------------------------- |
+| `Enter`                      | Send message                    |
+| `Shift+Enter` or `Alt+Enter` | Insert newline                  |
+| `Ctrl+M`                     | Toggle multiline input mode     |
+| `Ctrl+C` or `Esc`            | Cancel current operation        |
+| `Ctrl+D` or `Ctrl+Q`         | Quit (with confirmation)        |
+| `Ctrl+O`                     | Toggle always-approve mode |
+| `Ctrl+T`                     | Toggle TODO/task panel          |
+| `Ctrl+R`                     | Search prompt history           |
+| `Ctrl+V`                     | Paste from clipboard            |
+| `Ctrl+U`                     | Undo last input change          |
+| `Ctrl+G`                     | Move foreground task to background |
+| `Ctrl+P`                     | Toggle debug panel              |
+
 ### Slash Commands
+
+Type `/` in the input to access commands:
+
+| Command                            | Alias     | Description                                              |
+| ---------------------------------- | --------- | -------------------------------------------------------- |
+| `/model <name>`                    | `/m`      | Switch to a different model                              |
+| `/new`                             |           | Start a new session (clears context)                     |
+| `/load [workspace] [session]`      | `/resume` | Load a previous session                                  |
+| `/rewind <prompt>`                 |           | Rewind to a previous prompt (restores files)             |
+| `/compact [context]`               |           | Compact conversation history                             |
+| `/always-approve [on\|off]`        | `/yolo`   | Toggle auto-approve mode                                 |
+| `/multiline`                       | `/ml`     | Toggle multiline input mode                              |
+| `/memory [workspace\|global] <text>` |         | Append text to a memory file (requires `--experimental-memory`) |
+| `/flush`                           |           | Save current session knowledge to memory now             |
+| `/skills [name]`                   |           | List skills or inject a skill into context               |
+| `/plugins [list\|reload\|trust]`   | `/plugin` | Manage plugins (list, reload, trust)                     |
+| `/hooks-list`                      |           | Show hooks loaded in this session                        |
+| `/hooks-trust`                     |           | Trust this folder for hooks (writes folder trust)        |
+| `/hooks-add <path>`                |           | Add a custom hook file or directory                      |
+| `/feedback [message]`              |           | Report an issue or send feedback                         |
+| `/exit`                            | `/quit`   | Exit the TUI                                             |
 
 ```bash
 # Example usage in TUI:
@@ -391,7 +552,7 @@ Use the `@` operator in your prompt to attach file contents to your message. Typ
 
 **Exposing hidden files with `!`**
 
-By default, the `@` file picker respects `.gitignore` rules and hides dotfiles (files and directories starting with `.`).
+By default, the `@` file picker respects `.gitignore` rules and hides dotfiles (files and directories starting with `.`). To search hidden files, prefix your query with `!`:
 
 ```
 @!.github                 # Search for .github/ and other hidden files
@@ -422,11 +583,28 @@ grok -p "Your prompt here"
 
 ### Options
 
+| Flag                    | Description                                           |
+| ----------------------- | ----------------------------------------------------- |
+| `-p, --single <PROMPT>` | The prompt to send (required)                         |
+| `-m, --model <MODEL>`   | Model to use (e.g., `grok-build`)               |
+| `-s, --session-id <ID>` | Create or resume a headless session with this ID      |
+| `-r, --resume <ID_OR_TITLE>` | Resume an existing session by ID, or by title for the current directory, ignoring letter case (a sole explicitly renamed title wins among duplicates; remaining duplicates error with their IDs; UUID-shaped values are always treated as IDs) |
+| `-c, --continue`        | Continue the most recent session in current directory |
+| `--cwd <PATH>`          | Working directory                                     |
+| `--output-format <FMT>` | Output format |
+| `--always-approve`      | Auto-approve tool executions                          |
+| `--rules <TEXT>`        | Custom rules for the system prompt                    |
+| `--tools <TOOLS>`       | Allowlist of built-in tools (comma-separated). Only the listed tools will be available; all others are removed. Headless mode only. |
+| `--disallowed-tools <TOOLS>` | Denylist of built-in tools to remove (comma-separated). Listed tools are stripped from the agent's toolset. Supports `Agent` / `Agent(type)` entries to restrict subagent spawning (see below). Headless mode only. |
+| `--max-turns <N>`       | Maximum number of agentic turns before stopping       |
+| `--reasoning-effort` / `--effort <LEVEL>` | Reasoning effort. TUI and headless. |
+| `--permission-mode <MODE>` | Permission mode for tool approvals                 |
+| `--allow <RULE>`        | Permission allow rule with glob patterns (repeatable). See below. |
+| `--deny <RULE>`         | Permission deny rule with glob patterns (repeatable). See below.  |
+
 #### Tool Filtering (`--tools` / `--disallowed-tools`)
 
 Use `--tools` to restrict the agent to an explicit set of tools (allowlist), or `--disallowed-tools` to remove specific tools from the default set (denylist). Both accept a comma-separated list of tool names.
-
-Tool names correspond to the internal tool IDs shown below.
 
 ```bash
 # Only allow read-only tools
@@ -438,6 +616,14 @@ grok -p "Review this code" --disallowed-tools "web_search,web_fetch,search_repla
 # Remove shell access
 grok -p "Review this code" --disallowed-tools "run_terminal_cmd"
 ```
+
+`--disallowed-tools` also supports special `Agent` entries to control subagent spawning:
+
+| Entry                          | Effect                                                  |
+| ------------------------------ | ------------------------------------------------------- |
+| `Agent`                        | Block **all** subagent spawning                         |
+| `Agent(explore)`               | Block the `explore` subagent type only                  |
+| `Agent(explore, plan)`         | Block multiple specific types                           |
 
 ```bash
 # Allow tools but prevent the agent from spawning any subagents
@@ -455,7 +641,17 @@ When `--tools` is set, only the listed tools are available and default tool inje
 
 Permission rules control whether specific tool invocations are auto-approved, denied, or require confirmation. Unlike `--disallowed-tools` (which removes tools fully from the agent's toolset), permission rules leave tools available but gate their execution.
 
-Rules use `ToolPrefix(glob_pattern)` syntax.
+Rules use `ToolPrefix(glob_pattern)` syntax. Supported prefixes:
+
+| Prefix        | What it controls                   |
+| ------------- | ---------------------------------- |
+| `Bash(...)`   | Shell command execution            |
+| `Edit(...)`   | File editing (path glob)           |
+| `Write(...)`  | File writing (path glob)           |
+| `Read(...)`   | File reading (path glob)           |
+| `Grep(...)`   | Search operations (path glob)      |
+| `WebFetch(...)` | URL fetching (glob or `domain:host`) |
+| `MCPTool(...)` | MCP tool invocations              |
 
 Glob patterns support `*` (single-level wildcard) and `**` (recursive). A bare prefix without parentheses matches all invocations of that type. Claude Code's `Bash(cmd:*)` rules are also accepted and are equivalent to prefix matching on `cmd`.
 
@@ -599,6 +795,12 @@ Communication happens via JSON-RPC over stdin/stdout. This mode is used by:
 
 ### Options
 
+| Flag                  | Description                                                                         |
+| --------------------- | ----------------------------------------------------------------------------------- |
+| `-m, --model <MODEL>` | Override the default model ID (e.g., `grok-build`)                           |
+| `--always-approve`    | Start in always-approve mode (auto-approve all tool executions without confirmation) |
+| `--reauth`            | Force re-authentication flow                                                        |
+
 <details>
 <summary><strong>Advanced: WebSocket Relay</strong></summary>
 
@@ -651,7 +853,156 @@ Grok can be used as an OpenAI-compatible chat completion backend. Choose between
 
 Use headless mode for simple integrations. Spawns `grok -p` and parses JSON output.
 
+#### Python - Headless
+
+```python
+import asyncio
+import json
+import os
+
+class GrokChat:
+    """Simple OpenAI-compatible wrapper using headless mode."""
+
+    def __init__(self, cwd="."):
+        self.cwd = cwd
+        self.env = {**os.environ}
+
+    def _build_cmd(self, prompt, model, stream):
+        return ["grok", "-p", prompt, "-m", model, "--cwd", self.cwd,
+                "--output-format", "streaming-json" if stream else "json", "--always-approve"]
+
+    async def create(self, messages, model="grok-build", stream=False):
+        prompt = messages[-1]["content"] if len(messages) == 1 else "\n".join(
+            f"{m['role']}: {m['content']}" for m in messages
+        )
+        cmd = self._build_cmd(prompt, model, stream)
+
+        if stream:
+            return self._stream(cmd)
+
+        proc = await asyncio.create_subprocess_exec(
+            *cmd, env=self.env, stdout=asyncio.subprocess.PIPE
+        )
+        stdout, _ = await proc.communicate()
+        data = json.loads(stdout.decode()) if stdout else {"text": ""}
+        return {
+            "choices": [{
+                "message": {"role": "assistant", "content": data.get("text", "")},
+                "finish_reason": "stop"
+            }]
+        }
+
+    async def _stream(self, cmd):
+        proc = await asyncio.create_subprocess_exec(
+            *cmd, env=self.env, stdout=asyncio.subprocess.PIPE
+        )
+        async for line in proc.stdout:
+            if not line.strip():
+                continue
+            event = json.loads(line)
+            if event.get("type") == "text":
+                yield {"choices": [{"delta": {"content": event["data"]}}]}
+            elif event.get("type") == "end":
+                yield {"choices": [{"delta": {}, "finish_reason": "stop"}]}
+
+
+# Usage
+async def main():
+    client = GrokChat(cwd=".")
+
+    # Non-streaming
+    response = await client.create([{"role": "user", "content": "What files are here?"}])
+    print(response["choices"][0]["message"]["content"])
+
+    # Streaming
+    async for chunk in await client.create(
+        [{"role": "user", "content": "List files"}], stream=True
+    ):
+        print(chunk["choices"][0]["delta"].get("content", ""), end="", flush=True)
+
+asyncio.run(main())
+```
+
 #### TypeScript - Headless
+
+```typescript
+import { execa } from "execa";
+
+class GrokChat {
+  constructor(private cwd = ".") {}
+
+  private buildArgs(prompt: string, model: string, stream: boolean) {
+    return [
+      "-p",
+      prompt,
+      "-m",
+      model,
+      "--cwd",
+      this.cwd,
+      "--output-format",
+      stream ? "streaming-json" : "json",
+      "--always-approve",
+    ];
+  }
+
+  async create(
+    messages: { role: string; content: string }[],
+    { model = "grok-build", stream = false } = {},
+  ) {
+    const prompt =
+      messages.length === 1
+        ? messages[0].content
+        : messages.map((m) => `${m.role}: ${m.content}`).join("\n");
+
+    if (stream) return this.streamResponse(prompt, model);
+
+    const { stdout } = await execa(
+      "grok",
+      this.buildArgs(prompt, model, false),
+    );
+    const data = JSON.parse(stdout || '{"text":""}');
+    return {
+      choices: [
+        {
+          message: { role: "assistant", content: data.text || "" },
+          finish_reason: "stop",
+        },
+      ],
+    };
+  }
+
+  async *streamResponse(prompt: string, model: string) {
+    const proc = execa("grok", this.buildArgs(prompt, model, true));
+    for await (const chunk of proc.stdout!) {
+      for (const line of chunk.toString().split("\n").filter(Boolean)) {
+        const event = JSON.parse(line);
+        if (event.type === "text") {
+          yield { choices: [{ delta: { content: event.data } }] };
+        } else if (event.type === "end") {
+          yield { choices: [{ delta: {}, finish_reason: "stop" }] };
+        }
+      }
+    }
+  }
+}
+
+// Usage
+const client = new GrokChat(".");
+
+// Non-streaming
+const response = await client.create([
+  { role: "user", content: "What files are here?" },
+]);
+console.log(response.choices[0].message.content);
+
+// Streaming
+for await (const chunk of await client.create(
+  [{ role: "user", content: "List files" }],
+  { stream: true },
+)) {
+  process.stdout.write(chunk.choices[0].delta?.content || "");
+}
+```
 
 ---
 
@@ -659,13 +1010,290 @@ Use headless mode for simple integrations. Spawns `grok -p` and parses JSON outp
 
 Use the Agent Client Protocol for full access to tool calls, thoughts, plans, and permissions.
 
+#### Python - ACP SDK
+
+```python
+import asyncio
+import json
+
+class GrokACPChat:
+    """Rich OpenAI-compatible wrapper using ACP protocol."""
+
+    def __init__(self, cwd="."):
+        self.cwd = cwd
+        self.proc = None
+        self.session_id = None
+
+    async def init(self):
+        self.proc = await asyncio.create_subprocess_exec(
+            "grok", "agent", "stdio",
+            stdin=asyncio.subprocess.PIPE,
+            stdout=asyncio.subprocess.PIPE
+        )
+
+        # Initialize
+        await self._request("initialize", {
+            "protocolVersion": "1",
+            "clientCapabilities": {
+                "fs": {"readTextFile": True, "writeTextFile": True},
+                "terminal": True
+            }
+        })
+
+        # Create session
+        result = await self._request("session/new", {
+            "cwd": self.cwd,
+            "mcpServers": []
+        })
+        self.session_id = result["sessionId"]
+        return self
+
+    async def _request(self, method, params):
+        msg = json.dumps({"jsonrpc": "2.0", "id": 1, "method": method, "params": params})
+        self.proc.stdin.write(f"{msg}\n".encode())
+        await self.proc.stdin.drain()
+
+        line = await self.proc.stdout.readline()
+        return json.loads(line).get("result", {})
+
+    async def create(self, messages, model="grok-build", stream=False):
+        prompt = [{"type": "text", "text": m["content"]} for m in messages]
+
+        # For streaming, yield chunks as they arrive
+        if stream:
+            return self._stream(prompt)
+
+        result = await self._request("session/prompt", {
+            "sessionId": self.session_id,
+            "prompt": prompt
+        })
+        return {
+            "choices": [{
+                "message": {"role": "assistant", "content": result.get("text", "")},
+                "finish_reason": result.get("stopReason", "stop").lower()
+            }]
+        }
+
+    async def _stream(self, prompt):
+        # Send prompt request
+        msg = json.dumps({
+            "jsonrpc": "2.0", "id": 1,
+            "method": "session/prompt",
+            "params": {"sessionId": self.session_id, "prompt": prompt}
+        })
+        self.proc.stdin.write(f"{msg}\n".encode())
+        await self.proc.stdin.drain()
+
+        # Read streaming updates
+        while True:
+            line = await self.proc.stdout.readline()
+            if not line:
+                break
+
+            data = json.loads(line)
+
+            # Handle notifications
+            if data.get("method") == "session/update":
+                update = data["params"]["update"]
+                session_update = update.get("sessionUpdate")
+
+                if session_update == "agent_message_chunk":
+                    yield {"choices": [{"delta": {"content": update["content"]["text"]}}]}
+                elif session_update == "agent_thought_chunk":
+                    yield {"choices": [{"delta": {"thought": update["content"]["text"]}}]}
+                elif session_update == "tool_call":
+                    yield {"choices": [{"delta": {"tool_call": {
+                        "name": update["tool"],
+                        "status": "pending"
+                    }}}]}
+                elif session_update == "plan":
+                    yield {"choices": [{"delta": {"plan": update["entries"]}}]}
+
+            # Handle final response
+            elif "result" in data:
+                yield {"choices": [{"delta": {}, "finish_reason": "stop"}]}
+                break
+
+
+# Usage
+async def main():
+    client = await GrokACPChat(cwd=".").init()
+
+    # Streaming with rich updates
+    async for chunk in await client.create(
+        [{"role": "user", "content": "Refactor the main function"}],
+        stream=True
+    ):
+        delta = chunk["choices"][0]["delta"]
+        if "content" in delta:
+            print(delta["content"], end="", flush=True)
+        if "thought" in delta:
+            print(f"\n[Thinking: {delta['thought']}]", end="")
+        if "tool_call" in delta:
+            print(f"\n[Tool: {delta['tool_call']}]")
+        if "plan" in delta:
+            print(f"\n[Plan: {delta['plan']}]")
+
+asyncio.run(main())
+```
+
 #### TypeScript - ACP SDK
+
+```typescript
+import { spawn, ChildProcess } from "child_process";
+import * as readline from "readline";
+
+class GrokACPChat {
+  private proc!: ChildProcess;
+  private sessionId!: string;
+  private rl!: readline.Interface;
+
+  constructor(private cwd = ".") {}
+
+  async init() {
+    this.proc = spawn("grok", ["agent", "stdio"]);
+    this.rl = readline.createInterface({ input: this.proc.stdout! });
+
+    // Initialize
+    await this.request("initialize", {
+      protocolVersion: "1",
+      clientCapabilities: {
+        fs: { readTextFile: true, writeTextFile: true },
+        terminal: true,
+      },
+    });
+
+    // Create session
+    const { sessionId } = await this.request("session/new", {
+      cwd: this.cwd,
+      mcpServers: [],
+    });
+    this.sessionId = sessionId;
+    return this;
+  }
+
+  private async request(method: string, params: any): Promise<any> {
+    return new Promise((resolve) => {
+      const msg = JSON.stringify({ jsonrpc: "2.0", id: 1, method, params });
+      this.proc.stdin!.write(msg + "\n");
+
+      this.rl.once("line", (line) => {
+        resolve(JSON.parse(line).result || {});
+      });
+    });
+  }
+
+  async create(
+    messages: { role: string; content: string }[],
+    { model = "grok-build", stream = false } = {},
+  ) {
+    const prompt = messages.map((m) => ({ type: "text", text: m.content }));
+
+    if (stream) return this.streamResponse(prompt);
+
+    const result = await this.request("session/prompt", {
+      sessionId: this.sessionId,
+      prompt,
+    });
+
+    return {
+      choices: [
+        {
+          message: { role: "assistant", content: result.text || "" },
+          finish_reason: result.stopReason?.toLowerCase() || "stop",
+        },
+      ],
+    };
+  }
+
+  async *streamResponse(prompt: { type: string; text: string }[]) {
+    const msg = JSON.stringify({
+      jsonrpc: "2.0",
+      id: 1,
+      method: "session/prompt",
+      params: { sessionId: this.sessionId, prompt },
+    });
+    this.proc.stdin!.write(msg + "\n");
+
+    for await (const line of this.rl) {
+      const data = JSON.parse(line);
+
+      if (data.method === "session/update") {
+        const update = data.params.update;
+        switch (update.sessionUpdate) {
+          case "agent_message_chunk":
+            yield { choices: [{ delta: { content: update.content?.text } }] };
+            break;
+          case "agent_thought_chunk":
+            yield { choices: [{ delta: { thought: update.content?.text } }] };
+            break;
+          case "tool_call":
+            yield {
+              choices: [
+                {
+                  delta: {
+                    tool_call: {
+                      name: update.tool,
+                      args: update.arguments,
+                      status: "pending",
+                    },
+                  },
+                },
+              ],
+            };
+            break;
+          case "plan":
+            yield { choices: [{ delta: { plan: update.entries } }] };
+            break;
+        }
+      } else if (data.result) {
+        yield { choices: [{ delta: {}, finish_reason: "stop" }] };
+        break;
+      }
+    }
+  }
+}
+
+// Usage
+const client = await new GrokACPChat(".").init();
+
+// Streaming with rich updates
+for await (const chunk of await client.create(
+  [{ role: "user", content: "Refactor main" }],
+  { stream: true },
+)) {
+  const delta = chunk.choices[0].delta;
+  if (delta.content) process.stdout.write(delta.content);
+  if (delta.thought) console.log(`\n[Thinking: ${delta.thought}]`);
+  if (delta.tool_call)
+    console.log(`\n[Tool: ${JSON.stringify(delta.tool_call)}]`);
+  if (delta.plan) console.log(`\n[Plan: ${JSON.stringify(delta.plan)}]`);
+}
+```
 
 ---
 
 ### ACP Protocol Reference
 
 Grok implements the [Agent Client Protocol (ACP)](https://agentclientprotocol.com), a standard for AI agent communication.
+
+#### Architecture
+
+```
+┌─────────────────────────────────────────┐
+│           ACP Client                    │
+│  (IDE, Editor, Custom Application)      │
+└──────────────────┬──────────────────────┘
+                   │ JSON-RPC over stdio
+┌──────────────────▼──────────────────────┐
+│           grok agent stdio              │
+│                                         │
+│  ┌─────────┐  ┌─────────┐  ┌─────────┐  │
+│  │ Session │  │  Tools  │  │   MCP   │  │
+│  │ Manager │  │ Registry│  │ Servers │  │
+│  └─────────┘  └─────────┘  └─────────┘  │
+└─────────────────────────────────────────┘
+```
 
 #### SDKs
 
@@ -741,7 +1369,7 @@ Each feature section below documents its own config. This section covers the gen
 
 ### Telemetry
 
-Configure telemetry destinations and credentials. Empty values disable the corresponding sink. Env vars take precedence over config values. `mixpanel_enabled` is `false`, so nothing is sent unless you supply values here or via env.
+Configure telemetry destinations and credentials. Empty values disable the corresponding sink. Env vars take precedence over config values. Builds from the public source tree carry no telemetry defaults. `mixpanel_enabled` is `false`, so nothing is sent unless you supply values here or via env.
 
 ```json
 {
@@ -755,7 +1383,7 @@ Configure telemetry destinations and credentials. Empty values disable the corre
 }
 ```
 
-This happens when building from source. Config-file and runtime env values override build-time defaults.
+Defaults can also be baked into the binary at compile time in the build environment (providing a Mixpanel token this way also enables Mixpanel by default). This happens when building from source. Config-file and runtime env values override build-time defaults.
 
 ### LSP Servers
 
@@ -764,6 +1392,7 @@ Grok can connect to Language Server Protocol (LSP) servers configured in JSON fi
 LSP support is used in multiple ways:
 
 - **Passive diagnostics** — after edits, Grok can surface language-server diagnostics such as errors and warnings.
+- **The `lsp` tool** — Grok can actively query the language server.
 
 Reference: [Language Server Protocol](https://microsoft.github.io/language-server-protocol/)
 
@@ -824,6 +1453,22 @@ If LSP tools are enabled but no usable server config is found, Grok emits a non-
 | `command` | Server binary to execute. For `stdio`, this must be available in `PATH` or be an absolute path. |
 | `extensionToLanguage` | Maps file extensions to LSP language IDs. |
 
+#### Optional fields
+
+| Field | Description |
+|-------|-------------|
+| `args` | Command-line arguments for the server process. |
+| `transport` | `stdio` (default) or `socket`. |
+| `env` | Extra environment variables for the server process. |
+| `initializationOptions` | JSON passed during LSP initialize. |
+| `settings` | Configuration sent via workspace settings updates. |
+| `workspaceFolder` | Override workspace folder path sent to the server. |
+| `workspaceOpen` | Solution or projects to load, for servers that need to be told explicitly (see below). |
+| `startupTimeout` | Max startup wait in milliseconds before startup is considered failed. |
+| `shutdownTimeout` | Max graceful shutdown wait in milliseconds. |
+| `restartOnCrash` | Whether to restart the server after a crash. |
+| `maxRestarts` | Maximum restart attempts before giving up. |
+
 #### Telling a server which solution to load (`workspaceOpen`)
 
 Most servers work out what to analyze from the workspace folder. A few do not, and instead load their workspace through a protocol extension. The C# server (`Microsoft.CodeAnalysis.LanguageServer`, "Roslyn") is the notable one: on its own it treats every file as a loose "miscellaneous file". It reports no project-level diagnostics at all, until it is told to open a solution or a set of projects.
@@ -852,6 +1497,14 @@ That server requires note that `--logLevel`, and that anything more verbose than
 #### Installing language servers
 
 Grok does not bundle language server binaries. You must install the server yourself and make sure the configured `command` is runnable on your machine.
+
+Examples:
+
+| Language | Server | Install example |
+|----------|--------|-----------------|
+| TypeScript | `typescript-language-server` | `npm install -g typescript-language-server typescript` |
+| Python | `pyright` | `npm install -g pyright` or `pip install pyright` |
+| Rust | `rust-analyzer` | Install `rust-analyzer` using your platform's recommended method |
 
 #### Notes
 
@@ -909,8 +1562,6 @@ Grok scans for agent rules in this order:
 2. If inside a git repo: every directory from the repo root → current working directory (inclusive)
 3. If **not** inside a git repo: only the current working directory
 
-Within each directory, Grok checks for these filenames:
-
 Ordering matters: files found later (deeper directories) come last, so they effectively take precedence if instructions conflict. Files ignored by gitignore are skipped. Each file is capped at 10,000 characters (truncated with a warning if exceeded).
 
 > **Note:** The `--rules` flag appends _additional_ rules on top of any discovered agent files, so you can combine both for session-specific customization.
@@ -922,6 +1573,15 @@ Ordering matters: files found later (deeper directories) come last, so they effe
 Skills are reusable prompt packages that extend Grok with specialized workflows, domain knowledge, and tool integrations. Use them to encode repeatable procedures that will otherwise require re-explaining each session.
 
 ### Skill Locations
+
+Grok discovers skills from these directories (in priority order):
+
+| Location                    | Scope | Priority |
+| --------------------------- | ----- | -------- |
+| `./.grok/skills/`           | Local | Highest  |
+| `<repo_root>/.grok/skills/` | Repo  | Medium   |
+| `~/.grok/skills/`           | User  | Lowest   |
+| `~/.claude/skills/`         | User  | Lowest   |
 
 Skills with the same name are deduplicated — higher priority locations override lower ones.
 
@@ -1006,7 +1666,12 @@ Users can reference skills as `/skill-name` (e.g., `/commit`). When you see this
 
 Agent profiles control the system prompt, toolset, and behavior of a session. A profile is a `.md` file with YAML frontmatter, or a named agent discovered from disk.
 
-Grok discovers agent definitions from `.grok/agents/` (project), `~/.grok/agents/` (user), and built-in agents.
+Grok discovers agent definitions from `.grok/agents/` (project), `~/.grok/agents/` (user), and built-in agents. Priority (highest wins):
+
+1. `--agent-profile <PATH>` CLI flag
+2. `agents.selection` in `config.json`
+3. `GROK_AGENT` env var
+4. Default `grok-build` agent
 
 ```json
 {
@@ -1048,7 +1713,7 @@ export GROK_SUBAGENTS=0              # Environment variable
 
 ### Usage Frequency
 
-`usage_frequency` does not gate the tool.
+`usage_frequency` does not gate the tool. It tunes how strongly the system prompt and tool wording nudge the model toward spawning subagents.
 
 ```json
 {
@@ -1120,6 +1785,14 @@ Both are also discovered from `.grok/roles/*.json` and `.grok/personas/*.json` f
 
 Plugins extend Grok with more tools, skills, and MCP servers from external packages.
 
+### Plugin Locations
+
+| Location                    | Scope   |
+| --------------------------- | ------- |
+| `.grok/plugins/`            | Project |
+| `~/.grok/plugins/`          | User    |
+| `--plugin-dir <PATH>` (CLI) | Session |
+
 ### Configuration
 
 ```json
@@ -1136,6 +1809,8 @@ Plugins extend Grok with more tools, skills, and MCP servers from external packa
   }
 }
 ```
+
+Manage plugins at runtime.
 
 ---
 
@@ -1356,6 +2031,12 @@ Point Grok at a custom OpenAI-compatible `/v1/models` endpoint instead of the de
 
 **Environment variables:**
 
+| Variable | Required | Description |
+|----------|----------|-------------|
+| `GROK_MODELS_BASE_URL` | Yes | Base URL for inference / chat completions (e.g. `https://api.acme.com/v1`). The model list is fetched from `{base_url}/models` automatically |
+| `XAI_API_KEY` | Yes | API key sent as `Authorization: Bearer` to the custom endpoint |
+| `GROK_MODELS_LIST_URL` | No | Override the model list URL if it differs from `{base_url}/models` |
+
 **Setup:**
 
 ```bash
@@ -1420,7 +2101,13 @@ MCP servers are configured in `~/.grok/config.json`:
 
 ### Project-Scoped MCP Servers
 
-MCP servers can also be configured per-project in `.grok/config.json`.
+MCP servers can also be configured per-project in `.grok/config.json`. Grok walks from the current directory up to the git repo root, loading `.grok/config.json` at each level:
+
+| Location                        | Scope             | Priority |
+| ------------------------------- | ----------------- | -------- |
+| `~/.grok/config.json`           | All projects      | Lowest   |
+| `<repo-root>/.grok/config.json` | This repository   | ↑        |
+| `<cwd>/.grok/config.json`       | Current directory | Highest  |
 
 If a project defines a server with the same name as a global one, the project version **replaces** it fully (fields are not merged — omitted fields get defaults, not the global values). Servers defined only in the global config are unaffected.
 
@@ -1641,7 +2328,7 @@ Omit `workspace` or `global` and it defaults to workspace scope.
 
 ### Searching memory
 
-Grok searches memory automatically on the first turn of each session and after compaction. The first-turn injection can be disabled or given its own score threshold under `memory.initial_injection`. You can also invoke `memory_search` and `memory_get` directly via the model prompt:
+Grok searches memory automatically on the first turn of each session and after compaction. The first-turn injection can be disabled or given its own score threshold under `[memory.initial_injection]`. You can also invoke `memory_search` and `memory_get` directly via the model prompt:
 
 ```
 Search memory for "auth middleware patterns"
@@ -1660,6 +2347,22 @@ grok memory edit --global
 # Show memory statistics: file count, chunk count, and index size
 grok memory stats
 ```
+
+### Configuration reference
+
+Key options under `[memory]` in `~/.grok/config.json`:
+
+| Key | Default | Description |
+|-----|---------|-------------|
+| `enabled` | `false` | Enable memory (can also be set via CLI flag or env var) |
+| `session.save_on_end` | `true` | Write the lightweight metadata summary on session end |
+| `watcher.enabled` | `true` | Watch `~/.grok/memory/` for external edits and reindex on search |
+| `search.max_results` | `6` | Default number of memory results to return |
+| `search.min_score` | `0.35` | Minimum relevance score threshold for explicit memory search and recovery paths |
+| `initial_injection.enabled` | `true` | Enable automatic first-turn memory injection |
+| `initial_injection.min_score` | `0.0` | Override score threshold for first-turn injection (`0.0` preserves historical no-filter behavior) |
+| `embedding.model` | *(unset)* | Embedding model for vector search; unset disables embeddings |
+| `embedding.dimensions` | `1024` | Embedding vector dimensions |
 
 ### Observability
 
@@ -1686,6 +2389,17 @@ grok --sandbox read-only
 # Maximum isolation (read/write CWD only, no child network)
 grok --sandbox strict
 ```
+
+### Built-in Profiles
+
+| Profile         | FS Read            | FS Write                  | Child Network | Use Case                 |
+| --------------- | ------------------ | ------------------------- | ------------- | ------------------------ |
+| `off` (default) | Unrestricted       | Unrestricted              | Unrestricted  | No sandbox               |
+| `workspace`     | Everywhere         | CWD + `/tmp` + `~/.grok/` | Allowed       | Normal development       |
+| `read-only`     | Everywhere         | `~/.grok/` only           | Blocked       | Exploration, code review |
+| `strict`        | CWD + system paths | CWD + `/tmp` + `~/.grok/` | Blocked       | Untrusted code           |
+
+Sensitive paths are always write-protected regardless of profile.
 
 ### Custom Profiles
 
@@ -1766,6 +2480,19 @@ Plugin-provided components appear in their respective sections with a `[plugin: 
 
 Grok automatically discovers configuration from Claude Code directories alongside native `.grok/` paths. No extra setup is needed.
 
+### What is picked up
+
+| Component         | Claude Code location                                 | How Grok uses it                 |
+| ----------------- | ---------------------------------------------------- | -------------------------------- |
+| **Skills**        | `.claude/skills/`, `~/.claude/skills/`               | Loaded as skills (same as `.grok/skills/`) |
+| **Agents**        | `.claude/agents/`, `~/.claude/agents/`               | Loaded as subagents              |
+| **Plugins**       | `.claude/plugins/`, `~/.claude/plugins/`             | Discovered with all components   |
+| **Installed plugins** | `~/.claude/plugins/installed_plugins.json`        | Each `installPath` is loaded     |
+| **Marketplaces**  | `~/.claude/plugins/known_marketplaces.json`          | Plugin dirs from `installLocation` |
+| **MCP servers**   | `~/.claude.json`, `.mcp.json`                        | Loaded alongside `config.json`   |
+| **Project rules** | `CLAUDE.md`, `.claude/CLAUDE.md`                     | Loaded as project instructions   |
+| **Permissions**   | `.claude/settings.json`, `.claude/settings.local.json` | Fallback when no TOML config   |
+
 ### Plugin components
 
 Claude Code plugins can give skills (`skills/`), commands (`commands/`), agents (`agents/`), hooks (`hooks/hooks.json`), MCP servers (`.mcp.json`), and LSP servers (`.lsp.json`). Grok at runtime discovers all component types.
@@ -1774,9 +2501,44 @@ Claude Code plugins can give skills (`skills/`), commands (`commands/`), agents 
 
 ## Built-in Tools
 
+Grok includes these tools by default:
+
+| Tool             | Description                                                    |
+| ---------------- | -------------------------------------------------------------- |
+| `read_file`      | Read file contents with line numbers                           |
+| `search_replace` | Make precise edits to files                                    |
+| `grep_search`    | Search with regex patterns (ripgrep)                           |
+| `list_dir`       | List directory contents                                        |
+| `bash`           | Execute shell commands                                         |
+| `web_search`     | Search the web for up-to-date information                      |
+| `web_fetch`      | Fetch a specific URL and return its content as markdown        |
+| `todo_write`     | Create and manage task lists                                   |
+| `task`           | Launch subagent sessions (requires `--subagents`)              |
+| `kill_task`      | Terminate a running background task or subagent                |
+| `get_task_output` | Get output and status from a background task or subagent      |
+| `memory_search`  | Search cross-session memory (requires `--experimental-memory`) |
+| `memory_get`     | Read a memory file by path                                     |
+| `search_tool`    | Discover available integration tools (MCP)                     |
+| `use_tool`       | Call an integration tool discovered via `search_tool`           |
+| `lsp`            | Code intelligence via language servers (requires `lsp_tools`)  |
+
 ### Controlling Available Tools
 
 In headless mode, you can restrict or remove tools with the `--tools` (allowlist) and `--disallowed-tools` (denylist) flags. See [Headless Mode](#headless-mode) for details and examples.
+
+In agent profiles, use the `tools` and `disallowedTools` frontmatter fields:
+
+```yaml
+---
+tools:
+  - read_file
+  - grep_search
+  - list_dir
+disallowedTools:
+  - web_search
+  - Agent(explore)
+---
+```
 
 ### `web_fetch`
 
@@ -1788,7 +2550,7 @@ When no custom `allowed_domains` is set, the tool permits a default allowlist of
 
 ## Session Persistence
 
-Grok automatically persists conversations to disk.
+Grok automatically persists conversations to disk. This works across all modes: TUI, headless, and agent stdio.
 
 ### Storage Layout
 
@@ -1869,9 +2631,52 @@ The agent persists all session updates automatically. Clients can reconnect and 
 
 ## File Locations
 
+| Path                  | Description                                         |
+| --------------------- | --------------------------------------------------- |
+| `~/.grok/config.json` | Configuration file                                  |
+| `~/.grok/sessions/`   | Persisted sessions (organized by working directory) |
+| `~/.grok/auth.json`   | Authentication credentials (auto-managed)           |
+| `~/.grok/memory/`     | Cross-session memory files and index                |
+| `~/.grok/skills/`     | User-scoped skill definitions                       |
+| `~/.grok/plugins/`    | User-scoped plugins                                 |
+| `~/.grok/agents/`     | User-scoped agent definitions                       |
+| `.grok/config.json`   | Project-scoped config (MCP servers)                 |
+| `.grok/skills/`       | Project-scoped skill definitions                    |
+| `.grok/plugins/`      | Project-scoped plugins                              |
+| `.grok/agents/`       | Project-scoped agent definitions                    |
+| `.grok/hooks/`        | Project-scoped hooks                                |
+| `.grok/lsp.json`      | LSP server configuration                            |
+| `~/.claude/skills/`   | User-scoped skills (Claude Code compat)             |
+| `~/.claude/plugins/`  | User-scoped plugins (Claude Code compat)            |
+| `~/.claude.json`      | MCP servers (Claude Code compat)                    |
+| `.mcp.json`           | Project-scoped MCP servers (Claude Code compat)     |
+
 ---
 
 ## Environment Variables
+
+| Variable                         | Description                                                                                              |
+| -------------------------------- | -------------------------------------------------------------------------------------------------------- |
+| `XAI_API_KEY`         | API key from [console.example.invalid](https://console.example.invalid). Used for custom endpoint auth and API key login      |
+| `GROK_CLI_CHAT_PROXY_BASE_URL`  | The cli-chat-proxy URL. No default: unset, nothing is sent to a proxy |
+| `GROK_MODELS_BASE_URL`          | Custom base URL for inference. Model list auto-fetched from `{base_url}/models` (see [Custom Models Endpoint](#custom-models-endpoint)) |
+| `GROK_MODELS_LIST_URL`          | Override the model list URL if it differs from `{GROK_MODELS_BASE_URL}/models`                                              |
+| `GROK_AUTH_PROVIDER_COMMAND`     | External auth binary (alternative to config file). See [External Auth Provider](#external-auth-provider) |
+| `GROK_AUTH_TOKEN_TTL`            | Token lifetime in seconds for external auth providers that output bare tokens. See [External Auth Provider](#external-auth-provider) |
+| `GROK_AUTH_EARLY_INVALIDATION_SECS` | Seconds before `expires_at` to consider a token expired (default: `300`). See [Automatic Credential Refresh](#automatic-credential-refresh) |
+| `GROK_OIDC_ISSUER`              | OIDC issuer URL (alternative to config file). See [OIDC](#oidc-customer-sso)                             |
+| `GROK_OIDC_CLIENT_ID`           | OIDC client ID (alternative to config file). See [OIDC](#oidc-customer-sso)                              |
+| `GROK_HOME`                     | Override config directory (default: `~/.grok`)                                                           |
+| `GROK_SUBAGENTS`                | Enable (`1`) or disable (`0`) subagent/task tool support                                                 |
+| `GROK_MEMORY`                   | Enable (`1`) or disable (`0`) cross-session memory                                                       |
+| `GROK_AGENT`                    | Custom agent definition path or name (see [Agent Profiles](#agent-profiles))                             |
+| `GROK_WEB_FETCH`                | Enable (`1`) or disable (`0`) the `web_fetch` tool                                                       |
+| `GROK_WEB_FETCH_PROXY`          | Egress proxy URL for `web_fetch` requests (overridden by `[toolset.web_fetch] proxy_endpoint`)           |
+| `GROK_RESPECT_GITIGNORE`        | Disable `.gitignore` filtering in tools when set to `0`                                                  |
+| `GROK_FEEDBACK_ENABLED`         | Enable (`1`) or disable (`0`) feedback system independently from telemetry                               |
+| `GROK_LOG_FILE`                 | Enable file logging by providing a file path (the value is used verbatim as the path)                    |
+| `GROK_DEBUG_LOG`                | Debug firehose (set by `--debug`): truthy routes per-session logs to `~/.grok/debug/<sessionId>.txt`, a path writes that one file |
+| `RUST_LOG`                      | Log filter for stderr (headless `-p` defaults to `off`, other non-TUI modes to `error`; TUI captures stderr) and for the `GROK_LOG_FILE` log; the `--debug` firehose ignores it |
 
 ---
 
