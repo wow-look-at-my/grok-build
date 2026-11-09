@@ -19,8 +19,6 @@ portable-pty = { workspace = true }
 prost = { workspace = true }
 rcgen = { workspace = true }
 regex = { workspace = true }
-# The recording proxy forwards each request upstream with it.
-request = { workspace = true }
 # `ring` feature: the TLS mock builds its server config on ring.
 rustls = { workspace = true, features = ["ring"] }
 serde = { workspace = true }
@@ -32,10 +30,13 @@ tokio-util = { workspace = true, features = ["compat"] }
 tracing = { workspace = true }
 url = { workspace = true }
 xai-acp-lib = { workspace = true }
+# The recording proxy forwards each request upstream with it.
+xai-grok-net = { workspace = true }
 xai-tty-utils = { workspace = true }
 xai-spawn = { workspace = true }
 
 [dev-dependencies]
+request = { workspace = true }
 # `test-util` enables the paused clock the recorder's deadline tests run on.
 tokio = { workspace = true, features = ["test-util"] }
 [features]

@@ -5,8 +5,9 @@ use std::sync::{Arc, Mutex};
 use axum::Router;
 use axum::body::Body;
 use axum::extract::{Request, State};
-use axum::http::{HeaderName, StatusCode, header};
+use axum::http::{HeaderMap, HeaderName, StatusCode, header};
 use axum::response::{IntoResponse, Response};
+use xai_grok_net::{Auth, ClientOptions, HttpClient, is_credential_header};
 
 use crate::loopback::{LoopbackServer, header_text};
 
@@ -28,7 +29,7 @@ pub struct RecordedRequest {
 
 struct ProxyState {
     upstream: String,
-    client: request::Client,
+    client: HttpClient,
     log: Mutex<Vec<RecordedRequest>>,
 }
 
@@ -55,14 +56,32 @@ async fn forward(State(state): State<Arc<ProxyState>>, req: Request) -> Response
         .uri
         .path_and_query()
         .map_or_else(|| parts.uri.path().to_owned(), |pq| pq.as_str().to_owned());
-    let mut upstream = state
-        .client
-        .request(parts.method.clone(), format!("{}{path}", state.upstream));
+    // xai-grok-net takes the credential headers only as an `Auth`.
+    let mut credentials = HeaderMap::new();
+    let mut headers = HeaderMap::new();
     for (name, value) in &parts.headers {
-        if !hop_by_hop(name) {
-            upstream = upstream.header(name, value);
+        if hop_by_hop(name) {
+            continue;
+        }
+        if is_credential_header(name) {
+            credentials.append(name.clone(), value.clone());
+        } else {
+            headers.append(name.clone(), value.clone());
         }
     }
+    let auth = if credentials.is_empty() {
+        Auth::None
+    } else {
+        Auth::Configured(credentials)
+    };
+    let upstream = state
+        .client
+        .request(
+            parts.method.clone(),
+            format!("{}{path}", state.upstream),
+            auth,
+        )
+        .headers(headers);
     let read = |name: &str| parts.headers.get(name).map(header_text);
     let mut record = RecordedRequest {
         method: parts.method.to_string(),
@@ -100,13 +119,7 @@ async fn forward(State(state): State<Arc<ProxyState>>, req: Request) -> Response
 impl RecordingProxy {
     /// Forward every request to `upstream` (`scheme://host:port`) with its path unchanged.
     pub async fn start(upstream: &str) -> anyhow::Result<Self> {
-        // No automatic decoding: the client must see exactly what the upstream sent.
-        let client = request::Client::builder()
-            .no_gzip()
-            .no_brotli()
-            .no_deflate()
-            .no_zstd()
-            .build()?;
+        let client = HttpClient::build(ClientOptions::default())?;
         let state = Arc::new(ProxyState {
             upstream: upstream.trim_end_matches('/').to_owned(),
             client,

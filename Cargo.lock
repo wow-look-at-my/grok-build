@@ -12744,6 +12744,7 @@ dependencies = [
  "tracing",
  "url",
  "xai-acp-lib",
+ "xai-grok-net",
  "xai-spawn",
  "xai-tty-utils",
 ]
