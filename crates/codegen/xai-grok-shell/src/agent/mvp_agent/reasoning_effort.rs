@@ -28,6 +28,23 @@ impl ModelsManager {
         resolve_reasoning_effort(need, &self.effort_support(model_id))
     }
 
+    /// The effort a config for `model_id` carries when nothing chose one: the
+    /// catalog's default for the model, else [`ReasoningNeed::Default`].
+    /// `None` only for a model that takes no effort. Reasoning goes off only
+    /// through an explicit `none`.
+    pub(crate) fn default_effort_for(&self, model_id: &str) -> Option<ReasoningEffort> {
+        if !self.model_supports_reasoning_effort(model_id) {
+            return None;
+        }
+        Some(
+            self.model_default_reasoning_effort(model_id)
+                .unwrap_or_else(|| self.reasoning_effort_for(ReasoningNeed::Default, model_id)),
+        )
+    }
+
+    /// Apply `effort` to `sampling`. With no `effort`, a config that carries
+    /// none takes [`Self::default_effort_for`], so a model that takes an
+    /// effort never goes out without one.
     pub(crate) fn apply_supported_effort(
         &self,
         sampling: &mut SamplerConfig,
@@ -35,8 +52,13 @@ impl ModelsManager {
         session_id: &acp::SessionId,
         target: EffortTarget,
     ) {
-        let Some(effort) = effort else {
-            return;
+        let effort = match effort {
+            Some(effort) => effort,
+            None if sampling.reasoning_effort.is_some() => return,
+            None => match self.default_effort_for(&sampling.model) {
+                Some(effort) => effort,
+                None => return,
+            },
         };
         if !self.model_supports_reasoning_effort(&sampling.model) {
             // SummaryClient stays quiet; the spawn or switch that carried this effort already warned that the model does not support it

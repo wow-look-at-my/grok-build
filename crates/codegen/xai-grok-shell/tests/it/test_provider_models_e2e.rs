@@ -142,6 +142,60 @@ async fn provider_listed_and_configured_models_send_only_to_the_provider() {
     }
 }
 
+/// The provider lists an effort menu with no default, and nothing picks an
+/// effort. The prompt must still carry one: no effort sends no thinking on the
+/// Messages API. Only an explicit `none` turns reasoning off.
+#[tokio::test]
+async fn an_effort_capable_model_sends_an_effort_when_none_was_chosen() {
+    let menu = ["none", "low", "medium", "high"]
+        .into_iter()
+        .map(serde_json::Value::from)
+        .collect();
+    let provider = MockInferenceServer::start_with_models(vec![
+        MockModelEntry::new("effort-model")
+            .with_supports_reasoning_effort(true)
+            .with_reasoning_efforts(menu),
+    ])
+    .await
+    .expect("start provider mock");
+    let mut sandbox = TestSandbox::builder().git().build();
+    allow(&mut sandbox, &provider.url());
+    std::fs::write(
+        sandbox.grok_home().join("config.toml"),
+        format!(
+            r#"[models]
+default = "internal/effort-model"
+
+[model_providers.internal]
+base_url = "{url}"
+api_key = "{PROVIDER_KEY}"
+"#,
+            url = provider.url()
+        ),
+    )
+    .expect("write config.toml");
+
+    let result = run_prompt(&sandbox, None).await;
+    assert_headless_success(&result, "effort-capable default", Some(&provider));
+
+    let bodies = provider.request_bodies();
+    let sent = bodies
+        .iter()
+        .rev()
+        .find(|b| b.get("model").and_then(|m| m.as_str()) == Some("effort-model"))
+        .unwrap_or_else(|| {
+            panic!(
+                "the prompt must reach the provider:\n{}",
+                provider.request_log_summary()
+            )
+        });
+    let effort = sent.get("reasoning_effort").and_then(|e| e.as_str());
+    assert!(
+        effort.is_some_and(|e| e != "none"),
+        "an effort-capable model must send a real effort when none was chosen, got {effort:?}; body:\n{sent:#}"
+    );
+}
+
 /// No first-party URL is set and no default is named. The session must start
 /// on a provider model, because the built-in models have nowhere to go.
 #[tokio::test]
