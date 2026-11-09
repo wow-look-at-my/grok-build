@@ -1499,19 +1499,20 @@ impl SamplingClient {
             tracing::error!("Failed to serialize request body: {}", e);
         })?;
         if let Some(json) = request.body.take() {
-            let body = if should_compress(self.defaults.request_compression, json.len()) {
-                match compress_body(&json).await {
-                    Some(compressed) => {
-                        request
-                            .headers
-                            .insert(CONTENT_ENCODING, HeaderValue::from_static("zstd"));
-                        compressed
+            let body =
+                if should_compress(self.defaults.request_compression, &request.url, json.len()) {
+                    match compress_body(&json).await {
+                        Some(compressed) => {
+                            request
+                                .headers
+                                .insert(CONTENT_ENCODING, HeaderValue::from_static("zstd"));
+                            compressed
+                        }
+                        None => json,
                     }
-                    None => json,
-                }
-            } else {
-                json
-            };
+                } else {
+                    json
+                };
             request.body = Some(body);
         }
         Ok(request)
