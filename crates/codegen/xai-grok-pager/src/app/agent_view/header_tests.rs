@@ -248,12 +248,12 @@ fn overlay_header_omits_title_when_unnamed_and_switcher_when_alone() {
     assert!(agent.hit_dashboard.rect.is_some());
 }
 /// On a narrow terminal the title yields first (it is capped at half the left budget), so the location survives; the right-hand
-/// group — switcher and `[Dashboard]` — stays present and clickable.
+/// group — the switcher, whose middle is the dashboard button — stays present and clickable.
 #[test]
 fn narrow_overlay_header_caps_title_and_keeps_location_and_buttons() {
     let _theme = crate::theme::cache::pin_theme();
     let registry = ActionRegistry::defaults();
-    let mut agent = agent_at(60);
+    let mut agent = agent_at(46);
     let header = OverlayHeader {
         title: Some("A generated title long enough to need trimming here"),
         position: Some((2, 5)),
