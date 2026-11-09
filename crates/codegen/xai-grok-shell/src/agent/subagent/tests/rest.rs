@@ -2219,6 +2219,30 @@ async fn read_parent_sampling_config_fallback_uses_session_model_id() {
     assert_eq!(model_id.0.as_ref(), "composer-2-fast");
     assert_ne!(model_id.0.as_ref(), "auto");
 }
+/// A child on a model with no default effort takes the parent's effort, else
+/// the root default. With none, a Messages request carries no `thinking`.
+#[tokio::test]
+async fn a_child_without_a_model_default_takes_an_effort() {
+    use xai_grok_sampling_types::ReasoningEffort;
+    let mut ctx = ctx_with_toggle(HashMap::new());
+    ctx.parent_chat_state = None;
+
+    ctx.sampling_config.reasoning_effort = Some(ReasoningEffort::High);
+    ctx.models_manager
+        .set_current_reasoning_effort(Some(ReasoningEffort::Low));
+    assert_eq!(
+        handle_request::child_effort_fallback(&ctx).await,
+        Some(ReasoningEffort::High),
+        "the parent's effort comes first"
+    );
+
+    ctx.sampling_config.reasoning_effort = None;
+    assert_eq!(
+        handle_request::child_effort_fallback(&ctx).await,
+        Some(ReasoningEffort::Low),
+        "with no parent effort, the root default applies"
+    );
+}
 #[tokio::test]
 async fn read_parent_sampling_config_ignores_global_default() {
     let mut models = indexmap::IndexMap::new();

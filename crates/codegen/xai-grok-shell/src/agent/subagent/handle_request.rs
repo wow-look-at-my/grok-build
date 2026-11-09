@@ -352,6 +352,22 @@ pub(super) fn admit_explicit_tool_model(
         }
     }
 }
+/// The effort for a child whose model has no default of its own: the parent's
+/// live effort, else the effort a new root session takes. Without one, a
+/// Messages request carries no `thinking` block, so the child gets no thinking
+/// and no thinking summary.
+pub(super) async fn child_effort_fallback(ctx: &SubagentSpawnContext) -> Option<ReasoningEffort> {
+    let parent_live = match ctx.parent_chat_state.as_ref() {
+        Some(chat_state) => chat_state
+            .get_sampling_config()
+            .await
+            .and_then(|config| config.reasoning_effort),
+        None => None,
+    };
+    parent_live
+        .or(ctx.sampling_config.reasoning_effort)
+        .or_else(|| ctx.models_manager.current_reasoning_effort())
+}
 /// A fork runs on the model its caller named, else on the parent's model.
 pub(super) fn fork_runtime_model(requested: Option<String>, parent: &str) -> String {
     requested
@@ -937,6 +953,15 @@ pub(crate) async fn run_shell_child(
                 )
             }
         }
+    }
+    if effective_sampling_config.reasoning_effort.is_none() {
+        let fallback = child_effort_fallback(&ctx).await;
+        ctx.models_manager.apply_supported_effort(
+            &mut effective_sampling_config,
+            fallback,
+            &acp::SessionId::new(request.id.clone()),
+            crate::sampling::EffortTarget::SummaryClient,
+        );
     }
     if effective_sampling_config.conversation_group_id.is_none() {
         let inherited_group_id = if let Some(parent_chat_state) = ctx.parent_chat_state.as_ref() {
