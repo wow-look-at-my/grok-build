@@ -128,19 +128,68 @@ pub(crate) fn zstd_compress(json: &[u8]) -> std::io::Result<Vec<u8>> {
 mod tests {
     use super::*;
 
+    const UNSEEN: &str = "https://never-advertised.invalid/v1/chat/completions";
+
     #[test]
     fn should_compress_requires_zstd_config_and_min_size() {
         assert!(should_compress(
             RequestCompression::Zstd,
+            UNSEEN,
             MIN_COMPRESS_BYTES
         ));
         assert!(!should_compress(
             RequestCompression::Zstd,
+            UNSEEN,
             MIN_COMPRESS_BYTES - 1
         ));
         assert!(!should_compress(
             RequestCompression::None,
+            UNSEEN,
             MIN_COMPRESS_BYTES * 4
         ));
+    }
+
+    fn headers(values: &[&str]) -> xai_grok_net::header::HeaderMap {
+        let mut map = xai_grok_net::header::HeaderMap::new();
+        for value in values {
+            map.append(
+                xai_grok_net::header::ACCEPT_ENCODING,
+                value.parse().unwrap(),
+            );
+        }
+        map
+    }
+
+    #[test]
+    fn accept_encoding_parsing() {
+        assert!(lists_zstd("zstd"));
+        assert!(lists_zstd("gzip, ZSTD;q=0.5"));
+        assert!(!lists_zstd("gzip, br"));
+        assert!(!lists_zstd("zstd;q=0"));
+        assert!(!lists_zstd("zstdx"));
+    }
+
+    #[test]
+    fn advertised_origin_compresses_until_it_stops_advertising() {
+        let url = "https://Proxy.Example:8317/v1/messages?beta=true";
+        let sibling = "https://proxy.example:8317/v1/models";
+        let big = MIN_COMPRESS_BYTES;
+        assert!(!should_compress(RequestCompression::None, url, big));
+
+        note_response_headers(sibling, &headers(&["zstd"]));
+        assert!(should_compress(RequestCompression::None, url, big));
+        assert!(!should_compress(RequestCompression::Off, url, big));
+        assert!(!should_compress(RequestCompression::None, url, big - 1));
+        assert!(!should_compress(
+            RequestCompression::None,
+            "https://proxy.example:9999/v1/messages",
+            big
+        ));
+
+        note_response_headers(url, &headers(&[]));
+        assert!(should_compress(RequestCompression::None, url, big));
+
+        note_response_headers(url, &headers(&["gzip"]));
+        assert!(!should_compress(RequestCompression::None, url, big));
     }
 }
