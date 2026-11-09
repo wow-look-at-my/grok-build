@@ -37,12 +37,6 @@ A caller with `retry_only_before_output` gets no backup. A takeover replaces out
 
 All events use the sampling log target.
 
-- `output_rate_backup_started`
-- `output_rate_backup_cancelled`
-- `output_rate_backup_adopted`
-- `output_rate_backup_failed`
-- `output_rate_backup_budget_spent`
-
 ## What the backup sends, and the prefix cache
 
 The backup sends the request that the slow call started with, byte for byte. It does not include the partial output of the slow call.

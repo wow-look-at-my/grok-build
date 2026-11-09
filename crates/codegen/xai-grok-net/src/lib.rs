@@ -17,7 +17,7 @@ pub use client::{ClientOptions, HttpClient, Request};
 pub use error::{AuthRefusal, Error};
 pub use session::register_session_token;
 
-/// The transport error a response body read (`json`, `text`, `bytes`) returns.
+/// The transport error a response body read returns.
 pub type TransportError = request::Error;
 
 pub use request::{

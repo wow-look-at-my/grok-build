@@ -54,7 +54,6 @@ const ALLOWED_BARE_COMMANDS: &[&str] = &["api"];
 
 /// Every flag a request may carry. An allowlist rather than a deny-list
 /// because the flags that matter are the ones that turn a read into a write.
-/// `-X POST`, `--method`, `--field`, `--input`.
 const ALLOWED_FLAGS: &[&str] = &[
     "--json",
     "--jq",
@@ -1090,9 +1089,8 @@ mod tests {
     #[test]
     fn worker_answers_dot_for_any_request_that_is_not_a_fixed_shape() {
         // The confined worker must never run an arbitrary command. Any request
-        // outside its shapes (`gh-status`, `gh-pr`, `gh <json argv>`) is
-        // answered with the nothing-usable sentinel: the jailed side degrades
-        // to "off", and nothing is executed.
+        // outside its shapes is answered with the nothing-usable sentinel: the
+        // jailed side degrades to "off", and nothing is executed.
         for line in [
             "run list --json",
             "--branch master",

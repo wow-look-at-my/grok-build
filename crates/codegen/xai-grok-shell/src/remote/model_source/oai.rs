@@ -136,10 +136,9 @@ impl OaiModelSource {
         );
         let mut models = Vec::with_capacity(models_response.data.len());
         for (idx, value) in models_response.data.into_iter().enumerate() {
-            // Synthetic-shaped entries (non-standard `context_length`,
-            // `max_output_length`, `reasoning_parameters.efforts` keys) are parsed
-            // through the Synthetic-scoped home so the extension keys stay out of
-            // the generic cross-provider fallback chains.
+            // Synthetic-shaped entries are parsed through the Synthetic-scoped
+            // home so the extension keys stay out of the generic cross-provider
+            // fallback chains.
             let parsed = if crate::agent::remote_config::is_synthetic_listing(&value) {
                 crate::agent::remote_config::parse_synthetic_model_entry(
                     &value,

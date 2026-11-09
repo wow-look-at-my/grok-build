@@ -129,8 +129,7 @@ impl<'a> Signer<'a> {
         hex(&hmac_sha256(&k_signing, &string_to_sign))
     }
 
-    /// The `Authorization` header for a request. `headers` holds every header to sign,
-    /// `host`, `x-amz-date` and `x-amz-content-sha256` included.
+    /// The `Authorization` header for a request.
     pub(crate) fn authorization(
         &self,
         method: &str,

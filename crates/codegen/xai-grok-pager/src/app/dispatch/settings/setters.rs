@@ -1943,8 +1943,6 @@ pub(in crate::app::dispatch) fn clear_default_model(app: &mut AppView) -> Vec<Ef
     }]
 }
 
-// The `web_search_model`, `session_summary_model`, and
-// `default_reasoning_effort` setters
 
 /// State-only mutation for one harness model slot. An empty `model_id`
 /// removes the entry, which is what the modal reads as "(no override)".
@@ -2201,8 +2199,6 @@ pub(in crate::app::dispatch) fn set_max_thoughts_width(app: &mut AppView, new: i
     }]
 }
 
-// min_output_tokens_per_sec, output_rate_sustained_secs,
-// output_rate_window_secs, output_rate_max_retries, ttft_timeout_secs.
 
 fn clamp_min_output_tokens_per_sec(value: i64) -> i64 {
     value.clamp(

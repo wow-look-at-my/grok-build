@@ -80,7 +80,7 @@ pub enum ConfigChangeEvent {
     HomeClaudeJsonChanged,
 }
 
-/// Watches `~/.grok/` for `auth.json`, `config.json`, and `models_cache.json`
+/// Watches `~/.grok/`
 /// Uses `notify-debouncer-mini` for built-in debounce that coalesces rapid editor writes (including write-then-rename patterns). Self-write suppression is intentionally omitted.
 /// editor writes (including write-then-rename patterns).
 pub struct ConfigFileWatcher {

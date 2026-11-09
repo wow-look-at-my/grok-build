@@ -9,7 +9,7 @@ use std::process::Command;
 
 use xai_grok_sandbox::jail::{JailDefaults, build_plan, parse_jail_args};
 
-/// Selects what a re-run of this binary does: `plan`, `plan-unfixed` or `save`.
+/// Selects what a re-run of this binary does.
 const MODE_ENV: &str = "JAIL_GROK_HOME_MODE";
 
 fn backend_is_usable() -> bool {

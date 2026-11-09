@@ -133,9 +133,7 @@ fn profile_confines(name: &str) -> bool {
 }
 
 /// Whether this process is confined by a profile that restricts **writes** to
-/// the workspace, `$GROK_HOME` and the temp dirs (`workspace`, `read-only`,
-/// `strict`, the `pathbox` jail, or a custom profile that extends one of
-/// them).
+/// the workspace, `$GROK_HOME` and the temp dirs.
 pub fn confines_home_writes() -> bool {
     if is_jailed() {
         return true;

@@ -24,13 +24,12 @@ pub struct Snapshot {
     /// Seconds remaining. Absent when no estimate can be made.
     #[serde(default)]
     pub eta_seconds: Option<f64>,
-    /// How the estimate was derived: `pace`, `ref-pace`, or `none`.
+    /// How the estimate was derived.
     pub eta_kind: String,
     /// Current speed against the reference, where above one is slower.
     pub pace: f64,
     /// Fraction of live lines matched.
     pub match_rate: f64,
-    /// `high`, `medium`, `low`, or `none`.
     pub confidence: String,
     /// Live lines seen.
     pub current_lines: u64,
