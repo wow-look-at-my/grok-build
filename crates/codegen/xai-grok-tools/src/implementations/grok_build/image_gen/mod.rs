@@ -16,11 +16,11 @@
 //! image into the project working directory when it needs a persistent asset.
 
 use base64::Engine as _;
-use xai_grok_net::header::{CONTENT_TYPE, HeaderMap, HeaderValue};
 use xai_tool_runtime::ToolError;
 
 use crate::attribution::{SharedAttributionCallback, ToolConsumer};
 use crate::implementations::grok_build::media_bearer::MediaBearer;
+use crate::implementations::grok_build::media_client::MediaEndpoint;
 use crate::types::SharedApiKeyProvider;
 
 use crate::types::output::{MediaGenOutput, ToolOutput};
@@ -33,9 +33,8 @@ use crate::types::tool::{ToolKind, ToolNamespace};
 const XAI_IMAGINE_MODEL: &str = "grok-imagine-image-quality";
 // Some Imagine models (e.g. `grok-imagine-image`, selectable via `model_override`) expand the prompt then generate,
 // and the proxy buffers the whole image before sending any bytes — so the client may receive nothing for well over a
-// minute. Keep these generous so a slow-but-progressing generation isn't cut off.
-const IMAGE_GEN_TIMEOUT_SECS: u64 = 300;
-const IMAGE_GEN_READ_TIMEOUT_SECS: u64 = 240;
+// minute. Keep this generous so a slow-but-progressing generation isn't cut off.
+pub(crate) const IMAGE_GEN_TIMEOUT_SECS: u64 = 300;
 const DEFAULT_IMAGE_DIR: &str = crate::session_output_dirs::IMAGE_OUTPUT_DIR;
 
 pub use xai_grok_tools_api::slash_commands::{
@@ -47,13 +46,11 @@ pub use xai_grok_tools_api::slash_commands::{
 /// upsell modal instead; this covers the natural-language path.
 pub(crate) const TIER_RESTRICTED_UPSELL: &str = "Image generation is a SuperGrok feature and isn't available on the free or X Basic tier. Let the user know they can unlock image and video generation by upgrading to SuperGrok: https://grok.invalid/supergrok?referrer=grok-build. Do not retry this tool.";
 
-/// HTTP client for xAI Imagine API. Cloned per-request; shares `Arc` state.
+/// Client for the xAI Imagine API. Cloned per request. Each request goes through a
+/// [`xai_grok_sampler::SamplingClient`], which takes a request slot and bills the call.
 #[derive(Clone)]
 pub struct ImageGenClient {
-    http: xai_grok_net::HttpClient,
-    /// Credential headers from `extra_headers`.
-    credential_headers: HeaderMap,
-    base_url: String,
+    endpoint: MediaEndpoint,
     /// Imagine model slug used by `generate()`. Selected at construction from
     /// `ImageGenConfig::model_override` (falling back to [`XAI_IMAGINE_MODEL`]). `image_edit` uses
     /// its own model and is unaffected.
@@ -69,10 +66,6 @@ pub struct ImageGenClient {
     /// `image_gen` / `image_edit` short-circuit before any HTTP call and return the SuperGrok
     /// upsell prose instead. See [`ImageGenClient::is_tier_restricted`].
     tier_restricted: bool,
-    /// Per-request [`SESSION_ID_HEADER`]; kept off `default_headers` so the
-    /// transport stays session-independent and cacheable.
-    session_header: Option<HeaderValue>,
-    defaults_have_session_header: bool,
 }
 
 impl ImageGenClient {
@@ -103,67 +96,27 @@ impl ImageGenClient {
             .filter(|m| !m.trim().is_empty())
             .unwrap_or_else(|| super::image_edit::XAI_IMAGINE_EDIT_MODEL.to_owned());
 
-        let mut headers = HeaderMap::new();
-        headers.insert(CONTENT_TYPE, HeaderValue::from_static("application/json"));
-
-        extra_headers.into_iter().try_for_each(|(key, value)| {
-            let header_name = xai_grok_net::header::HeaderName::from_bytes(key.as_bytes())
-                .map_err(|e| {
-                    xai_tool_runtime::ToolError::invalid_arguments(format!(
-                        "Invalid header name '{key}': {e}"
-                    ))
-                })?;
-            let header_value = HeaderValue::from_str(value).map_err(|e| {
-                xai_tool_runtime::ToolError::invalid_arguments(format!(
-                    "Invalid header value for '{key}': {e}"
-                ))
-            })?;
-            headers.insert(header_name, header_value);
-            Ok::<(), xai_tool_runtime::ToolError>(())
-        })?;
-
-        // Process-cached: timeouts are constants, so the headers key
-        // suffices; the session id is attached per request, not here.
-        let defaults_have_session_header = headers.contains_key(SESSION_ID_HEADER);
-        let credential_headers = crate::util::shared_http::take_credential_headers(&mut headers);
-        let key = crate::util::shared_http::cache_key("image_gen", &headers);
-        let http = crate::util::shared_http::cached_client(key, || {
-            xai_grok_net::HttpClient::build(
-                xai_grok_net::ClientOptions::default()
-                    .timeout(std::time::Duration::from_secs(IMAGE_GEN_TIMEOUT_SECS))
-                    .read_timeout(std::time::Duration::from_secs(IMAGE_GEN_READ_TIMEOUT_SECS))
-                    .default_headers(headers.clone()),
-            )
-        })
-        .map_err(|e| {
-            xai_tool_runtime::ToolError::invalid_arguments(format!(
-                "Failed to build HTTP client: {e}"
-            ))
-        })?;
-
         Ok(Self {
-            http,
-            credential_headers,
-            base_url: base_url.clone(),
+            endpoint: MediaEndpoint::new(base_url, extra_headers)?,
             model,
             edit_model,
             writer: super::storage::SessionFileWriter::new(DEFAULT_IMAGE_DIR, "jpg"),
             bearer: MediaBearer::new(api_key_provider, api_key.clone()),
             attribution_callback: None,
             tier_restricted: *tier_restricted,
-            session_header: None,
-            defaults_have_session_header,
         })
     }
 
     /// Attach [`SESSION_ID_HEADER`] per request; a caller-provided
     /// `extra_headers` value is never overridden.
     pub fn with_session_id(mut self, session_id: &str) -> Self {
-        if !self.defaults_have_session_header
-            && let Ok(value) = HeaderValue::from_str(session_id)
-        {
-            self.session_header = Some(value);
-        }
+        self.endpoint.set_session_id(session_id);
+        self
+    }
+
+    /// Wire the sink that bills each Imagine call. A request with no sink is refused.
+    pub fn with_usage_sink(mut self, sink: Option<xai_grok_sampler::SharedUsageSink>) -> Self {
+        self.endpoint.set_usage_sink(sink);
         self
     }
 
@@ -195,27 +148,18 @@ impl ImageGenClient {
     }
 
     pub(crate) fn base_url(&self) -> &str {
-        &self.base_url
+        self.endpoint.base_url()
     }
 
-    /// Every Imagine-API POST goes through here so no call site can miss
-    /// the bearer or per-request session header (image_edit once did).
-    pub(crate) fn post_json(
+    /// The sampling client for one Imagine request. Every request goes through here so no call
+    /// site can miss the bearer, the session header or the usage sink.
+    pub(crate) fn sampling_client(
         &self,
-        url: &str,
-        payload: &serde_json::Value,
+        tool: &str,
+        model: &str,
         sent_bearer: &str,
-    ) -> xai_grok_net::Request {
-        let auth = crate::util::shared_http::key_auth(
-            Some(sent_bearer),
-            "Bearer",
-            &self.credential_headers,
-        );
-        let mut req = self.http.post(url, auth).json(payload);
-        if let Some(ref session) = self.session_header {
-            req = req.header(SESSION_ID_HEADER, session.clone());
-        }
-        req
+    ) -> Result<xai_grok_sampler::SamplingClient, ToolError> {
+        self.endpoint.client(tool, model, sent_bearer)
     }
 
     pub(crate) fn writer(&self) -> &super::storage::SessionFileWriter {
@@ -231,7 +175,10 @@ impl ImageGenClient {
         prompt: &str,
         aspect_ratio: &str,
     ) -> Result<Vec<u8>, xai_tool_runtime::ToolError> {
-        let url = format!("{}/images/generations", self.base_url.trim_end_matches('/'));
+        let url = format!(
+            "{}/images/generations",
+            self.base_url().trim_end_matches('/')
+        );
         crate::implementations::grok_build::allow_endpoint(&url, "image_gen")?;
 
         let payload = serde_json::json!({
@@ -247,20 +194,26 @@ impl ImageGenClient {
         // emit see the same value (even if the provider rotates between
         // the send and the response handling).
         let sent_bearer = self.current_bearer().await?;
-        let req = self.post_json(&url, &payload, &sent_bearer);
+        let client = self.sampling_client("image_gen", &self.model, &sent_bearer)?;
 
-        let response = req.send().await.map_err(|e| {
-            xai_tool_runtime::ToolError::invalid_arguments(format!(
-                "Image generation API request failed: {e}"
-            ))
-        })?;
+        let response = client
+            .generate_images(
+                &payload,
+                Some(std::time::Duration::from_secs(IMAGE_GEN_TIMEOUT_SECS)),
+            )
+            .await
+            .map_err(|e| {
+                xai_tool_runtime::ToolError::invalid_arguments(format!(
+                    "Image generation API request failed: {e}"
+                ))
+            })?;
 
-        let status = response.status();
+        let status = response.status;
         if status == xai_grok_net::StatusCode::UNAUTHORIZED {
             self.record_401_attribution(ToolConsumer::ImageGen, Some(&sent_bearer));
         }
+        let body = response.text();
         if !status.is_success() {
-            let body = response.text().await.unwrap_or_default();
             let truncated: String = body.chars().take(200).collect();
             tracing::warn!(http_status = %status, "Imagine API error: {truncated}");
             return Err(xai_tool_runtime::ToolError::new(
@@ -269,12 +222,6 @@ impl ImageGenClient {
             )
             .with_details(serde_json::json!({"code": "http_failure", "status": status.as_u16()})));
         }
-
-        let body = response.text().await.map_err(|e| {
-            xai_tool_runtime::ToolError::invalid_arguments(format!(
-                "Failed to read image generation response body: {e}"
-            ))
-        })?;
 
         let resp_json: ImageGenResponse = serde_json::from_str(&body).map_err(|e| {
             let preview: String = body.chars().take(500).collect();
@@ -488,7 +435,7 @@ impl xai_tool_runtime::Tool for ImageGenTool {
         };
 
         let absolute_path = client
-            .writer
+            .writer()
             .save(&session_folder, &image_bytes, None)
             .await
             .map_err(|e| xai_tool_runtime::ToolError::invalid_arguments(e.to_string()))?;
@@ -557,7 +504,7 @@ mod tests {
         let client = ImageGenClient::new(&cfg, None)
             .unwrap()
             .with_session_id("sess-1");
-        assert!(client.session_header.is_none());
+        assert!(client.endpoint.session_id().is_none());
 
         let cfg_plain = ImageGenConfig::Enabled {
             api_key: Some("k".into()),
@@ -572,19 +519,13 @@ mod tests {
         let client = ImageGenClient::new(&cfg_plain, None)
             .unwrap()
             .with_session_id("sess-1");
-        assert_eq!(
-            client.session_header.as_ref().and_then(|v| v.to_str().ok()),
-            Some("sess-1")
-        );
+        assert_eq!(client.endpoint.session_id(), Some("sess-1"));
     }
 
-    // Pins the image_edit wire regression: every POST routes through
-    // post_json, which attaches both bearer and session id.
-    #[tokio::test]
-    async fn post_json_attaches_session_and_bearer_headers() {
+    fn client_for(base_url: String) -> ImageGenClient {
         let cfg = ImageGenConfig::Enabled {
-            api_key: Some("k".into()),
-            base_url: "https://api.example.invalid/v1".into(),
+            api_key: Some("tok".into()),
+            base_url,
             extra_headers: indexmap::IndexMap::new(),
             image_gen_enabled: true,
             image_edit_enabled: true,
@@ -592,27 +533,57 @@ mod tests {
             edit_model_override: None,
             tier_restricted: false,
         };
-        let client = ImageGenClient::new(&cfg, None)
-            .unwrap()
-            .with_session_id("sess-42");
+        ImageGenClient::new(&cfg, None).unwrap()
+    }
+
+    // Every Imagine request goes through the sampling client, which sends the bearer and the
+    // session id and bills the call to the session sink.
+    #[tokio::test]
+    async fn generate_sends_session_and_bearer_and_bills_the_call() {
         let server = wiremock::MockServer::start().await;
         wiremock::Mock::given(wiremock::matchers::method("POST"))
+            .and(wiremock::matchers::path("/v1/images/generations"))
             .and(wiremock::matchers::header(SESSION_ID_HEADER, "sess-42"))
             .and(wiremock::matchers::header("authorization", "Bearer tok"))
-            .respond_with(wiremock::ResponseTemplate::new(200))
+            .respond_with(
+                wiremock::ResponseTemplate::new(200).set_body_json(serde_json::json!({
+                    "data": [{ "b64_json": "aGk=" }],
+                    "usage": { "cost_in_usd_ticks": 400 }
+                })),
+            )
             .expect(1)
             .mount(&server)
             .await;
-        let response = client
-            .post_json(
-                &format!("{}/v1/images", server.uri()),
-                &serde_json::json!({}),
-                "tok",
-            )
-            .send()
+        let (recorder, sink) = crate::implementations::grok_build::media_client::recorder();
+        let client = client_for(format!("{}/v1", server.uri()))
+            .with_session_id("sess-42")
+            .with_usage_sink(Some(sink));
+
+        let bytes = client.generate("a cat", "auto").await.expect("image");
+
+        assert_eq!(bytes, b"hi");
+        let calls = recorder.calls();
+        assert_eq!(calls.len(), 1, "{calls:?}");
+        assert_eq!(
+            calls.first().map(|c| c.model.as_str()),
+            Some(XAI_IMAGINE_MODEL)
+        );
+        assert_eq!(calls.first().and_then(|c| c.cost_usd_ticks), Some(400));
+    }
+
+    #[tokio::test]
+    async fn generate_without_a_sink_is_refused() {
+        let server = wiremock::MockServer::start().await;
+        wiremock::Mock::given(wiremock::matchers::any())
+            .respond_with(wiremock::ResponseTemplate::new(200))
+            .expect(0)
+            .mount(&server)
+            .await;
+        let err = client_for(format!("{}/v1", server.uri()))
+            .generate("a cat", "auto")
             .await
-            .unwrap();
-        assert_eq!(response.status(), xai_grok_net::StatusCode::OK);
+            .expect_err("no sink, no request");
+        assert!(err.to_string().contains("usage sink"), "{err}");
     }
 
     #[test]

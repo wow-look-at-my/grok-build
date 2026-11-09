@@ -7,7 +7,7 @@ use std::time::{Duration, Instant};
 
 use futures_util::stream::{BoxStream, Stream, StreamExt};
 use xai_grok_sampling_types::ollama::OllamaChatChunk;
-use xai_grok_sampling_types::{ChatCompletionChunk, Result, TokenUsage, messages, rs};
+use xai_grok_sampling_types::{ChatCompletionChunk, Result, TokenUsage, UsageCost, messages, rs};
 
 use crate::stream::usage::{CallUsage, MessagesUsageAccumulator};
 
@@ -125,11 +125,62 @@ impl CallMeter {
         self.usage = CallUsage::of_responses(response);
     }
 
+    /// Read the `model` and `usage` of a JSON body from an endpoint that is not a chat API.
+    /// Token counts and a reported cost are kept. A body without them leaves the meter empty.
+    pub(crate) fn observe_endpoint_body(&mut self, body: &[u8]) {
+        let Ok(value) = serde_json::from_slice::<serde_json::Value>(body) else {
+            return;
+        };
+        if let Some(model) = value.get("model").and_then(serde_json::Value::as_str) {
+            self.note_model(model);
+        }
+        let Some(usage) = value
+            .get("usage")
+            .and_then(|u| serde_json::from_value::<EndpointUsage>(u.clone()).ok())
+        else {
+            return;
+        };
+        let counted = usage.prompt_tokens > 0 || usage.completion_tokens > 0;
+        let tokens = counted.then(|| TokenUsage {
+            prompt_tokens: usage.prompt_tokens,
+            completion_tokens: usage.completion_tokens,
+            total_tokens: usage
+                .total_tokens
+                .max(usage.prompt_tokens.saturating_add(usage.completion_tokens)),
+            reasoning_tokens: 0,
+            cached_prompt_tokens: 0,
+            cache_creation_prompt_tokens: 0,
+        });
+        self.usage = CallUsage {
+            usage: tokens,
+            cost_usd_ticks: crate::stream::usage::wire_cost_ticks(
+                usage.cost_in_usd_ticks,
+                usage.cost.as_ref(),
+            ),
+        };
+    }
+
     pub(crate) fn observe_messages_response(&mut self, response: &messages::MessagesResponse) {
         self.note_model(&response.model);
         self.messages.observe_response(&response.usage);
         self.usage = self.messages.finish();
     }
+}
+
+/// The `usage` object of an endpoint body. Every field is optional: an embeddings body has no
+/// completion count, and an image body can have only a cost.
+#[derive(serde::Deserialize)]
+struct EndpointUsage {
+    #[serde(default)]
+    prompt_tokens: u32,
+    #[serde(default)]
+    completion_tokens: u32,
+    #[serde(default)]
+    total_tokens: u32,
+    #[serde(default)]
+    cost_in_usd_ticks: Option<i64>,
+    #[serde(default)]
+    cost: Option<UsageCost>,
 }
 
 impl Drop for CallMeter {

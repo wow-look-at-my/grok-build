@@ -778,6 +778,8 @@ pub struct SamplingClient {
     bearer_resolver: Option<crate::config::SharedBearerResolver>,
     /// Per-request header injection (OTel traceparent).
     header_injector: Option<crate::config::SharedHeaderInjector>,
+    /// The credential every request carries in place of the configured one. See [`Self::with_request_auth`].
+    auth_override: Option<Auth>,
     /// Endpoint URL builder, resolved once from `base_url` and `query_params`.
     endpoint: EndpointTemplate,
     first_use_noted: Arc<AtomicBool>,
@@ -1174,9 +1176,16 @@ impl SamplingClient {
             usage_sink: config.usage_sink,
             bearer_resolver: config.bearer_resolver,
             header_injector: config.header_injector,
+            auth_override: None,
             endpoint,
             first_use_noted: Arc::new(AtomicBool::new(false)),
         })
+    }
+
+    /// The same client with `auth` as the credential of every request.
+    pub fn with_request_auth(mut self, auth: Auth) -> Self {
+        self.auth_override = Some(auth);
+        self
     }
 
     pub fn api_backend(&self) -> ApiBackend {
@@ -1246,6 +1255,9 @@ impl SamplingClient {
     /// The credential the next request carries, read at send time. With a
     /// `bearer_resolver`, the live xAI session is the only credential.
     fn request_auth(&self) -> Auth {
+        if let Some(auth) = &self.auth_override {
+            return auth.clone();
+        }
         if self.bearer_resolver.is_some() || self.configured_credentials.is_empty() {
             return self.key_auth();
         }
@@ -1543,13 +1555,21 @@ impl SamplingClient {
 
     /// Hand `request` to `xai-grok-net`, which writes its credential.
     fn net_request(&self, request: HttpRequest) -> Result<xai_grok_net::Request> {
+        self.net_request_as(xai_grok_net::Method::POST, request)
+    }
+
+    fn net_request_as(
+        &self,
+        method: xai_grok_net::Method,
+        request: HttpRequest,
+    ) -> Result<xai_grok_net::Request> {
         if let Some(problem) = request.invalid_header {
             tracing::error!("Failed to build HTTP request: {problem}");
             return Err(SamplingError::InvalidConfiguration(problem));
         }
         let mut net = self
             .http
-            .post(request.url, request.auth)
+            .request(method, request.url, request.auth)
             .headers(request.headers);
         if let Some(body) = request.body {
             net = net.body(body);
@@ -3189,6 +3209,10 @@ fn stream_collect_error(info: SamplingErrorInfo) -> SamplingError {
         error_code: info.error_code,
     }
 }
+
+#[path = "client_endpoints.rs"]
+mod endpoints;
+pub use endpoints::{EndpointResponse, WebSocketSession};
 
 #[cfg(test)]
 mod tests {

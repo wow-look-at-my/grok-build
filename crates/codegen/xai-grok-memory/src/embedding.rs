@@ -25,12 +25,14 @@ pub trait EmbeddingProvider: Send + Sync {
 }
 
 /// API-based embedding provider using an OpenAI-compatible embeddings endpoint.
+/// Each request goes through a [`xai_grok_sampler::SamplingClient`], which takes a request slot
+/// and bills the call to `usage_sink`.
 pub struct ApiEmbeddingProvider {
     api_base: String,
     model: String,
     dimensions: usize,
-    client: xai_grok_net::HttpClient,
     auth: xai_grok_net::Auth,
+    usage_sink: xai_grok_sampler::SharedUsageSink,
     max_batch_size: usize,
 }
 
@@ -39,15 +41,15 @@ impl ApiEmbeddingProvider {
         api_base: String,
         model: String,
         dimensions: usize,
-        client: xai_grok_net::HttpClient,
         auth: xai_grok_net::Auth,
+        usage_sink: xai_grok_sampler::SharedUsageSink,
     ) -> Self {
         Self {
             api_base,
             model,
             dimensions,
-            client,
             auth,
+            usage_sink,
             max_batch_size: 32,
         }
     }
@@ -56,14 +58,15 @@ impl ApiEmbeddingProvider {
         config: &xai_grok_config_types::MemoryEmbeddingConfig,
         api_base: String,
         auth: xai_grok_net::Auth,
+        usage_sink: xai_grok_sampler::SharedUsageSink,
     ) -> Option<Self> {
         let model = config.model.clone().filter(|m| !m.is_empty())?;
         Some(Self::new(
             api_base,
             model,
             config.dimensions,
-            xai_grok_http::shared_client(),
             auth,
+            usage_sink,
         ))
     }
 
@@ -72,12 +75,31 @@ impl ApiEmbeddingProvider {
         config: &xai_grok_config_types::MemoryEmbeddingConfig,
         proxy_base_url: String,
         auth_key: String,
+        usage_sink: xai_grok_sampler::SharedUsageSink,
     ) -> Option<Self> {
         let auth = xai_grok_net::Auth::ApiKey {
             key: auth_key,
             scheme: xai_grok_net::KeyScheme::Bearer,
         };
-        Self::from_config(config, proxy_base_url, auth)
+        Self::from_config(config, proxy_base_url, auth, usage_sink)
+    }
+
+    fn sampling_client(
+        &self,
+    ) -> Result<xai_grok_sampler::SamplingClient, Box<dyn std::error::Error>> {
+        let mut extra_headers = indexmap::IndexMap::new();
+        extra_headers.insert("X-XAI-Token-Auth".to_owned(), "xai-grok-cli".to_owned());
+        let config = xai_grok_sampler::SamplerConfig {
+            base_url: self.api_base.clone(),
+            model: self.model.clone(),
+            extra_headers,
+            client_version: Some(xai_grok_version::version().to_owned()),
+            usage_sink: Some(self.usage_sink.clone()),
+            ..Default::default()
+        };
+        let client = xai_grok_sampler::SamplingClient::new(config)
+            .map_err(|e| format!("embedding client: {e}"))?;
+        Ok(client.with_request_auth(self.auth.clone()))
     }
 }
 
@@ -104,6 +126,7 @@ impl EmbeddingProvider for ApiEmbeddingProvider {
         let endpoint = format!("{}/embeddings", self.api_base);
         xai_grok_http::endpoint_allowlist::check(&endpoint)
             .map_err(|refusal| refusal.to_string())?;
+        let client = self.sampling_client()?;
         // Process in batches to respect API payload limits
         for batch in texts.chunks(self.max_batch_size) {
             let input: Vec<&str> = batch.to_vec();
@@ -127,17 +150,12 @@ impl EmbeddingProvider for ApiEmbeddingProvider {
                     tokio::time::sleep(std::time::Duration::from_millis(delay)).await;
                 }
 
-                let request = self
-                    .client
-                    .post(&endpoint, self.auth.clone())
-                    .json(&body_json)
-                    .header("X-XAI-Token-Auth", "xai-grok-cli")
-                    .header("x-grok-client-version", xai_grok_version::version());
-
-                let response = match request.send().await {
+                let response = match client.create_embeddings(&body_json).await {
                     Ok(r) => r,
                     // A refusal sent nothing, and a retry is refused the same way.
-                    Err(e) if e.auth_refusal().is_some() => {
+                    Err(xai_grok_sampling_types::SamplingError::Http(e))
+                        if e.auth_refusal().is_some() =>
+                    {
                         return Err(format!("embedding request refused: {e}").into());
                     }
                     Err(e) => {
@@ -146,9 +164,9 @@ impl EmbeddingProvider for ApiEmbeddingProvider {
                     }
                 };
 
-                let status = response.status();
+                let status = response.status;
                 if status.is_success() {
-                    let body: serde_json::Value = response.json().await?;
+                    let body: serde_json::Value = serde_json::from_slice(&response.body)?;
                     let data = body
                         .get("data")
                         .and_then(|d| d.as_array())
@@ -171,15 +189,12 @@ impl EmbeddingProvider for ApiEmbeddingProvider {
                 // Retry on 429 (rate limit) or 5xx (server error)
                 if status == xai_grok_net::StatusCode::TOO_MANY_REQUESTS || status.is_server_error()
                 {
-                    last_err = format!(
-                        "HTTP {status}: {}",
-                        response.text().await.unwrap_or_default()
-                    );
+                    last_err = format!("HTTP {status}: {}", response.text());
                     continue;
                 }
 
                 // Any other status is not retryable, so fail immediately
-                let body = response.text().await.unwrap_or_default();
+                let body = response.text();
                 return Err(format!("embedding API error {status}: {body}").into());
             }
 

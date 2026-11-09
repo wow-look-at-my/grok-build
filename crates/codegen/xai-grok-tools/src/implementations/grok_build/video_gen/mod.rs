@@ -23,7 +23,6 @@
 
 use base64::Engine as _;
 use serde::Deserialize;
-use xai_grok_net::header::{CONTENT_TYPE, HeaderMap, HeaderValue};
 
 use crate::attribution::{SharedAttributionCallback, ToolConsumer};
 use crate::types::SharedApiKeyProvider;
@@ -138,14 +137,13 @@ impl std::fmt::Debug for ZdrVideoOutputS3Config {
     }
 }
 
-/// HTTP client for xAI Video Generation API. Cloned per-request; shares `Arc` state.
+/// Client for the xAI Video Generation API. Cloned per request. The start and status requests
+/// go through a [`xai_grok_sampler::SamplingClient`], which takes a request slot and bills the call.
 #[derive(Clone)]
 pub struct VideoGenClient {
-    http: xai_grok_net::HttpClient,
-    /// Credential headers from `extra_headers`.
-    credential_headers: HeaderMap,
+    endpoint: super::media_client::MediaEndpoint,
+    /// Fetches the finished video from its presigned URL, which carries its own auth.
     download_http: xai_grok_net::HttpClient,
-    base_url: String,
     writer: super::storage::SessionFileWriter,
     zdr_video_output_s3: Option<ZdrVideoOutputS3Config>,
     bearer: super::media_bearer::MediaBearer,
@@ -159,10 +157,6 @@ pub struct VideoGenClient {
     tier_restricted: bool,
     /// See [`VideoGenConfig::Enabled`]'s `zdr_restricted`.
     zdr_restricted: bool,
-    /// Per-request session-id header; kept off `default_headers` so the
-    /// transport stays session-independent and cacheable.
-    session_header: Option<HeaderValue>,
-    defaults_have_session_header: bool,
 }
 
 impl VideoGenClient {
@@ -184,45 +178,14 @@ impl VideoGenClient {
             ));
         };
 
-        let mut headers = HeaderMap::new();
-        headers.insert(CONTENT_TYPE, HeaderValue::from_static("application/json"));
+        let endpoint = super::media_client::MediaEndpoint::new(base_url, extra_headers)?;
 
-        extra_headers.into_iter().try_for_each(|(key, value)| {
-            let header_name = xai_grok_net::header::HeaderName::from_bytes(key.as_bytes())
-                .map_err(|e| {
-                    xai_tool_runtime::ToolError::invalid_arguments(format!(
-                        "Invalid header name '{key}': {e}"
-                    ))
-                })?;
-            let header_value = HeaderValue::from_str(value).map_err(|e| {
-                xai_tool_runtime::ToolError::invalid_arguments(format!(
-                    "Invalid header value for '{key}': {e}"
-                ))
-            })?;
-            headers.insert(header_name, header_value);
-            Ok::<(), xai_tool_runtime::ToolError>(())
-        })?;
-
-        // Process-cached; the session id is attached per request, not here.
-        let defaults_have_session_header =
-            headers.contains_key(super::image_gen::SESSION_ID_HEADER);
-        let credential_headers = crate::util::shared_http::take_credential_headers(&mut headers);
-        let key = crate::util::shared_http::cache_key("video_gen", &headers);
-        let http = crate::util::shared_http::cached_client(key, || {
-            xai_grok_net::HttpClient::build(
-                xai_grok_net::ClientOptions::default().default_headers(headers.clone()),
-            )
-        })
-        .map_err(|e| {
-            xai_tool_runtime::ToolError::invalid_arguments(format!(
-                "Failed to build HTTP client: {e}"
-            ))
-        })?;
-
-        // Distinct client (download timeout, no default headers); an empty
-        // header map routes it through the same `CacheKey` constructor.
-        let download_key =
-            crate::util::shared_http::cache_key("video_gen_download", &HeaderMap::new());
+        // Download timeout and no default headers; an empty header map routes it through the
+        // same `CacheKey` constructor.
+        let download_key = crate::util::shared_http::cache_key(
+            "video_gen_download",
+            &xai_grok_net::header::HeaderMap::new(),
+        );
         let download_http = crate::util::shared_http::cached_client(download_key, || {
             xai_grok_net::HttpClient::build(
                 xai_grok_net::ClientOptions::default()
@@ -236,10 +199,8 @@ impl VideoGenClient {
         })?;
 
         Ok(Self {
-            http,
-            credential_headers,
+            endpoint,
             download_http,
-            base_url: base_url.clone(),
             writer: super::storage::SessionFileWriter::new(DEFAULT_VIDEO_DIR, "mp4"),
             zdr_video_output_s3: zdr_video_output_s3
                 .as_ref()
@@ -249,38 +210,30 @@ impl VideoGenClient {
             attribution_callback: None,
             tier_restricted: *tier_restricted,
             zdr_restricted: *zdr_restricted,
-            session_header: None,
-            defaults_have_session_header,
         })
     }
 
-    /// Attach the session-id header per start/poll request; a caller-provided `extra_headers` value is never overridden.
-    /// Every Imagine video API request goes through here so no call site can miss the bearer or per-request session header
-    /// (the presigned download client stays separate: its URLs carry their own auth).
-    fn request(
+    /// The sampling client for one start or status request. Every Imagine
+    /// video API request goes through here so no call site can miss the
+    /// bearer, the session header or the sink.
+    fn sampling_client(
         &self,
-        method: xai_grok_net::Method,
-        url: &str,
+        model: &str,
         sent_bearer: &str,
-    ) -> xai_grok_net::Request {
-        let auth = crate::util::shared_http::key_auth(
-            Some(sent_bearer),
-            "Bearer",
-            &self.credential_headers,
-        );
-        let mut req = self.http.request(method, url, auth);
-        if let Some(ref session) = self.session_header {
-            req = req.header(super::image_gen::SESSION_ID_HEADER, session.clone());
-        }
-        req
+    ) -> Result<xai_grok_sampler::SamplingClient, xai_tool_runtime::ToolError> {
+        self.endpoint.client("video_gen", model, sent_bearer)
     }
 
+    /// Attach the session-id header per start/poll request; a caller-provided `extra_headers`
+    /// value is never overridden.
     pub fn with_session_id(mut self, session_id: &str) -> Self {
-        if !self.defaults_have_session_header
-            && let Ok(value) = HeaderValue::from_str(session_id)
-        {
-            self.session_header = Some(value);
-        }
+        self.endpoint.set_session_id(session_id);
+        self
+    }
+
+    /// Wire the sink that bills each video call. A request with no sink is refused.
+    pub fn with_usage_sink(mut self, sink: Option<xai_grok_sampler::SharedUsageSink>) -> Self {
+        self.endpoint.set_usage_sink(sink);
         self
     }
 
@@ -327,7 +280,10 @@ impl VideoGenClient {
         reference_voices: Vec<String>,
         pins: VideoKeyframePins,
     ) -> Result<VideoOutcome, xai_tool_runtime::ToolError> {
-        let start_url = format!("{}/videos/generations", self.base_url.trim_end_matches('/'));
+        let start_url = format!(
+            "{}/videos/generations",
+            self.endpoint.base_url().trim_end_matches('/')
+        );
         crate::implementations::grok_build::allow_endpoint(&start_url, "video_gen")?;
 
         // Before the ZDR presign, a network call that must not happen on a refused bearer
@@ -367,34 +323,35 @@ impl VideoGenClient {
             }),
         };
 
-        let req = self
-            .request(xai_grok_net::Method::POST, &start_url, &sent_bearer)
-            .timeout(std::time::Duration::from_secs(VIDEO_START_TIMEOUT_SECS))
-            .json(&payload);
-
-        let response = req.send().await.map_err(|e| {
+        let payload = serde_json::to_value(&payload).map_err(|e| {
             xai_tool_runtime::ToolError::invalid_arguments(format!(
-                "Video generation API request failed: {e}"
+                "Failed to build video generation payload: {e}"
             ))
         })?;
+        let response = self
+            .sampling_client(model, &sent_bearer)?
+            .generate_video(
+                &payload,
+                Some(std::time::Duration::from_secs(VIDEO_START_TIMEOUT_SECS)),
+            )
+            .await
+            .map_err(|e| {
+                xai_tool_runtime::ToolError::invalid_arguments(format!(
+                    "Video generation API request failed: {e}"
+                ))
+            })?;
 
-        let status = response.status();
+        let status = response.status;
         if status == xai_grok_net::StatusCode::UNAUTHORIZED {
             self.record_401_attribution(ToolConsumer::VideoGenStart, Some(&sent_bearer));
         }
+        let body = response.text();
         if !status.is_success() {
-            let body = response.text().await.unwrap_or_default();
             // 500 chars so the unknown-voice 400 keeps its full voice roster.
             let truncated: String = body.chars().take(500).collect();
             tracing::warn!(http_status = %status, "Video generation API error: {truncated}");
             return Err(video_http_error(status, &body));
         }
-
-        let body = response.text().await.map_err(|e| {
-            xai_tool_runtime::ToolError::invalid_arguments(format!(
-                "Failed to read video generation start response body: {e}"
-            ))
-        })?;
 
         let start_resp: VideoGenStartResponse = serde_json::from_str(&body).map_err(|e| {
             let preview: String = body.chars().take(500).collect();
@@ -413,11 +370,6 @@ impl VideoGenClient {
 
         tracing::info!(request_id = %request_id, "Video generation started, polling for completion");
 
-        let poll_url = format!(
-            "{}/videos/{}",
-            self.base_url.trim_end_matches('/'),
-            request_id
-        );
         let poll_timeout = std::time::Duration::from_secs(VIDEO_POLL_REQUEST_TIMEOUT_SECS);
         let poll_interval = std::time::Duration::from_secs(VIDEO_POLL_INTERVAL_SECS);
         let deadline = std::time::Duration::from_secs(VIDEO_GEN_TIMEOUT_SECS);
@@ -434,23 +386,24 @@ impl VideoGenClient {
             }
 
             let poll_sent_bearer = self.current_bearer().await?;
-            let poll_req = self
-                .request(xai_grok_net::Method::GET, &poll_url, &poll_sent_bearer)
-                .timeout(poll_timeout);
+            let poll_response = self
+                .sampling_client(model, &poll_sent_bearer)?
+                .video_status(&request_id, Some(poll_timeout))
+                .await
+                .map_err(|e| {
+                    xai_tool_runtime::ToolError::invalid_arguments(format!(
+                        "Video poll request failed: {e}"
+                    ))
+                })?;
 
-            let poll_response = poll_req.send().await.map_err(|e| {
-                xai_tool_runtime::ToolError::invalid_arguments(format!(
-                    "Video poll request failed: {e}"
-                ))
-            })?;
-
-            let poll_status = poll_response.status();
+            let poll_status = poll_response.status;
             if poll_status == xai_grok_net::StatusCode::UNAUTHORIZED {
                 self.record_401_attribution(ToolConsumer::VideoGenPoll, Some(&poll_sent_bearer));
             }
+            let poll_body = poll_response.text();
             if !poll_status.is_success() && poll_status.as_u16() != 202 {
-                let body = poll_response.text().await.unwrap_or_default();
-                if is_zdr_upload_url_error(&body) {
+                let body = &poll_body;
+                if is_zdr_upload_url_error(body) {
                     return Err(zdr_restricted_error());
                 }
                 let truncated: String = body.chars().take(200).collect();
@@ -462,12 +415,6 @@ impl VideoGenClient {
                     serde_json::json!({"code": "http_failure", "status": poll_status.as_u16()}),
                 ));
             }
-
-            let poll_body = poll_response.text().await.map_err(|e| {
-                xai_tool_runtime::ToolError::invalid_arguments(format!(
-                    "Failed to read video poll response body: {e}"
-                ))
-            })?;
 
             let poll_data: VideoGenPollResponse =
                 serde_json::from_str(&poll_body).map_err(|e| {
@@ -1451,42 +1398,67 @@ impl xai_tool_runtime::Tool for ReferenceToVideoTool {
 
 #[cfg(test)]
 mod tests {
-    // Mirrors image_gen's post_json pinning: every start/poll request must
-    // route through request(), which attaches both bearer and session id.
+    // Every start and status request goes through sampling_client(). This sends the bearer
+    // and the session id and bills the call to the session sink.
     #[tokio::test]
-    async fn request_attaches_session_and_bearer_headers() {
+    async fn start_and_status_send_session_and_bearer_and_bill_the_call() {
+        let server = wiremock::MockServer::start().await;
+        let session = super::super::image_gen::SESSION_ID_HEADER;
+        wiremock::Mock::given(wiremock::matchers::method("POST"))
+            .and(wiremock::matchers::path("/v1/videos/generations"))
+            .and(wiremock::matchers::header(session, "sess-7"))
+            .and(wiremock::matchers::header("authorization", "Bearer tok"))
+            .respond_with(
+                wiremock::ResponseTemplate::new(200)
+                    .set_body_json(serde_json::json!({ "request_id": "r1" })),
+            )
+            .expect(1)
+            .mount(&server)
+            .await;
+        wiremock::Mock::given(wiremock::matchers::method("GET"))
+            .and(wiremock::matchers::path("/v1/videos/r1"))
+            .and(wiremock::matchers::header(session, "sess-7"))
+            .and(wiremock::matchers::header("authorization", "Bearer tok"))
+            .respond_with(wiremock::ResponseTemplate::new(200).set_body_json(
+                serde_json::json!({ "status": "done", "usage": { "cost_in_usd_ticks": 900 } }),
+            ))
+            .expect(1)
+            .mount(&server)
+            .await;
         let cfg = VideoGenConfig::Enabled {
-            api_key: Some("k".into()),
-            base_url: "https://api.example.invalid/v1".into(),
+            api_key: Some("tok".into()),
+            base_url: format!("{}/v1", server.uri()),
             extra_headers: indexmap::IndexMap::new(),
             zdr_video_output_s3: None,
             tier_restricted: false,
             zdr_restricted: false,
         };
+        let (recorder, sink) = crate::implementations::grok_build::media_client::recorder();
         let client = VideoGenClient::new(&cfg, None)
             .unwrap()
-            .with_session_id("sess-7");
-        let server = wiremock::MockServer::start().await;
-        wiremock::Mock::given(wiremock::matchers::method("POST"))
-            .and(wiremock::matchers::header(
-                super::super::image_gen::SESSION_ID_HEADER,
-                "sess-7",
-            ))
-            .and(wiremock::matchers::header("authorization", "Bearer tok"))
-            .respond_with(wiremock::ResponseTemplate::new(200))
-            .expect(1)
-            .mount(&server)
-            .await;
-        let response = client
-            .request(
-                xai_grok_net::Method::POST,
-                &format!("{}/v1/videos", server.uri()),
-                "tok",
-            )
-            .send()
+            .with_session_id("sess-7")
+            .with_usage_sink(Some(sink));
+        let sampling = client.sampling_client(XAI_VIDEO_MODEL, "tok").unwrap();
+
+        let start = sampling
+            .generate_video(&serde_json::json!({ "model": XAI_VIDEO_MODEL }), None)
             .await
             .unwrap();
-        assert_eq!(response.status(), xai_grok_net::StatusCode::OK);
+        assert_eq!(start.status, xai_grok_net::StatusCode::OK);
+        let status = sampling.video_status("r1", None).await.unwrap();
+        assert_eq!(status.status, xai_grok_net::StatusCode::OK);
+
+        let calls = recorder.calls();
+        assert_eq!(
+            calls.len(),
+            1,
+            "only the priced status answer reports: {calls:?}"
+        );
+        assert_eq!(
+            calls.first().map(|c| c.model.as_str()),
+            Some(XAI_VIDEO_MODEL)
+        );
+        assert_eq!(calls.first().and_then(|c| c.cost_usd_ticks), Some(900));
     }
 
     use super::*;

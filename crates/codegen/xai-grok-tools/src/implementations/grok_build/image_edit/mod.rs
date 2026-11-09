@@ -359,9 +359,6 @@ impl xai_tool_runtime::Tool for ImageEditTool {
         }
         tracing::info!(count = data_urls.len(), "resolved image references");
 
-        let base = client.base_url().trim_end_matches('/');
-        let url = format!("{base}/images/edits");
-
         let mut payload = serde_json::json!({
             "model": client.edit_model(),
             "prompt": input.prompt,
@@ -397,20 +394,27 @@ impl xai_tool_runtime::Tool for ImageEditTool {
             );
         }
 
-        let req = client.post_json(&url, &payload, &sent_bearer);
+        let sampling = client.sampling_client("image_edit", client.edit_model(), &sent_bearer)?;
+        let response = sampling
+            .edit_images(
+                &payload,
+                Some(std::time::Duration::from_secs(
+                    super::image_gen::IMAGE_GEN_TIMEOUT_SECS,
+                )),
+            )
+            .await
+            .map_err(|e| {
+                xai_tool_runtime::ToolError::invalid_arguments(format!(
+                    "Image edit API request failed: {e}"
+                ))
+            })?;
 
-        let response = req.send().await.map_err(|e| {
-            xai_tool_runtime::ToolError::invalid_arguments(format!(
-                "Image edit API request failed: {e}"
-            ))
-        })?;
-
-        let status = response.status();
+        let status = response.status;
         if status == xai_grok_net::StatusCode::UNAUTHORIZED {
             client.record_401_attribution(ToolConsumer::ImageGen, Some(&sent_bearer));
         }
+        let body = response.text();
         if !status.is_success() {
-            let body = response.text().await.unwrap_or_default();
             let truncated: String = body.chars().take(200).collect();
             tracing::warn!(http_status = %status, "Imagine edit API error: {truncated}");
             return Err(xai_tool_runtime::ToolError::new(
@@ -419,12 +423,6 @@ impl xai_tool_runtime::Tool for ImageEditTool {
             )
             .with_details(serde_json::json!({"code": "http_failure", "status": status.as_u16()})));
         }
-
-        let body = response.text().await.map_err(|e| {
-            xai_tool_runtime::ToolError::invalid_arguments(format!(
-                "Failed to read image edit response body: {e}"
-            ))
-        })?;
 
         let resp_json: ImageGenResponse = serde_json::from_str(&body).map_err(|e| {
             let preview: String = body.chars().take(500).collect();
