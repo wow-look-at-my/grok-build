@@ -16,6 +16,21 @@ pub(crate) const DELTA_HEADER: &str = "x-zstd-delta";
 pub(crate) const DELTA_VALUE: &str = "sha256";
 pub(crate) const BASE_HEADER: &str = "x-zstd-base";
 pub(crate) const BASE_MISSING_HEADER: &str = "x-zstd-base-missing";
+pub(crate) const KEY_HEADER: &str = "x-zstd-key";
+
+/// This process's secret for the relay's body store. The relay finds a kept
+/// body only for the key that kept it. A leaked base hash is not enough to
+/// read the body back.
+pub(crate) fn delta_key() -> &'static str {
+    static KEY: std::sync::OnceLock<String> = std::sync::OnceLock::new();
+    KEY.get_or_init(|| {
+        format!(
+            "{}{}",
+            uuid::Uuid::new_v4().simple(),
+            uuid::Uuid::new_v4().simple()
+        )
+    })
+}
 
 /// A base plus a body past this skips the delta.
 pub(crate) const MAX_DELTA_WINDOW_BYTES: usize = 128 << 20;

@@ -49,9 +49,9 @@ use xai_grok_sampling_types::{
 use crate::config::{AuthScheme, OriginClientInfo, RequestCompression, SamplerConfig};
 use crate::events::SamplingErrorInfo;
 use crate::request_compression::{
-    BASE_HEADER, BASE_MISSING_HEADER, DELTA_HEADER, DELTA_VALUE, MAX_DELTA_WINDOW_BYTES,
-    compress_body, compress_body_against, delta_capable, note_response_headers, origin_key,
-    sha256_hex, should_compress,
+    BASE_HEADER, BASE_MISSING_HEADER, DELTA_HEADER, DELTA_VALUE, KEY_HEADER,
+    MAX_DELTA_WINDOW_BYTES, compress_body, compress_body_against, delta_capable, delta_key,
+    note_response_headers, origin_key, sha256_hex, should_compress,
 };
 use crate::span_timing::{ERROR, STATUS_CODE, SUCCESS, StreamSpanTiming};
 use crate::stream_classify::{chat_chunk_class, message_event_class, responses_event_class};
@@ -1566,6 +1566,9 @@ impl SamplingClient {
         request
             .headers
             .insert(DELTA_HEADER, HeaderValue::from_static(DELTA_VALUE));
+        request
+            .headers
+            .insert(KEY_HEADER, HeaderValue::from_static(delta_key()));
         if let Some(base) = base.filter(|_| against_base)
             && let Ok(value) = HeaderValue::from_str(&base.hash)
         {
