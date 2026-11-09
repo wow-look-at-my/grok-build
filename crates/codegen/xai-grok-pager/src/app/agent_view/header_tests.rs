@@ -120,8 +120,7 @@ fn session_header_always_shortens_deep_cwd() {
         "middle components must not stay full, row = {row:?}"
     );
 }
-/// Frame 5: a plain session shows `path … [Dashboard]` on one row with no title and no switcher, the path in `text_secondary`.
-/// `[Dashboard]` opens the dashboard on click.
+/// `☰` opens the dashboard on click.
 #[test]
 fn plain_session_header_has_path_and_dashboard_button_only() {
     let _theme = crate::theme::cache::pin_theme();
@@ -132,7 +131,7 @@ fn plain_session_header_has_path_and_dashboard_button_only() {
     let row = header_row(&agent, &buf);
     let y = agent.hit_dashboard.rect.unwrap().y;
     assert!(row.contains(PATH), "row = {row:?}");
-    assert!(row.contains("[Dashboard]"), "row = {row:?}");
+    assert!(row.contains(crate::glyphs::dashboard()), "row = {row:?}");
     assert!(
         !row.contains(crate::glyphs::chevron_left()) && !row.contains(crate::glyphs::chevron()),
         "no switcher in a plain session, row = {row:?}"
@@ -146,7 +145,7 @@ fn plain_session_header_has_path_and_dashboard_button_only() {
         InputOutcome::Action(Action::OpenDashboard)
     ));
 }
-/// Outside the overlay `[Dashboard]` follows the `/dashboard` feature gate: a disabled dashboard paints no dead button. Inside
+/// Outside the overlay the dashboard button follows the `/dashboard` feature gate: a disabled dashboard paints no dead button. Inside
 /// the overlay the button is the way back, so it stays regardless.
 #[test]
 fn dashboard_button_follows_the_feature_gate_outside_the_overlay() {
@@ -158,7 +157,7 @@ fn dashboard_button_follows_the_feature_gate_outside_the_overlay() {
     assert!(agent.hit_dashboard.rect.is_none());
     let screen: String = (0..buf.area.height).map(|y| row_text(&buf, y)).collect();
     assert!(
-        screen.contains(PATH) && !screen.contains("[Dashboard]"),
+        screen.contains(PATH) && !screen.contains(crate::glyphs::dashboard()),
         "the header row is painted, without the button"
     );
     draw(&mut agent, &registry, true, OverlayHeader::default());
@@ -249,12 +248,12 @@ fn overlay_header_omits_title_when_unnamed_and_switcher_when_alone() {
     assert!(agent.hit_dashboard.rect.is_some());
 }
 /// On a narrow terminal the title yields first (it is capped at half the left budget), so the location survives; the right-hand
-/// group — switcher and `[Dashboard]` — stays present and clickable.
+/// group — the switcher, whose middle is the dashboard button — stays present and clickable.
 #[test]
 fn narrow_overlay_header_caps_title_and_keeps_location_and_buttons() {
     let _theme = crate::theme::cache::pin_theme();
     let registry = ActionRegistry::defaults();
-    let mut agent = agent_at(60);
+    let mut agent = agent_at(46);
     let header = OverlayHeader {
         title: Some("A generated title long enough to need trimming here"),
         position: Some((2, 5)),
@@ -310,8 +309,8 @@ fn long_title_and_long_branch_leave_the_path_visible() {
         "the hit rect starts where the path is painted"
     );
 }
-/// Hover brightens exactly the affordance under the pointer: `›` to `text_primary` while `‹` stays faint, and `[Dashboard]` from
-/// `gray` to `text_primary`.
+/// Hover brightens exactly the affordance under the pointer: `›` to `text_primary` while `‹` stays faint. The switcher's
+/// middle is the dashboard button: it shows the position in `gray`, and `☰` in `text_primary` under the pointer.
 #[test]
 fn hover_brightens_only_the_pointed_affordance() {
     let _theme = crate::theme::cache::pin_theme();
@@ -328,7 +327,12 @@ fn hover_brightens_only_the_pointed_affordance() {
     let dash = agent.hit_dashboard.rect.unwrap();
     let faint_fg = theme.faint().fg.expect("pinned theme blends");
     assert_eq!(fg(&buf, next.x, next.y), faint_fg, "resting ›");
-    assert_eq!(fg(&buf, dash.x, dash.y), theme.gray, "resting [Dashboard]");
+    assert_eq!(fg(&buf, dash.x, dash.y), theme.gray, "resting position");
+    assert_eq!(
+        text_at(&buf, dash),
+        " 2/5 ",
+        "the middle shows the position at rest"
+    );
     assert!(matches!(
         agent.handle_input(&mouse(MouseEventKind::Moved, next.x, next.y), &registry),
         InputOutcome::Changed
@@ -341,15 +345,19 @@ fn hover_brightens_only_the_pointed_affordance() {
     assert_eq!(
         fg(&buf, dash.x, dash.y),
         theme.text_primary,
-        "hovered [Dashboard]"
+        "hovered dashboard button"
+    );
+    assert_eq!(
+        text_at(&buf, dash),
+        format!("  {}  ", crate::glyphs::dashboard()),
+        "the middle shows the dashboard glyph under the pointer, at the same width"
     );
     assert_eq!(fg(&buf, next.x, next.y), faint_fg, "› released");
 }
-/// The link preview is sized to what the other chips leave, so a long URL under navigation shortens instead of pushing
-/// `‹ i/n ›` and `[Dashboard]` off the row, and it leaves the location its floor. Too narrow for a readable URL, the
-/// preview is skipped rather than painted as a bare `…`.
+/// The bar never shows a highlighted link: the terminal already shows it. The switcher and the dashboard button keep
+/// the end of the row.
 #[test]
-fn long_link_preview_yields_to_the_switcher_and_dashboard_button() {
+fn a_highlighted_link_never_reaches_the_status_bar() {
     use crate::render::osc8::{LinkOverlay, LinkPresentation, LinkTarget, OverlayLink};
     let _theme = crate::theme::cache::pin_theme();
     let registry = ActionRegistry::defaults();
@@ -372,34 +380,22 @@ fn long_link_preview_yields_to_the_switcher_and_dashboard_button() {
         title: None,
         position: Some((2, 5)),
     };
-    let mut agent = agent_at(100);
-    highlight(&mut agent);
-    let buf = draw(&mut agent, &registry, true, header);
-    let dash = agent
-        .hit_dashboard
-        .rect
-        .expect("[Dashboard] stays on the row");
-    let next = agent.hit_overlay_next.rect.expect("› stays on the row");
-    assert!(dash.x + dash.width <= 100 && next.x < dash.x);
-    let row = header_row(&agent, &buf);
-    assert!(
-        row.contains("https://example.com/segment/") && row.contains("…"),
-        "the URL is what shortens, row = {row:?}"
-    );
-    assert!(
-        row.contains(PATH),
-        "the location keeps its floor next to the preview, row = {row:?}"
-    );
-    assert_eq!(text_at(&buf, dash), "[Dashboard]");
-    let mut agent = agent_at(60);
-    highlight(&mut agent);
-    let buf = draw(&mut agent, &registry, true, header);
-    let row = header_row(&agent, &buf);
-    assert!(
-        !row.contains("https://") && row.contains(PATH),
-        "no preview, location intact, row = {row:?}"
-    );
-    assert!(agent.hit_overlay_next.rect.is_some() && agent.hit_dashboard.rect.is_some());
+    for width in [100, 60] {
+        let mut agent = agent_at(width);
+        highlight(&mut agent);
+        let buf = draw(&mut agent, &registry, true, header);
+        let row = header_row(&agent, &buf);
+        assert!(
+            !row.contains("https://") && row.contains(PATH),
+            "no link on the bar, location intact, row = {row:?}"
+        );
+        let dash = agent
+            .hit_dashboard
+            .rect
+            .expect("the switcher middle stays armed");
+        let next = agent.hit_overlay_next.rect.expect("› stays on the row");
+        assert!(dash.x + dash.width <= next.x && next.x < width);
+    }
 }
 /// Navigation targets disarm while a dropdown is open (an upward completion list can cover this row) and come back
 /// once it closes.

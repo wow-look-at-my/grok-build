@@ -129,11 +129,6 @@
 			"description": "Disable hooks & plugins UI (/hooks and /plugins commands, scrollback annotations).\nDefaults to false (plugins enabled).",
 			"default": false
 		},
-		"show_plan_chip": {
-			"type": "boolean",
-			"description": "Always show the \"plan\" chip in the status bar when plan content is\navailable, even after the user exits plan mode.\nDefaults to false (chip hidden once plan mode ends).",
-			"default": false
-		},
 		"$schema": {
 			"description": "The schema of this file.",
 			"type": "string"

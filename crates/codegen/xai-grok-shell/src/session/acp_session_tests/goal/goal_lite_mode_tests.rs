@@ -221,6 +221,8 @@ async fn a_full_goal_still_hands_a_candidate_to_the_panel() {
             let server = MockInferenceServer::start()
                 .await
                 .expect("mock inference server");
+            // With the planner off, a full goal starts with the same capture a lite goal runs.
+            server.enqueue_response("/v1/responses", lite_capture());
             server.enqueue_response(
                 "/v1/responses",
                 verdict("candidate_complete", "the suite passed on the last run"),
@@ -234,6 +236,7 @@ async fn a_full_goal_still_hands_a_candidate_to_the_panel() {
                 panic!("a full goal with the planner off must flow through to inference");
             };
             assert!(reminder.contains("adversarial verification panel"));
+            finish_all_todos(&actor).await;
 
             assert!(matches!(
                 actor.run_goal_round_end().await,
@@ -259,6 +262,7 @@ async fn a_user_cancel_of_the_panel_keeps_the_goal_and_points_at_the_user() {
             let server = MockInferenceServer::start()
                 .await
                 .expect("mock inference server");
+            server.enqueue_response("/v1/responses", lite_capture());
             let actor = goal_actor(&server).await;
             let GoalSetupOutcome::Inference { .. } = actor
                 .setup_goal("make the tests pass", None, GoalMode::Full)
@@ -446,9 +450,8 @@ async fn a_give_up_claim_is_sent_back_with_steps_then_upheld_on_the_same_path_fo
                     .await
                     .expect("mock inference server");
                 server.set_keep_requests(true);
-                if mode == GoalMode::Lite {
-                    server.enqueue_response("/v1/responses", lite_capture());
-                }
+                // With the planner off, both modes start with the capture.
+                server.enqueue_response("/v1/responses", lite_capture());
                 server.enqueue_response(
                     "/v1/responses",
                     claim_verdict("rejected", &[UNTRIED_STEP], ""),
@@ -492,7 +495,8 @@ async fn a_give_up_claim_is_sent_back_with_steps_then_upheld_on_the_same_path_fo
                     GoalRoundDecision::EndTurn
                 ));
                 let bodies = evaluator_bodies(&server);
-                let capture_calls = usize::from(mode == GoalMode::Lite);
+                // Both modes start with the capture, since the planner is off.
+                let capture_calls = 1;
                 assert_eq!(
                     bodies.len(),
                     capture_calls + 2,
@@ -647,9 +651,8 @@ async fn lite_and_full_goals_run_the_panel_on_an_upheld_claim() {
                 let server = MockInferenceServer::start()
                     .await
                     .expect("mock inference server");
-                if mode == GoalMode::Lite {
-                    server.enqueue_response("/v1/responses", lite_capture());
-                }
+                // With the planner off, both modes start with the capture.
+                server.enqueue_response("/v1/responses", lite_capture());
                 server.enqueue_response(
                     "/v1/responses",
                     claim_verdict("upheld", &[], "Capture a Tracy trace of updateColor()"),

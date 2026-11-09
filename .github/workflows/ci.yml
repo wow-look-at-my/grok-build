@@ -121,9 +121,7 @@ jobs:
       - name: Install cargo-nextest
         run: |
           mkdir -p "${{ runner.temp }}/nextest-bin"
-          # A release CDN 504 window outlasted a fixed minute of retrying. curl now backs off
-          # from one second and keeps trying for ten minutes. The pinned bytes land when it clears.
-          curl -fsSL --retry 10 --retry-delay 0 --retry-max-time 600 --retry-all-errors -o "${{ runner.temp }}/nextest.tar.gz" \
+          curl -fsSL --retry 20 --retry-delay 30 --retry-max-time 600 --retry-all-errors -o "${{ runner.temp }}/nextest.tar.gz" \
             https://github.com/nextest-rs/nextest/releases/download/cargo-nextest-0.9.143/cargo-nextest-0.9.143-x86_64-unknown-linux-gnu.tar.gz
           tar -xzf "${{ runner.temp }}/nextest.tar.gz" -C "${{ runner.temp }}/nextest-bin"
           echo "${{ runner.temp }}/nextest-bin" >> "$GITHUB_PATH"
@@ -200,9 +198,7 @@ jobs:
       - name: Install cargo-nextest
         run: |
           mkdir -p "${{ runner.temp }}/nextest-bin"
-          # A release CDN 504 window outlasted a fixed minute of retrying. curl now backs off
-          # from one second and keeps trying for ten minutes. The pinned bytes land when it clears.
-          curl -fsSL --retry 10 --retry-delay 0 --retry-max-time 600 --retry-all-errors -o "${{ runner.temp }}/nextest.tar.gz" \
+          curl -fsSL --retry 20 --retry-delay 30 --retry-max-time 600 --retry-all-errors -o "${{ runner.temp }}/nextest.tar.gz" \
             https://github.com/nextest-rs/nextest/releases/download/cargo-nextest-0.9.143/cargo-nextest-0.9.143-x86_64-unknown-linux-gnu.tar.gz
           tar -xzf "${{ runner.temp }}/nextest.tar.gz" -C "${{ runner.temp }}/nextest-bin"
           echo "${{ runner.temp }}/nextest-bin" >> "$GITHUB_PATH"
@@ -302,8 +298,7 @@ jobs:
       - name: Install zig (pinned 0.14.1)
         if: matrix.darwin
         run: |
-          # The pinned bytes, retried past a CDN window: back off from a second for up to ten minutes.
-          curl -fsSL --retry 10 --retry-delay 0 --retry-max-time 600 --retry-all-errors -o "${{ runner.temp }}/zig.tar.xz" https://ziglang.org/download/0.14.1/zig-x86_64-linux-0.14.1.tar.xz
+          curl -fsSL --retry 20 --retry-delay 30 --retry-max-time 600 --retry-all-errors -o "${{ runner.temp }}/zig.tar.xz" https://ziglang.org/download/0.14.1/zig-x86_64-linux-0.14.1.tar.xz
           echo "24aeeec8af16c381934a6cd7d95c807a8cb2cf7df9fa40d359aa884195c4716c  ${{ runner.temp }}/zig.tar.xz" | sha256sum -c -
           mkdir -p "${{ runner.temp }}/zig"
           tar -xJf "${{ runner.temp }}/zig.tar.xz" -C "${{ runner.temp }}/zig" --strip-components=1
@@ -314,8 +309,7 @@ jobs:
       - name: Install the macOS SDK (pinned 14.5)
         if: matrix.darwin
         run: |
-          # The pinned bytes, retried past a CDN window: back off from a second for up to ten minutes.
-          curl -fsSL --retry 10 --retry-delay 0 --retry-max-time 600 --retry-all-errors -o "${{ runner.temp }}/sdk.tar.xz" \
+          curl -fsSL --retry 20 --retry-delay 30 --retry-max-time 600 --retry-all-errors -o "${{ runner.temp }}/sdk.tar.xz" \
             https://github.com/joseluisq/macosx-sdks/releases/download/14.5/MacOSX14.5.sdk.tar.xz
           echo "6e146275d19f027faa2e8354da5e0267513abf013b8f16ad65a231653a2b1c5d  ${{ runner.temp }}/sdk.tar.xz" | sha256sum -c -
           mkdir -p "$SDKROOT"
