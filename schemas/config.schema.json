@@ -5454,7 +5454,7 @@
 					"default": null
 				}
 			},
-			"description": "A `[model_providers.<id>]` block: the settings every model behind one\nendpoint shares. A `[model.<id>]` that names the provider with\n`model_provider = \"<id>\"` inherits each field it leaves unset, so an\nendpoint, a credential. A wire format or a header set is written once.\nEvery field here is also a `[model.<id>]` field, and the model's own value\nalways wins. What is NOT here is what identifies one model: `model`,\n`name`, `description`."
+			"description": "A `[model_providers.<id>]` block: the settings every model behind one\nendpoint shares. A `[model.<id>]` that names the provider with\n`model_provider = \"<id>\"` inherits each field it leaves unset, so an\nendpoint, a credential. A wire format or a header set is written once.\nEvery field here is also a `[model.<id>]` field, and the model's own value\nalways wins. What is NOT here is what identifies one model."
 		},
 		"ModelsListDialect": {
 			"oneOf": [
