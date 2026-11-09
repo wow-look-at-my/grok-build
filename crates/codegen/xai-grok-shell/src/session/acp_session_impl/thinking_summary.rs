@@ -117,6 +117,7 @@ impl SessionActor {
             ..Default::default()
         };
         let response = match super::side_call::collect_aux_call(
+            &self.chat_state_handle,
             &setup.client,
             &request,
             "thinking-summary",
@@ -145,9 +146,11 @@ impl SessionActor {
         // Record BEFORE the broadcast: the next call may draw on this.
         self.thinking_summary_history
             .record(stream_start_ms, summary.clone());
+        let session_cost_usd_ticks = self.reported_session_cost_ticks().await;
         self.send_xai_notification(XaiSessionUpdate::ThinkingSummary {
             stream_start_ms,
             summary,
+            session_cost_usd_ticks,
         })
         .await;
         Ok(())

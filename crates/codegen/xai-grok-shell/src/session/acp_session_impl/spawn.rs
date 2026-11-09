@@ -660,6 +660,12 @@ pub(crate) async fn spawn_session_actor(
     .await;
     drop(chat_state_timer);
     chat_state_handle.update_credentials(credentials);
+    // The persistence actor makes the first auto-title call. It bills to this session.
+    let _ = persistence
+        .tx
+        .send(crate::session::persistence::PersistenceMsg::SideCallLedger(
+            chat_state_handle.clone(),
+        ));
     let state = TokioMutex::new(State {
         running_task: None,
         finalization_gate: Default::default(),

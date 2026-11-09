@@ -20,6 +20,32 @@ pub(crate) enum ModelCallKind {
     SideCall,
 }
 
+/// Bill one model call into the prompt and session ledgers of `chat_state` and return the cost recorded.
+/// The cost is the provider-reported one (ticks, else the USD float the sampler converted).
+/// Otherwise it is `usage` priced at the rates `model_pricing::resolve` finds for `model_id`.
+pub(crate) fn bill_model_call(
+    chat_state: &xai_chat_state::ChatStateHandle,
+    kind: ModelCallKind,
+    model_id: Option<String>,
+    usage: &xai_grok_sampling_types::TokenUsage,
+    api_duration_ms: Option<u64>,
+    reported_cost_ticks: Option<i64>,
+) -> Option<i64> {
+    let cost_ticks = reported_cost_ticks.or_else(|| {
+        let pricing = crate::agent::model_pricing::resolve(model_id.as_deref().unwrap_or(""));
+        xai_grok_sampling_types::compute_cost_ticks(Some(usage), &pricing)
+    });
+    match kind {
+        ModelCallKind::MainLoop => {
+            chat_state.record_model_call_usage(model_id, usage.clone(), api_duration_ms, cost_ticks)
+        }
+        ModelCallKind::SideCall => {
+            chat_state.record_side_call_usage(model_id, usage.clone(), api_duration_ms, cost_ticks)
+        }
+    }
+    cost_ticks
+}
+
 /// Per-prompt cap on the Length tool-call salvage streak. Matches the agent implementation's `MAX_RETRY_ITERATIONS`.
 pub(super) const MAX_OUTPUT_TOKEN_LIMIT_RETRIES: u32 = 5;
 
@@ -945,7 +971,7 @@ impl SessionActor {
                         x_grok_agent_id: Some(xai_grok_telemetry::id::agent_id()),
                         ..ConversationRequest::default()
                     };
-                    let fut = sampling_client.conversation_collect(request);
+                    let fut = session.collect_side_call(&sampling_client, request);
                     let response = xai_grok_sampler::timeout_excluding_queue(classify_timeout, fut)
                         .await
                         .map_err(|_| xai_grok_workspace::permission::ClassifierFailure::Timeout)?
@@ -2472,25 +2498,14 @@ impl SessionActor {
         api_duration_ms: Option<u64>,
         reported_cost_ticks: Option<i64>,
     ) -> Option<i64> {
-        let cost_ticks = reported_cost_ticks.or_else(|| {
-            let pricing = crate::agent::model_pricing::resolve(model_id.as_deref().unwrap_or(""));
-            xai_grok_sampling_types::compute_cost_ticks(Some(usage), &pricing)
-        });
-        match kind {
-            ModelCallKind::MainLoop => self.chat_state_handle.record_model_call_usage(
-                model_id,
-                usage.clone(),
-                api_duration_ms,
-                cost_ticks,
-            ),
-            ModelCallKind::SideCall => self.chat_state_handle.record_side_call_usage(
-                model_id,
-                usage.clone(),
-                api_duration_ms,
-                cost_ticks,
-            ),
-        }
-        cost_ticks
+        bill_model_call(
+            &self.chat_state_handle,
+            kind,
+            model_id,
+            usage,
+            api_duration_ms,
+            reported_cost_ticks,
+        )
     }
 
     /// The session ledger's cost total in USD ticks, or `None` when nothing is priced or the ledger did not answer.
@@ -2506,19 +2521,11 @@ impl SessionActor {
         model_id: &str,
         call: crate::session::helpers::session_compact::CompactCallUsage,
     ) {
-        let xai_grok_sampler::stream::usage::CallUsage {
-            usage,
-            cost_usd_ticks,
-        } = call.reported;
-        if usage.is_none() && cost_usd_ticks.is_none() {
-            return;
-        }
-        self.record_model_call_cost(
-            ModelCallKind::SideCall,
-            Some(model_id.to_owned()),
-            &usage.unwrap_or_default(),
+        super::side_call::bill_side_call(
+            &self.chat_state_handle,
+            model_id,
+            call.reported,
             call.api_duration_ms,
-            cost_usd_ticks,
         );
     }
 

@@ -512,7 +512,7 @@ impl SessionActor {
             // of them would otherwise throw away the whole run's work. Same
             // bounded budget `/btw` uses.
             let response =
-                collect_aux_call(&sampling_client, &base_request, "todo", |e, backoff| {
+                collect_aux_call(&self.chat_state_handle, &sampling_client, &base_request, "todo", |e, backoff| {
                     tracing::warn!(
                         backoff_ms = backoff.as_millis() as u64,
                         error = %e,

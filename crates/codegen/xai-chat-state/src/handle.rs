@@ -16,7 +16,7 @@ use crate::types::{
 
 /// Handle to communicate with ChatStateActor.
 /// This is cheap to clone and can be shared across tasks.
-#[derive(Clone)]
+#[derive(Clone, Debug)]
 pub struct ChatStateHandle {
     cmd_tx: mpsc::UnboundedSender<ChatStateCommand>,
 }

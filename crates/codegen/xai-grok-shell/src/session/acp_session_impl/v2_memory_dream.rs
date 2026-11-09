@@ -1184,8 +1184,12 @@ impl SessionActor {
         };
         xai_grok_sampler::timeout_excluding_queue(
             V2_DREAM_MODEL_TIMEOUT,
-            sampling_client
-                .conversation_collect_with_idle_timeout(request, V2_DREAM_MODEL_IDLE_TIMEOUT),
+            super::side_call::collect_billed_side_call(
+                &self.chat_state_handle,
+                &sampling_client,
+                request,
+                V2_DREAM_MODEL_IDLE_TIMEOUT,
+            ),
         )
         .await
         .map_err(|_| V2DreamModelFailure {

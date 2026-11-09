@@ -257,6 +257,7 @@ mod rewind;
 mod session_setup;
 #[path = "acp_session_impl/side_call.rs"]
 mod side_call;
+pub(crate) use side_call::{bill_side_call, collect_billed_side_call};
 #[path = "acp_session_impl/todo_capture.rs"]
 mod todo_capture;
 pub use todo_capture::{TodoCaptureError, TodoCaptureOutcome};
@@ -2335,6 +2336,9 @@ mod recap_display_only_tests;
 #[cfg(test)]
 #[path = "acp_session_tests/reminder_policy_tests.rs"]
 mod reminder_policy_tests;
+#[cfg(test)]
+#[path = "acp_session_tests/side_call_billing_tests.rs"]
+mod side_call_billing_tests;
 #[cfg(test)]
 #[path = "acp_session_tests/thinking_summary_tests.rs"]
 mod thinking_summary_tests;

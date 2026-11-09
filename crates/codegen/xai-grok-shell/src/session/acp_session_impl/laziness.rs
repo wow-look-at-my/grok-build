@@ -271,7 +271,7 @@ impl SessionActor {
         }
     }
 
-    /// The sampler call goes through `prepare_chat_completion().conversation_collect()`, which never publishes on the per-session sampler channel.
+    /// The sampler call goes through `collect_side_call`, which never publishes on the per-session sampler channel.
     /// A stalled verdict only queues a `<system-reminder>` via `push_system_reminder`; nothing enters `pending_inputs`, so no synthetic turn fires.
     /// Debug mode adds logging; it does not bypass the production decision logic.
     pub(crate) async fn maybe_fire_laziness_check(self: Arc<Self>) {
@@ -472,7 +472,7 @@ impl SessionActor {
         // Dropping the future on abort cancels the HTTP request.
         let sampler_future = xai_grok_sampler::timeout_excluding_queue(
             std::time::Duration::from_millis(LAZINESS_CLASSIFIER_TIMEOUT_MS),
-            sampling_client.conversation_collect(request),
+            self.collect_side_call(&sampling_client, request),
         );
         tokio::pin!(sampler_future);
         let response = loop {

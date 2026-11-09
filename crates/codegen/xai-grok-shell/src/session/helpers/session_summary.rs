@@ -187,10 +187,12 @@ pub fn title_fallback_from_user_text(user_message: &str) -> String {
 
 /// Generate the initial session title from the first user message, for the fast first-prompt path ([`crate::session::summary::SummaryGenerator`]).
 /// The title is later refreshed from the whole conversation at the early checkpoints in [`TITLE_REFRESH_TURNS`], then frozen.
+/// The call bills to `ledger` when there is one.
 pub async fn generate_session_summary(
     user_message: String,
     client: OaiCompatClient,
     model: &str,
+    ledger: Option<&xai_chat_state::ChatStateHandle>,
 ) -> String {
     let clean_message = title_source_text(&user_message);
     let request = ConversationRequest::from_items(vec![
@@ -231,7 +233,18 @@ Just generate the session_title and nothing else"#,
     .with_temperature(1.0)
     .with_tool_choice(ConversationToolChoice::Function("session_title".to_owned()));
 
-    match client.conversation_collect(request).await {
+    let collected = client
+        .conversation_collect_metered(request, xai_grok_sampler::DEFAULT_COLLECT_IDLE_TIMEOUT)
+        .await;
+    if let Some(ledger) = ledger {
+        crate::session::acp_session::bill_side_call(
+            ledger,
+            &collected.model,
+            collected.usage,
+            collected.api_duration_ms,
+        );
+    }
+    match collected.result {
         Ok(response) => {
             if let Some(a) = response.assistant()
                 && let Some(tool_call) = a.tool_calls.first()

@@ -2393,6 +2393,7 @@
             update: XaiSessionUpdate::LastTurnSummary {
                 summary: summary.into(),
                 prompt_id: prompt_id.map(String::from),
+                session_cost_usd_ticks: None,
             },
             meta: None,
         };

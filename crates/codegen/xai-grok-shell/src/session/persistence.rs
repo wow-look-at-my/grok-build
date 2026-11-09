@@ -352,6 +352,8 @@ pub enum PersistenceMsg {
     /// Generated session title from background LLM task.
     /// Routed back through the persistence channel so the storage write stays sequential with other summary.json mutations.
     GeneratedTitle(String),
+    /// The session ledger that the first auto-title call bills to.
+    SideCallLedger(xai_chat_state::ChatStateHandle),
     /// Early-session title refresh (turns 3 and 6): overwrite an existing auto title with one regenerated from the whole conversation.
     /// Never overwrites a manual `/rename` (enforced atomically under the summary lock).
     RegenerateTitle(String),
@@ -2334,6 +2336,7 @@ impl SessionPersistence {
                         &self.info.cwd,
                     );
                 }
+                PersistenceMsg::SideCallLedger(ledger) => self.summary.set_ledger(ledger),
                 PersistenceMsg::GeneratedTitle(title) => {
                     // Auto-generated titles must never overwrite a title the user set via `/rename`
                     // `set_generated_title_if_absent` writes only when the session still has no title (checked atomically under the summary lock)

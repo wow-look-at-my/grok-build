@@ -1025,7 +1025,12 @@ impl SessionActor {
             )),
             result = xai_grok_sampler::timeout_excluding_queue(
                 EXTRACTION_TIMEOUT,
-                sampling_client.conversation_collect(request),
+                super::side_call::collect_billed_side_call(
+                    &chat_state_handle,
+                    &sampling_client,
+                    request,
+                    xai_grok_sampler::DEFAULT_COLLECT_IDLE_TIMEOUT,
+                ),
             ) => result,
         }
         .map_err(|_| {

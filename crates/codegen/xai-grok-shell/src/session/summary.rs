@@ -32,6 +32,8 @@ pub(crate) struct SummaryConfig {
 pub(crate) struct SummaryGenerator {
     state: State,
     config: SummaryConfig,
+    /// The session ledger the title call bills to. `None` until the session sends it.
+    ledger: Option<xai_chat_state::ChatStateHandle>,
 }
 
 impl SummaryGenerator {
@@ -39,7 +41,12 @@ impl SummaryGenerator {
         Self {
             state: State::Idle,
             config,
+            ledger: None,
         }
+    }
+
+    pub(crate) fn set_ledger(&mut self, ledger: xai_chat_state::ChatStateHandle) {
+        self.ledger = Some(ledger);
     }
 
     /// Generate a session summary from the first content chunk.
@@ -61,6 +68,7 @@ impl SummaryGenerator {
                 let sampling_client = self.config.sampling_client.clone();
                 let model = self.config.model.clone();
                 let persistence_tx = self.config.persistence_tx.clone();
+                let ledger = self.ledger.clone();
 
                 // Spawn title generation as a background task so the
                 // persistence actor can continue processing messages
@@ -70,7 +78,13 @@ impl SummaryGenerator {
                     async move {
                         let mut title = match sampling_client {
                             Some(client) => {
-                                generate_session_summary(content.clone(), client, &model).await
+                                generate_session_summary(
+                                    content.clone(),
+                                    client,
+                                    &model,
+                                    ledger.as_ref(),
+                                )
+                                .await
                             }
                             None => String::new(),
                         };

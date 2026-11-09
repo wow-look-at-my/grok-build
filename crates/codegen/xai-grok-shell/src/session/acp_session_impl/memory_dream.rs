@@ -528,8 +528,8 @@ impl SessionActor {
             x_grok_agent_id: Some(xai_grok_telemetry::id::agent_id()),
             ..Default::default()
         };
-        let response = sampling_client
-            .conversation_collect(request)
+        let response = self
+            .collect_side_call(&sampling_client, request)
             .await
             .map_err(|e| {
                 acp::Error::internal_error().data(format!("dream model call failed: {e}"))
@@ -666,11 +666,16 @@ impl SessionActor {
             };
 
             // Run on the multi-threaded runtime so it doesn't block the session's LocalSet
+            let ledger = self.chat_state_handle.clone();
             let handle = xai_spawn::spawn(async move {
-                let response = sampling_client
-                    .conversation_collect(request)
-                    .await
-                    .map_err(|e| format!("flush model call failed: {e}"))?;
+                let response = super::side_call::collect_billed_side_call(
+                    &ledger,
+                    &sampling_client,
+                    request,
+                    xai_grok_sampler::DEFAULT_COLLECT_IDLE_TIMEOUT,
+                )
+                .await
+                .map_err(|e| format!("flush model call failed: {e}"))?;
                 Ok::<_, String>(response.assistant_text())
             });
             // Abort the spawned task if this future is dropped (session cancellation), preventing orphan HTTP streams
@@ -929,9 +934,13 @@ impl SessionActor {
         };
 
         // Collect via the client so the LengthPolicy gate applies: a note truncated at the 1024-token cap must not persist to MEMORY.md
-        match sampling_client
-            .conversation_collect_with_idle_timeout(request, std::time::Duration::from_secs(15))
-            .await
+        match super::side_call::collect_billed_side_call(
+            &self.chat_state_handle,
+            &sampling_client,
+            request,
+            std::time::Duration::from_secs(15),
+        )
+        .await
         {
             Ok(response) => {
                 let text = response.assistant_text();

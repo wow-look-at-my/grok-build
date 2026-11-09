@@ -245,7 +245,7 @@ impl SessionActor {
                 }
             };
             let request = build(parse_error.as_deref());
-            let response = match client.conversation_collect(request).await {
+            let response = match self.collect_side_call(&client, request).await {
                 Ok(response) => response,
                 Err(error) => {
                     let _ = self

@@ -2845,7 +2845,7 @@ impl SamplingClient {
         &self,
         request: ConversationRequest,
     ) -> Result<ConversationResponse> {
-        self.conversation_collect_with_idle_timeout(request, std::time::Duration::from_secs(300))
+        self.conversation_collect_with_idle_timeout(request, DEFAULT_COLLECT_IDLE_TIMEOUT)
             .await
     }
 
@@ -2856,10 +2856,60 @@ impl SamplingClient {
         request: ConversationRequest,
         idle_timeout: std::time::Duration,
     ) -> Result<ConversationResponse> {
+        self.conversation_collect_metered(request, idle_timeout)
+            .await
+            .result
+    }
+
+    /// [`Self::conversation_collect_with_idle_timeout`] that also returns the usage the provider reported.
+    /// The usage stays when the length policy rejects the response, because the provider bills that call.
+    pub async fn conversation_collect_metered(
+        &self,
+        request: ConversationRequest,
+        idle_timeout: std::time::Duration,
+    ) -> MeteredCollect {
         let model = request
             .model
             .clone()
             .unwrap_or_else(|| self.defaults.model.clone());
+        let length_policy = request.length_policy;
+        let started = std::time::Instant::now();
+        match self
+            .collect_switching_backends(request, idle_timeout, &model)
+            .await
+        {
+            Ok(response) => {
+                let usage = crate::stream::usage::CallUsage {
+                    usage: response.usage.clone(),
+                    cost_usd_ticks: xai_grok_sampling_types::reported_cost_ticks(
+                        response.cost_usd_ticks,
+                    ),
+                };
+                MeteredCollect {
+                    result: apply_length_policy(length_policy, response),
+                    model,
+                    usage,
+                    api_duration_ms: Some(
+                        u64::try_from(started.elapsed().as_millis()).unwrap_or(u64::MAX),
+                    ),
+                }
+            }
+            Err(err) => MeteredCollect {
+                result: Err(err),
+                model,
+                usage: crate::stream::usage::CallUsage::default(),
+                api_duration_ms: None,
+            },
+        }
+    }
+
+    /// Collect one response before the length policy. A model the provider refuses on this backend goes out on the others.
+    async fn collect_switching_backends(
+        &self,
+        request: ConversationRequest,
+        idle_timeout: std::time::Duration,
+        model: &str,
+    ) -> Result<ConversationResponse> {
         let mut probe = crate::backend_detect::BackendProbe::default();
         let mut client = self.clone();
         loop {
@@ -2871,7 +2921,7 @@ impl SamplingClient {
                     if probe.switched() {
                         crate::backend_detect::remember(
                             &self.base_url,
-                            &model,
+                            model,
                             client.api_backend(),
                         );
                     }
@@ -2915,7 +2965,6 @@ impl SamplingClient {
         idle_timeout: std::time::Duration,
     ) -> Result<ConversationResponse> {
         let request_id = crate::types::RequestId::random();
-        let length_policy = request.length_policy;
         let result = match self.api_backend() {
             ApiBackend::ChatCompletions => {
                 let (raw, meta) = self.conversation_stream(request).await?;
@@ -2940,11 +2989,25 @@ impl SamplingClient {
                 crate::stream::collect_response(events).await
             }
         };
-        let response = result
+        result
             .map(|(response, _metrics)| response)
-            .map_err(stream_collect_error)?;
-        apply_length_policy(length_policy, response)
+            .map_err(stream_collect_error)
     }
+}
+
+/// The idle timeout [`SamplingClient::conversation_collect`] uses.
+pub const DEFAULT_COLLECT_IDLE_TIMEOUT: std::time::Duration = std::time::Duration::from_secs(300);
+
+/// One collected call and the usage the provider reported for it.
+#[derive(Debug)]
+pub struct MeteredCollect {
+    pub result: Result<ConversationResponse>,
+    /// The model the request named, else the client's default model.
+    pub model: String,
+    /// Empty when no response arrived.
+    pub usage: crate::stream::usage::CallUsage,
+    /// Wall time of the call, when a response arrived.
+    pub api_duration_ms: Option<u64>,
 }
 
 /// Keep `slot` until the stream is dropped: the request is in flight for as
