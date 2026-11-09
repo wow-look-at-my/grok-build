@@ -166,6 +166,12 @@ CI is the source of truth and builds every pushed branch. A branch that is only 
 - `[ui].thinking_summaries` and `[ui].thinking_summary_history_*` apply to a session that already runs. The config watcher sends `ReloadThinkingSummaries` to every resident session, the same path as the output-rate floor.
 - Headless `streaming-json` emits a `thinking_summary` line. The Messages format has no field for it and drops it.
 
+## A model that takes an effort always carries one
+
+- Without an effort, the Messages builder sends no `thinking` block, so the model returns no thinking and no `display: "summarized"` summary. No effort is never a stand-in for "off". Reasoning goes off only through an explicit `none` (`/effort none`, also spelled `off` or `disabled`), and only on a model whose menu offers it.
+- `ModelsManager::apply_supported_effort` (`mvp_agent/reasoning_effort.rs`) enforces it. Every path that builds a session's config calls it: new session, load, model switch, subagent spawn. Called with no effort on a config that carries none, it applies `default_effort_for`. That is the catalog default, else `ReasoningNeed::Default` (`reasoning_policy.rs`): the menu's marked option, else Medium, else the nearest offered tier. The default never resolves to `none`.
+- A child pinned to its own model (a `[subagents.models]` pin, its definition, a goal role, `@sonnet`) first tries the parent's live effort, else the root default (`child_effort_fallback` in `subagent/handle_request.rs`).
+
 ## Streaming tool-call notes
 
 [docs/streaming-tool-call-notes.md](docs/streaming-tool-call-notes.md) holds this section.
@@ -226,6 +232,7 @@ CI is the source of truth and builds every pushed branch. A branch that is only 
 - A model the provider refuses on the configured backend goes out again on the others (`xai-grok-sampler/src/backend_detect.rs`). The triggers are `is_unsupported_backend_error` ("only supported in v1/responses", Copilot's `unsupported_api_for_model`) and `is_endpoint_missing_error` (a router 404, any 405), in `xai-grok-sampling-types/src/backend_mismatch.rs`.
 - A backend the error names goes first, then Chat Completions, Responses, Messages. Ollama's native API never takes part. Once the request left its first backend, any 4xx other than 401/403/429 moves it on. When none answers, the first refusal is the reported error.
 - The backend that answers is kept per (base URL, model) for the process. `SamplingClient::new` and `resolve_api_backend` read it. The actor loop (`RetryWithBackendSwitch`) and `conversation_collect` both run the walk.
+- A gateway can serve a model on a translated API that works but loses features: a Claude on Chat Completions has no thinking. No error fires. A listed model starts on the API it is native to (`listed_native_backend` in `remote/client.rs`). A per-model `supported_endpoints` list decides first: Messages, then Responses, then Chat Completions. Otherwise an Anthropic model (by `owned_by`, model family, Anthropic's row shape or a `claude` id) takes Messages. An `apiBackend` in the row or the config wins. A gateway with no `/v1/messages` route falls back through the walk above.
 
 ## Tool-call provider-field notes
 

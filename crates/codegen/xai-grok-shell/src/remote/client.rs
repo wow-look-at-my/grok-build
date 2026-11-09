@@ -808,6 +808,7 @@ pub(crate) fn parse_remote_model_value(
             "ollama" => Some(crate::sampling::ApiBackend::Ollama),
             _ => None,
         })
+        .or_else(|| listed_native_backend(obj, &model, model_family.as_deref()))
         .unwrap_or_default();
     let (reasoning_efforts, reasoning_effort_server_default) = obj
         .get("reasoningEfforts")
@@ -1061,6 +1062,59 @@ pub(crate) fn parse_listing_pricing(
     }
     xai_grok_sampling_types::ModelPricing::default()
 }
+
+/// The API a listed model is native to, for a listing row that names no
+/// `apiBackend`. A gateway can serve a Claude model through Chat Completions
+/// too, but that path drops the thinking. A guess the server has no route for
+/// falls back to the other backends (`xai_grok_sampler::backend_detect`).
+fn listed_native_backend(
+    obj: &serde_json::Map<String, serde_json::Value>,
+    model: &str,
+    model_family: Option<&str>,
+) -> Option<crate::sampling::ApiBackend> {
+    use crate::sampling::ApiBackend;
+    // GitHub Copilot and the gateways that copy it list the paths per model.
+    let endpoints: Vec<&str> = ["supported_endpoints", "supportedEndpoints"]
+        .iter()
+        .filter_map(|key| obj.get(*key).and_then(|v| v.as_array()))
+        .flatten()
+        .filter_map(|v| v.as_str())
+        .collect();
+    if !endpoints.is_empty() {
+        let serves = |path: &str| {
+            endpoints
+                .iter()
+                .any(|e| e.trim_end_matches('/').ends_with(path))
+        };
+        return if serves("/messages") {
+            Some(ApiBackend::Messages)
+        } else if serves("/responses") {
+            Some(ApiBackend::Responses)
+        } else if serves("/chat/completions") {
+            Some(ApiBackend::ChatCompletions)
+        } else {
+            None
+        };
+    }
+    let is_anthropic = |s: &str| {
+        let s = s.to_ascii_lowercase();
+        s == "anthropic" || s == "claude"
+    };
+    // Anthropic's own listing marks each row `"type": "model"`.
+    let anthropic_row = obj.get("type").and_then(|v| v.as_str()) == Some("model")
+        && obj.contains_key("display_name");
+    let slug = model
+        .rsplit('/')
+        .next()
+        .unwrap_or(model)
+        .to_ascii_lowercase();
+    let anthropic = anthropic_row
+        || get_string(obj, "owned_by").is_some_and(|o| is_anthropic(&o))
+        || model_family.is_some_and(is_anthropic)
+        || slug.starts_with("claude");
+    anthropic.then_some(ApiBackend::Messages)
+}
+
 fn get_string(obj: &serde_json::Map<String, serde_json::Value>, key: &str) -> Option<String> {
     obj.get(key).and_then(|v| v.as_str()).map(|s| s.to_string())
 }
