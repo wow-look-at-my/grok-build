@@ -48,7 +48,11 @@ use xai_grok_sampling_types::{
 
 use crate::config::{AuthScheme, OriginClientInfo, RequestCompression, SamplerConfig};
 use crate::events::SamplingErrorInfo;
-use crate::request_compression::{compress_body, note_response_headers, should_compress};
+use crate::request_compression::{
+    BASE_HEADER, BASE_MISSING_HEADER, DELTA_HEADER, DELTA_VALUE, MAX_DELTA_WINDOW_BYTES,
+    compress_body, compress_body_against, delta_capable, note_response_headers, origin_key,
+    sha256_hex, should_compress,
+};
 use crate::span_timing::{ERROR, STATUS_CODE, SUCCESS, StreamSpanTiming};
 use crate::stream_classify::{chat_chunk_class, message_event_class, responses_event_class};
 use xai_grok_auth::bearer_suffix;
@@ -66,6 +70,24 @@ struct HttpRequest {
     body: Option<Vec<u8>>,
     /// The first header that did not parse. `send` fails with it.
     invalid_header: Option<&'static str>,
+    /// Set when the body went to a delta relay, which keeps it as the next base.
+    delta: Option<DeltaPlan>,
+}
+
+/// What a delta relay keeps of one request, and how to resend it.
+struct DeltaPlan {
+    origin: String,
+    plain: Arc<[u8]>,
+    /// The body was encoded against the client's last base.
+    against_base: bool,
+}
+
+/// The last body a delta relay kept for this client.
+#[derive(Clone)]
+struct DeltaBase {
+    origin: String,
+    hash: String,
+    body: Arc<[u8]>,
 }
 
 impl HttpRequest {
@@ -779,6 +801,8 @@ pub struct SamplingClient {
     /// Endpoint URL builder, resolved once from `base_url` and `query_params`.
     endpoint: EndpointTemplate,
     first_use_noted: Arc<AtomicBool>,
+    /// Shared by clones, so every request of one session builds on the last.
+    delta_base: Arc<std::sync::Mutex<Option<DeltaBase>>>,
 }
 
 impl std::fmt::Debug for SamplingClient {
@@ -1172,6 +1196,7 @@ impl SamplingClient {
             header_injector: config.header_injector,
             endpoint,
             first_use_noted: Arc::new(AtomicBool::new(false)),
+            delta_base: Arc::default(),
         })
     }
 
@@ -1220,6 +1245,7 @@ impl SamplingClient {
                 headers,
                 body: None,
                 invalid_header: None,
+                delta: None,
             },
             sent_bearer,
         }
@@ -1498,24 +1524,127 @@ impl SamplingClient {
         let mut request = builder.json(payload).inspect_err(|e| {
             tracing::error!("Failed to serialize request body: {}", e);
         })?;
-        if let Some(json) = request.body.take() {
-            let body =
-                if should_compress(self.defaults.request_compression, &request.url, json.len()) {
-                    match compress_body(&json).await {
-                        Some(compressed) => {
-                            request
-                                .headers
-                                .insert(CONTENT_ENCODING, HeaderValue::from_static("zstd"));
-                            compressed
-                        }
-                        None => json,
-                    }
-                } else {
-                    json
-                };
-            request.body = Some(body);
+        let Some(json) = request.body.take() else {
+            return Ok(request);
+        };
+        if !should_compress(self.defaults.request_compression, &request.url, json.len()) {
+            request.body = Some(json);
+            return Ok(request);
         }
+        let delta_origin = origin_key(&request.url).filter(|_| delta_capable(&request.url));
+        let Some(origin) = delta_origin else {
+            request.body = Some(match compress_body(&json).await {
+                Some(compressed) => {
+                    request
+                        .headers
+                        .insert(CONTENT_ENCODING, HeaderValue::from_static("zstd"));
+                    compressed
+                }
+                None => json,
+            });
+            return Ok(request);
+        };
+
+        let plain: Arc<[u8]> = Arc::from(json);
+        let base = self.delta_base_for(&origin, plain.len());
+        let mut against_base = false;
+        let mut body = None;
+        if let Some(base) = &base {
+            body = compress_body_against(plain.clone(), base.body.clone()).await;
+            against_base = body.is_some();
+        }
+        if body.is_none() {
+            body = compress_body(&plain).await;
+        }
+        let Some(body) = body else {
+            request.body = Some(plain.to_vec());
+            return Ok(request);
+        };
+        request
+            .headers
+            .insert(CONTENT_ENCODING, HeaderValue::from_static("zstd"));
+        request
+            .headers
+            .insert(DELTA_HEADER, HeaderValue::from_static(DELTA_VALUE));
+        if let Some(base) = base.filter(|_| against_base)
+            && let Ok(value) = HeaderValue::from_str(&base.hash)
+        {
+            request.headers.insert(BASE_HEADER, value);
+        }
+        request.body = Some(body);
+        request.delta = Some(DeltaPlan {
+            origin,
+            plain,
+            against_base,
+        });
         Ok(request)
+    }
+
+    /// The last base a delta relay at `origin` kept, when a frame built on it
+    /// stays within the relay's decoder window.
+    fn delta_base_for(&self, origin: &str, plain_len: usize) -> Option<DeltaBase> {
+        let guard = self.delta_base.lock().ok()?;
+        guard
+            .as_ref()
+            .filter(|base| base.origin == origin)
+            .filter(|base| base.body.len() + plain_len <= MAX_DELTA_WINDOW_BYTES)
+            .cloned()
+    }
+
+    fn remember_delta_base(&self, plan: DeltaPlan) {
+        let base = DeltaBase {
+            hash: sha256_hex(&plan.plain),
+            origin: plan.origin,
+            body: plan.plain,
+        };
+        if let Ok(mut guard) = self.delta_base.lock() {
+            *guard = Some(base);
+        }
+    }
+
+    /// Send `request`. A body the relay accepted becomes the next base.
+    async fn send_net(&self, mut request: HttpRequest) -> Result<xai_grok_net::Response> {
+        let plan = request.delta.take();
+        let resend = plan.as_ref().filter(|plan| plan.against_base).map(|_| {
+            (
+                request.url.clone(),
+                request.auth.clone(),
+                request.headers.clone(),
+            )
+        });
+        let response = self.net_request(request)?.send().await?;
+        note_response_headers(response.url().as_str(), response.headers());
+        let base_missing = response.status() == xai_grok_net::StatusCode::CONFLICT
+            && response.headers().contains_key(BASE_MISSING_HEADER);
+        let response = match (resend, &plan) {
+            (Some((url, auth, mut headers)), Some(plan)) if base_missing => {
+                tracing::info!(origin = %plan.origin, "delta relay lost the base; resending the full body");
+                headers.remove(BASE_HEADER);
+                let body = match compress_body(&plan.plain).await {
+                    Some(compressed) => compressed,
+                    None => {
+                        headers.remove(CONTENT_ENCODING);
+                        plan.plain.to_vec()
+                    }
+                };
+                let retry = HttpRequest {
+                    url,
+                    auth,
+                    headers,
+                    body: Some(body),
+                    invalid_header: None,
+                    delta: None,
+                };
+                let response = self.net_request(retry)?.send().await?;
+                note_response_headers(response.url().as_str(), response.headers());
+                response
+            }
+            _ => response,
+        };
+        if let Some(plan) = plan {
+            self.remember_delta_base(plan);
+        }
+        Ok(response)
     }
 
     /// Hand `request` to `xai-grok-net`, which writes its credential.
@@ -1535,13 +1664,9 @@ impl SamplingClient {
     }
 
     async fn send(&self, request: HttpRequest) -> Result<xai_grok_net::Response> {
-        let response = self
-            .net_request(request)?
-            .send()
+        self.send_net(request)
             .await
-            .inspect_err(|e| tracing::debug!("HTTP request failed: {}", e))?;
-        note_response_headers(response.url().as_str(), response.headers());
-        Ok(response)
+            .inspect_err(|e| tracing::debug!("HTTP request failed: {}", e))
     }
 
     async fn execute_stream_request(
@@ -1550,13 +1675,11 @@ impl SamplingClient {
         span_timing: &mut StreamSpanTiming,
     ) -> Result<xai_grok_net::Response> {
         span_timing.record_request_build();
-        let response = self.net_request(built_request)?.send().await.map_err(|e| {
+        let response = self.send_net(built_request).await.inspect_err(|e| {
             tracing::debug!("HTTP request failed: {}", e);
             span_timing.record_transport_failure(&e.to_string());
-            e
         })?;
         span_timing.record_response_headers();
-        note_response_headers(response.url().as_str(), response.headers());
         Ok(response)
     }
 
@@ -3922,6 +4045,178 @@ mod tests {
 
     fn large_input() -> String {
         "x".repeat(2 * crate::request_compression::MIN_COMPRESS_BYTES)
+    }
+
+    /// Text zstd cannot shrink by itself, so only a delta makes it small.
+    fn incompressible_text(seed: u64, len: usize) -> String {
+        let mut state = seed;
+        let mut out = String::with_capacity(len);
+        while out.len() < len {
+            state = state
+                .wrapping_mul(6364136223846793005)
+                .wrapping_add(1442695040888963407);
+            out.push_str(&format!("{:016x} ", state));
+        }
+        out
+    }
+
+    struct RelayHit {
+        wire_len: usize,
+        base: Option<String>,
+        status: u16,
+        plain: Option<String>,
+    }
+
+    async fn delta_relay() -> (
+        String,
+        Arc<std::sync::Mutex<Vec<RelayHit>>>,
+        Arc<std::sync::Mutex<std::collections::HashMap<String, Vec<u8>>>>,
+        tokio::task::JoinHandle<()>,
+    ) {
+        let hits = Arc::new(std::sync::Mutex::new(Vec::<RelayHit>::new()));
+        let store = Arc::new(std::sync::Mutex::new(std::collections::HashMap::<
+            String,
+            Vec<u8>,
+        >::new()));
+        let handler = post({
+            let (hits, store) = (hits.clone(), store.clone());
+            move |headers: axum::http::HeaderMap, body: Bytes| {
+                let (hits, store) = (hits.clone(), store.clone());
+                async move {
+                    let base = header(&headers, BASE_HEADER.parse().unwrap()).map(str::to_owned);
+                    let zstd = header(&headers, CONTENT_ENCODING) == Some("zstd");
+                    let base_body = base.as_ref().map(|h| store.lock().unwrap().get(h).cloned());
+                    let (status, plain) = match base_body {
+                        Some(None) => (409, None),
+                        Some(Some(base)) => {
+                            let mut decoder =
+                                zstd::stream::read::Decoder::with_ref_prefix(&body[..], &base)
+                                    .unwrap();
+                            decoder.window_log_max(31).unwrap();
+                            let mut out = Vec::new();
+                            std::io::Read::read_to_end(&mut decoder, &mut out).unwrap();
+                            (200, Some(out))
+                        }
+                        None if zstd => (200, Some(zstd::decode_all(&body[..]).unwrap())),
+                        None => (200, Some(body.to_vec())),
+                    };
+                    if let Some(plain) = &plain
+                        && header(&headers, DELTA_HEADER.parse().unwrap()).is_some()
+                    {
+                        store
+                            .lock()
+                            .unwrap()
+                            .insert(sha256_hex(plain), plain.clone());
+                    }
+                    hits.lock().unwrap().push(RelayHit {
+                        wire_len: body.len(),
+                        base,
+                        status,
+                        plain: plain.map(|p| String::from_utf8(p).unwrap()),
+                    });
+                    let mut response = axum::response::Response::builder()
+                        .status(status)
+                        .header("content-type", "application/json")
+                        .header("accept-encoding", "zstd")
+                        .header(DELTA_HEADER, DELTA_VALUE);
+                    if status == 409 {
+                        response = response.header(BASE_MISSING_HEADER, "1");
+                    }
+                    let reply = if status == 409 {
+                        r#"{"type":"error","error":{"type":"zstd_base_missing","message":"gone"}}"#
+                    } else {
+                        EMPTY_MESSAGE_JSON
+                    };
+                    response.body(axum::body::Body::from(reply)).unwrap()
+                }
+            }
+        });
+        let app = Router::new().route("/v1/messages", handler);
+        let listener = TcpListener::bind("127.0.0.1:0").await.unwrap();
+        let addr = listener.local_addr().unwrap();
+        let server = xai_spawn::spawn(async move {
+            let _ = axum::serve(listener, app).await;
+        });
+        (format!("http://{addr}/v1"), hits, store, server)
+    }
+
+    /// The whole delta protocol against a relay: a full frame first, then a
+    /// small delta on the prior body. Then a full resend after the relay
+    /// forgets its bases.
+    #[tokio::test]
+    async fn delta_relay_receives_small_deltas_and_full_resends() {
+        use xai_grok_sampling_types::{ContentPart, ConversationItem, UserItem};
+
+        let (base_url, hits, store, server) = delta_relay().await;
+        let client = SamplingClient::new(SamplerConfig {
+            base_url,
+            api_backend: ApiBackend::Messages,
+            ..minimal_config()
+        })
+        .unwrap();
+        let history = incompressible_text(7, 3 * crate::request_compression::MIN_COMPRESS_BYTES);
+        let user = |text: &str| {
+            ConversationItem::User(UserItem {
+                content: vec![ContentPart::Text {
+                    text: Arc::from(text),
+                }],
+                ..Default::default()
+            })
+        };
+        let send = |items: Vec<ConversationItem>| {
+            let client = client.clone();
+            async move {
+                client
+                    .conversation_messages(ConversationRequest {
+                        items,
+                        ..Default::default()
+                    })
+                    .await
+                    .map(drop)
+            }
+        };
+
+        send(vec![user(&history)]).await.expect("learns the relay");
+        send(vec![user(&history), user("second turn")])
+            .await
+            .expect("full frame");
+        send(vec![
+            user(&history),
+            user("second turn"),
+            user("third turn"),
+        ])
+        .await
+        .expect("delta");
+        store.lock().unwrap().clear();
+        send(vec![user(&history), user("fourth turn")])
+            .await
+            .expect("resend after a lost base");
+        server.abort();
+
+        let hits = hits.lock().unwrap();
+        assert_eq!(hits.len(), 5, "learn, full, delta, 409, resend");
+        assert!(hits[0].base.is_none() && hits[1].base.is_none());
+        let full = &hits[1];
+        let delta = &hits[2];
+        assert!(
+            delta.base.is_some(),
+            "the third request names the second as its base"
+        );
+        assert_eq!(delta.status, 200);
+        assert!(
+            delta.plain.as_deref().unwrap().contains("third turn")
+                && delta.plain.as_deref().unwrap().contains(&history[..64]),
+            "the relay rebuilt the whole body"
+        );
+        assert!(
+            delta.wire_len * 20 < full.wire_len,
+            "a delta carries only the new turn: delta {} bytes, full {} bytes",
+            delta.wire_len,
+            full.wire_len
+        );
+        assert_eq!(hits[3].status, 409);
+        assert!(hits[4].base.is_none(), "the resend drops the base");
+        assert!(hits[4].plain.as_deref().unwrap().contains("fourth turn"));
     }
 
     /// RFC 7694: a server that answers with `Accept-Encoding: zstd` gets zstd
