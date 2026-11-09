@@ -260,6 +260,7 @@ CI is the source of truth and builds every pushed branch. A branch that is only 
 ## CI builds from clean
 
 - A crate's integration tests build as one `it` binary (`tests/it/main.rs`, one module per former file). Select tests by module path (`cargo nextest run -E 'binary(it) and test(/^module::/)'`). Run them with nextest: several set process-global state (`grok_home()`, env vars, the tracer) and pass only one test per process.
+- CI downloads GitHub release assets through `mirror.pazer.build` (`.github/actions/release-mirror`, called by `setup-protoc`), with the read token secret-server vends. A new release download in CI or in a build script goes through `$GROK_RELEASE_MIRROR/github.com/...` too.
 - CI has no compile cache. Every job compiles the whole dependency graph, so the number of registry crates is what sets its build time. Check what a new dependency pulls in (`cargo tree -e normal,build,dev -i <crate>`) before adding it.
 - Spawn tasks through `xai_spawn` (`spawn`, `spawn_blocking`, `spawn_local`, `spawn_on`, `spawn_in`), not through tokio directly. tokio compiles its task code once for each future type. The wrappers box the future first, so tokio compiles it once for each output type.
 - The read tools reach `pdf_oxide` only through `xai_tool_types::pdf`. `xai-grok-pdf` holds the engine, and each binary calls `xai_grok_pdf::install()` in `main`. Never add `pdf_oxide` or `xai-grok-pdf` to a library's `[dependencies]`. That puts a crate of several hundred thousand lines back in front of tools, workspace, shell and pager.
