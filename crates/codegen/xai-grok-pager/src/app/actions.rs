@@ -735,8 +735,8 @@ pub enum Action {
         /// The user typed `/TODO`, so the items go to the top of the list.
         urgent: bool,
     },
-    /// Spawn a background subagent on a model family (`@sonnet`, `@haiku`, `@opus`).
-    /// Bypasses the queue, so it works while the agent is busy.
+    /// Spawn a background subagent on a model family. Bypasses the queue, so it
+    /// works while the agent is busy.
     SpawnModelAgent {
         family: String,
         effort: Option<String>,

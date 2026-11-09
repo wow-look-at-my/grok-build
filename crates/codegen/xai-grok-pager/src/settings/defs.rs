@@ -57,9 +57,9 @@ pub(crate) const OUTPUT_RATE_FLOOR_CHILDREN: &[&str] = &[
 // ---------------------------------------------------------------------------
 // Theme choice catalogs.
 //
-// Canonical names MUST match `ThemeKind::display_name()`. Shared by `theme`,
-// `auto_dark_theme`, and `auto_light_theme`; auto-* sub-pickers drop "auto"
-// to avoid circular reference. Bounded by `MAX_PICKER_CHOICES`.
+// Canonical names MUST match `ThemeKind::display_name()`. Shared; auto-*
+// sub-pickers drop "auto" to avoid circular reference. Bounded by
+// `MAX_PICKER_CHOICES`.
 // ---------------------------------------------------------------------------
 
 /// Full theme catalog including the "auto" meta-variant; only `theme` uses it.

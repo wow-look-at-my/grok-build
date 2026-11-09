@@ -41,7 +41,6 @@ pub(crate) fn dest_path_contains(parent: &Path, child: &Path) -> bool {
     child.len() >= parent.len() && child[..parent.len()] == parent[..]
 }
 
-/// macOS exposes `/tmp`, `/var`, `/etc` and `/tftpboot` as symlinks into `/private/`.
 #[cfg(target_os = "macos")]
 const PRIVATE_ALIAS_DIRS: [&str; 4] = ["tmp", "var", "etc", "tftpboot"];
 

@@ -22,7 +22,7 @@ pub enum ConfigUpdate {
     /// `load_claude_json_mcp_servers_as_configs` reads this file for every session, so the reload cannot be narrowed by cwd.
     /// to matching cwds. Those are `<cwd>/.grok/config.json`, `<cwd>/.mcp.json`, and the project-level `<cwd>/.claude.json`.
     McpServersChanged,
-    /// A **project-scoped** MCP config file changed (`<cwd>/.grok/config.json`, `<cwd>/.mcp.json`, or `<cwd>/.claude.json`). The agent should reload MCP only for sessions whose cwd matches `cwd` (or sits beneath it).
+    /// A **project-scoped** MCP config file changed. The agent should reload MCP only for sessions whose cwd matches `cwd` (or sits beneath it).
     /// Strictly additive to [`Self::McpServersChanged`]: the unit variant continues to fire for global-config edits. The two cases are split so per-project reloads don't thrash unrelated sessions.
     ProjectMcpServersChanged {
         /// The project root whose `.grok/`, `.mcp.json`, or `.claude.json` file was edited.
@@ -36,7 +36,6 @@ pub enum ConfigUpdate {
     /// Updated `[compat]` vendor-compatibility config.
     /// It is applied on the next agent (re)build, which re-resolves `compat_resolved`.
     Compat(Box<xai_grok_tools::types::compat::CompatConfigToml>),
-    /// The `models.definitions.*`, `models` or `models.groups` objects in config.json changed.
     /// The agent should re-resolve its model list (BYOK models added/removed, default or surprise changed).
     ModelsChanged,
     /// `~/.grok/models_cache.json` was rewritten on disk (possibly by another grok process sharing the home dir). The agent should consult the cache via `ModelsManager::reload_from_disk_cache`.
@@ -376,8 +375,7 @@ impl ConfigReloader {
     }
 }
 
-/// True when a table that model resolution reads changed: `[model.*]`,
-/// `[models]`, `[model_groups]` or `[subagents]` (its per-type pins).
+/// True when a table that model resolution reads changed.
 fn model_tables_changed(old: &toml::Value, new: &toml::Value) -> bool {
     ["model", "models", "model_groups", "subagents"]
         .iter()

@@ -149,7 +149,6 @@ pub struct OllamaTagsResponse {
 /// `POST /api/show` — capabilities and the architecture's true context length.
 #[derive(Debug, Clone, Deserialize, Default)]
 pub struct OllamaShowResponse {
-    /// `completion`, `tools`, `vision`, `thinking`, `insert`, `embedding`, …
     #[serde(default)]
     pub capabilities: Vec<String>,
     /// GGUF metadata.

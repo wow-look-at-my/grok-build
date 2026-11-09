@@ -370,7 +370,7 @@ pub fn default_always_allow_scope(words: &[String]) -> usize {
     }
     // Pinned commands (dangerous verbs, exec vehicles) offer only the full command A narrowed default like "Always allow:
     // git push" would save a rule that can never match "Always allow: sudo git" or "python3" would authorize arbitrary
-    // arguments Wrapped/chained forms also save the exact script on accept (`persist_bash_always_allow`)
+    // arbitrary arguments Wrapped/chained forms also save the exact script on accept (`persist_bash_always_allow`)
     if always_allow_scope_pinned(words) {
         return words.len();
     }

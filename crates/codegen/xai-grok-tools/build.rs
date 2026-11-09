@@ -106,6 +106,12 @@ const FETCH_ATTEMPTS: u32 = 21;
 /// The fixed wait between tries.
 const FETCH_RETRY_DELAY: std::time::Duration = std::time::Duration::from_secs(30);
 
+/// Cap on one whole attempt, body included. reqwest's default cuts off a mirror that is slow but still sending.
+const FETCH_TIMEOUT: std::time::Duration = std::time::Duration::from_secs(300);
+
+/// Total time one download may spend retrying, so a dead mirror fails the build with this error instead of the job's timeout.
+const FETCH_BUDGET: std::time::Duration = std::time::Duration::from_secs(15 * 60);
+
 /// Any other 4xx is the tree's answer: it returns at once. The last failure is
 /// the one the caller reports.
 fn fetch_release(
@@ -114,10 +120,16 @@ fn fetch_release(
     override_env: &str,
 ) -> Result<Vec<u8>, Box<dyn std::error::Error>> {
     let (url, token) = release_source(url)?;
-    let client = request::blocking::Client::new();
+    let client = request::blocking::Client::builder()
+        .timeout(FETCH_TIMEOUT)
+        .build()?;
+    let deadline = std::time::Instant::now() + FETCH_BUDGET;
     let mut last = String::new();
     for attempt in 0..FETCH_ATTEMPTS {
         if attempt > 0 {
+            if deadline <= std::time::Instant::now() {
+                break;
+            }
             std::thread::sleep(FETCH_RETRY_DELAY);
         }
         let mut req = client.get(&url);
@@ -135,7 +147,18 @@ fn fetch_release(
         };
         let status = resp.status();
         if status.is_success() {
-            return Ok(resp.bytes()?.to_vec());
+            // Reading the body belongs to the attempt. A transfer that stalls
+            // part way through is retried like a failed send, not reported on
+            // the first try.
+            match resp.bytes() {
+                Ok(bytes) => return Ok(bytes.to_vec()),
+                Err(e) => {
+                    last = format!(
+                        "Failed to download {tool}: {e:?}\nSet {override_env} for offline builds."
+                    );
+                    continue;
+                }
+            }
         }
         last = format!("HTTP {status} downloading {tool}. Set {override_env} for offline builds.");
         if !status.is_server_error() && status.as_u16() != 429 {

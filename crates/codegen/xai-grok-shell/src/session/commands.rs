@@ -884,7 +884,7 @@ pub enum SessionCommand {
         images: Vec<acp::ImageContent>,
         respond_to: oneshot::Sender<Result<String, SideQuestionError>>,
     },
-    /// Spawn a background subagent on the newest model of a family (`@sonnet`, `@haiku`, `@opus`).
+    /// Spawn a background subagent on the newest model of a family.
     SpawnModelAgent {
         family: String,
         effort: Option<String>,

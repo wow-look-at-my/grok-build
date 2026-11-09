@@ -153,7 +153,7 @@ fn deny_short(args: &[String], denied: char, verb: &str) -> Result<(), String> {
     Ok(())
 }
 
-/// The option name of `--name` or `--name=value`, or `None` for anything else.
+/// The option name for anything else.
 fn long_name(arg: &str) -> Option<&str> {
     let name = arg.strip_prefix("--")?;
     let name = name.split_once('=').map_or(name, |(n, _)| n);
@@ -334,7 +334,6 @@ fn tag(rest: &[String]) -> Result<Approved, String> {
     Ok(plain("tag", rest))
 }
 
-/// `git remote`, `git remote -v` and `git remote get-url <name>`.
 fn remote(rest: &[String]) -> Result<Approved, String> {
     match rest.split_first() {
 		None => Ok(plain("remote", rest)),
@@ -498,7 +497,6 @@ fn notes(rest: &[String]) -> Result<Approved, String> {
     Ok(plain("notes", rest))
 }
 
-/// `git reflog`, `git reflog show`, `git reflog list` and `git reflog exists`.
 /// The subcommand must come first, so no write subcommand is found later.
 fn reflog(rest: &[String]) -> Result<Approved, String> {
     match rest.split_first() {

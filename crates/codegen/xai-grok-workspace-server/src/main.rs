@@ -213,7 +213,7 @@ impl PreviewActivitySink for TrackerSink {
 /// Additions are backward-compatible.
 #[derive(Debug, serde::Serialize)]
 struct Capabilities {
-    /// The in-guest diagnostics HTTP server (`/ready`, `/statusz`, `/logs`).
+    /// The in-guest diagnostics HTTP server.
     diag: bool,
 }
 const CAPABILITIES: Capabilities = Capabilities { diag: true };
