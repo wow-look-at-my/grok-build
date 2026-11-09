@@ -577,7 +577,7 @@ impl AcpPrompter {
                             acp::PermissionOption,
                         > = IndexMap::new();
                         // Always-allow leads; persistent deny trails so it never sits between safe options
-                        // Offer allow only when accepting it can stop this script from prompting again; deny stays because deny prefixes bind unconditionally
+                        // Accepting allow must stop this script from prompting again; a chain or wrapper also saves the exact script, so the row holds for every primary command
                         let primary_command = primary_command_from_script(bash_command);
                         if let Some(primary_command) = &primary_command
                             && crate::permission::grants::always_allow_row_is_effective(
@@ -1410,32 +1410,61 @@ mod tests {
         );
     }
 
-    /// A wrapped/chained dangerous command can never produce the exact grant it requires, so the allow row is suppressed.
-    /// Offering it would save a rule that keeps prompting.
-    /// The deny row stays (denies bind by prefix).
+    /// A wrapped or chained script whose primary-scoped grant leaves it prompting still gets the allow row beside the deny row.
+    /// Accepting it at the default scope saves the exact script too, so the script never prompts again.
     #[test]
-    fn unhonorable_always_allow_row_is_suppressed() {
+    fn wrapped_and_chained_scripts_offer_an_honored_allow_row() {
         let p = prompter(ClientType::GrokPager);
         for script in [
             "env FOO=1 git push origin main",
             "git status && git push origin main",
-            // No findings at all, but the primary-scoped grant cannot stop the second segment from prompting (the loop in the reports)
             "ls && npm publish",
             "ls /tmp && ./bazelw test //hw-tests/integration/...",
+            "git push origin main",
         ] {
-            let opts = p.build_options(&AccessKind::Bash(script.to_owned()));
+            let access = AccessKind::Bash(script.to_owned());
+            let opts = p.build_options(&access);
             assert!(
-                !has_option(&opts, "allow-always-command"),
-                "must not offer an allow row it cannot honor: {script:?}"
+                has_option(&opts, "allow-always-command"),
+                "allow row missing: {script:?}"
             );
             assert!(
                 has_option(&opts, "reject-always-command"),
-                "persistent deny stays available: {script:?}"
+                "deny row missing: {script:?}"
+            );
+
+            let h = primary_command_from_script(script).unwrap();
+            let scope = crate::permission::grants::default_always_allow_scope(&h.highlighted_words);
+            let label = h.highlighted_words[..scope].join(" ");
+            let meta = serde_json::json!({ "command_parts": [label] });
+            let outcome = outcome_for(
+                &opts,
+                "allow-always-command",
+                meta.as_object().cloned(),
+                &access,
+            );
+            let mut state = crate::permission::state::PermissionState::default();
+            crate::permission::grants::record_prompt_outcome(&mut state, &access, &outcome)
+                .unwrap_or_else(|| panic!("nothing recorded: {script:?}"));
+            use crate::permission::grants::{
+                BashGrantOpts, bash_grant_pre_decision, evaluate_bash,
+            };
+            let evaluation = evaluate_bash(script, &state, true);
+            let decision = bash_grant_pre_decision(
+                script,
+                &evaluation,
+                &state,
+                None,
+                BashGrantOpts::PRE_CLASSIFIER,
+            );
+            assert!(
+                matches!(
+                    decision,
+                    Some((crate::permission::types::Decision::Allow, _))
+                ),
+                "accepting the default scope must stop {script:?} from prompting, got {decision:?}"
             );
         }
-        // Plain dangerous command: full-scope grant matches, row offered.
-        let opts = p.build_options(&AccessKind::Bash("git push origin main".to_owned()));
-        assert!(has_option(&opts, "allow-always-command"));
     }
 
     #[test]
