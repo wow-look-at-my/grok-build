@@ -8526,7 +8526,7 @@ async fn polled_settings_apply_refreshes_accept_request_encodings() {
     );
     assert_eq!(
         crate::util::config::request_compression_for_url(&proxy),
-        RequestCompression::None,
+        RequestCompression::Auto,
         "a poll that no longer advertises zstd must disarm compression"
     );
     assert!(
@@ -8568,7 +8568,7 @@ async fn settings_apply_keys_the_advertisement_under_the_configured_proxy() {
     let prod = crate::env::PROD_CLI_CHAT_PROXY_BASE_URL;
     assert_eq!(
         crate::util::config::request_compression_for_url(prod),
-        RequestCompression::None,
+        RequestCompression::Auto,
         "{prod} did not serve these settings"
     );
     crate::util::config::cache_remote_accept_request_encodings(flag_proxy, &[]);
@@ -8592,7 +8592,7 @@ async fn polled_settings_apply_skips_when_the_advertisement_changed_mid_fetch() 
     agent.apply_polled_settings(advertised, pre_fetch);
     assert_eq!(
         crate::util::config::request_compression_for_url(&proxy),
-        RequestCompression::None,
+        RequestCompression::Auto,
         "a stale poll must not re-arm an advertisement a full reapply withdrew"
     );
     assert!(

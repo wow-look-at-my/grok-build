@@ -135,11 +135,23 @@ pub enum ContentBlock {
         signature: String,
     },
     /// Encrypted reasoning the model chose to redact: an opaque `data` blob, never plaintext.
-    /// Parsed so a stream carrying one deserializes instead of failing the whole event parse; request-building and the sampler never construct one.
     RedactedThinking { data: String },
     /// Any block kind this client does not model (e.g. `server_tool_use`).
     #[serde(other)]
     Unknown,
+}
+
+/// A reasoning item has no field for "redacted".
+const REDACTED_THINKING_TAG: &str = "redacted_thinking:";
+
+/// The `encrypted_content` that carries a `redacted_thinking` block's data.
+pub fn tag_redacted_thinking(data: &str) -> String {
+    format!("{REDACTED_THINKING_TAG}{data}")
+}
+
+/// The `redacted_thinking` data in an `encrypted_content`, when it holds one.
+pub fn redacted_thinking_data(encrypted_content: &str) -> Option<&str> {
+    encrypted_content.strip_prefix(REDACTED_THINKING_TAG)
 }
 
 #[derive(Debug, Clone, Serialize, Deserialize)]

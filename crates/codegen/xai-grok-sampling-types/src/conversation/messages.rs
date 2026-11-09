@@ -391,10 +391,16 @@ pub fn build_messages_request(req: &ConversationRequest) -> crate::messages::Mes
                         });
                     }
                     ThinkingDisposition::Native => {
-                        pending_assistant.push(ContentBlock::Thinking {
-                            thinking,
-                            signature,
-                        });
+                        if let Some(data) = crate::messages::redacted_thinking_data(&signature) {
+                            pending_assistant.push(ContentBlock::RedactedThinking {
+                                data: data.to_owned(),
+                            });
+                        } else {
+                            pending_assistant.push(ContentBlock::Thinking {
+                                thinking,
+                                signature,
+                            });
+                        }
                     }
                 }
             }
