@@ -4601,9 +4601,7 @@ fn plan_stdio_spawn(
     (OsString::from(command), args.to_vec())
 }
 
-/// Point a package-runner MCP child at caches the sandbox can write. `uvx`,
-/// `npx`, `bunx` and friends resolve the server they run from a package
-/// index, into caches that default under `$HOME`.
+/// Point a package-runner MCP child at caches the sandbox can write.
 fn apply_sandbox_runner_cache_env(cmd: &mut Command, program: &str) {
     let Some(scratch) = xai_grok_sandbox::package_cache::scratch_root() else {
         return;

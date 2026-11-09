@@ -205,8 +205,8 @@ fn command_of(value: &serde_json::Value) -> Option<&str> {
         .find_map(|k| value.get(*k).and_then(|v| v.as_str()))
 }
 
-/// Targets of `>`, `>>` and `tee` in a shell command. A file descriptor
-/// (`2>&1`) and `/dev/null` are not files anybody reads back.
+/// Targets in a shell command. A file descriptor (`2>&1`) and
+/// `/dev/null` are not files anybody reads back.
 fn redirect_targets(command: &str) -> Vec<String> {
     let tokens: Vec<&str> = command.split_whitespace().collect();
     let mut out = Vec::new();

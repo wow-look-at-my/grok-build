@@ -249,10 +249,9 @@ pub fn is_jailed() -> bool {
 /// The reserved name of the path-mount jail profile.
 pub const PATHBOX_PROFILE: &str = "pathbox";
 
-/// Read `--sandbox`, `--ro`, `--rw` and `--rn` off the raw command line. The
-/// raw line is what carries the order of the visible mounts; a parsed struct
-/// groups the flags into separate lists and loses it. The path-mount jail is
-/// enabled only when `--sandbox=pathbox` is given, OR any of
+/// The raw line is what carries the order of the visible mounts; a parsed
+/// struct groups the flags into separate lists and loses it. The path-mount
+/// jail is enabled only when `--sandbox=pathbox` is given, OR any of
 /// `--ro`/`--rw`/`--rn` appears (the jail is then implied). A bare `--sandbox`
 /// with no value is always invalid, and a `--sandbox <profile>` naming
 /// anything other than `pathbox` is the built-in profile sandbox (not a jail).
@@ -900,11 +899,9 @@ pub fn seatbelt_profile(plan: &JailPlan) -> String {
         "(allow file-read* (literal \"{}\"))\n",
         sbpl_escape(&plan.self_exe)
     ));
-    // The read-only system base the process needs to run (dylibs, binaries,
-    // config, and on macOS the real /private home of /etc, /var and /tmp).
-    // Emitted before the user mounts, matching bwrap's bind order (base
-    // first, then user mounts, then $GROK_HOME) so a user mount over a base
-    // path wins.
+    // The read-only system base the process needs to run. Emitted before
+    // the user mounts, matching bwrap's bind order (base first, then user
+    // mounts, then $GROK_HOME) so a user mount over a base path wins.
     for path in system_ro_base() {
         profile.push_str(&format!(
             "(allow file-read* (subpath \"{}\"))\n",

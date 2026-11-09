@@ -20,7 +20,7 @@ pub(super) fn session_mode_id_from_prompt_mode(prompt_mode: PromptMode) -> acp::
     acp::SessionModeId::new(mode.as_id())
 }
 /// The agent-identity half of the session mode. A session mode is either a
-/// permission mode (`default`, `plan`, `ask`) or an agent name.
+/// permission mode or an agent name.
 #[derive(Debug, Default)]
 pub(crate) struct ModeAgentState {
     /// The agent that ran before a Shift+Tab ring identity replaced it.

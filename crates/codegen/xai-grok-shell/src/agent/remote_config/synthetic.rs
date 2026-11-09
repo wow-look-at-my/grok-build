@@ -31,7 +31,6 @@ pub(crate) fn is_synthetic_listing(value: &serde_json::Value) -> bool {
         .and_then(|rp| rp.as_object())
         .and_then(|rp| rp.get("efforts"))
         .is_some();
-    // Synthetic model routing slugs are `syn:`-prefixed, e.g. `syn:large:text`.
     let has_synthetic_routing_slug = obj
         .get("id")
         .or_else(|| obj.get("model"))

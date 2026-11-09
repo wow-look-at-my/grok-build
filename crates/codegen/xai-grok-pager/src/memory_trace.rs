@@ -13,7 +13,6 @@
 //! Traces contain **process memory numbers only** (no user content), so they are safe to ship for analysis.
 //!
 //! ## Threshold hook
-//!
 //! Absent a hook, crossing is still recorded locally and logged via `tracing::warn!`.
 //!
 //! Everything is inert until [`start`] runs (tests use scoped sinks).

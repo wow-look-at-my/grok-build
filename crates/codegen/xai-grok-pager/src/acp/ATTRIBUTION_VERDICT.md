@@ -33,11 +33,5 @@ The claim's "acceptable trade-off" phrasing understates this idle-time mis-attri
 - 8-entry map bound documented as the memory-vs-latency trade-off.
 
 ## Tests (direct, on shipped `set_last_turn_cost`, no re-implementation)
-In `acp::tracker::tests`:
-- set_last_turn_cost_keyed_evicted_idle_is_dropped_not_misattributed
-- set_last_turn_cost_keyless_finished_attaches_to_last_finished
-- set_last_turn_cost_keyless_with_streaming_attaches_to_stream
-- set_last_turn_cost_keyed_streaming_matches_running_prompt
-- set_last_turn_cost_keyed_streaming_mismatch_skips_stream
 
 Green: set_last_turn_cost 5/5, acp::tracker 158/158, acp_handler 428/428, turn_completion 58/58.

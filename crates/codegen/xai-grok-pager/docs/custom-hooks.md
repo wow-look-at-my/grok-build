@@ -51,7 +51,6 @@ Hooks are discovered from several places (all are merged):
 | Global    | `~/.claude/settings.json`         | Always       | Claude Code compatibility |
 | Project   | `<project>/.grok/hooks/*.json`    | Requires trust | Per-repo automation |
 | Project   | `<project>/.claude/settings.json` | Requires trust | Claude compatibility |
-| Config    | `config.json`, `managed_config.toml`, `requirements.toml` | Always | Hooks shipped in your (or your organization's) config |
 | Plugin    | Bundled inside installed plugins  | Per-plugin   | Shared team hooks |
 
 Config-file hooks use the same schema under the `hooks` key. See the [Hooks user guide](user-guide/10-hooks.md#hooks-in-config-files) for details.

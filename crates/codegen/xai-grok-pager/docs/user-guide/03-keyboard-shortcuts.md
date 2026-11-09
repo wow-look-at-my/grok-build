@@ -175,7 +175,7 @@ Typing on the "No" row starts a message back to the agent instead. `Enter` sends
 
 **Mid-turn Esc grace:** for about a second after a mid-turn Esc, the idle rewind arm stays suppressed. Mashing Esc at a turn that then ends cannot silently open the rewind picker. Only the rewind arm is held. Every other Esc behavior is unaffected.
 
-**Steal-Esc (runs before the mid-turn hint and clear / rewind):** overlays, modals, slash/file/completion dropdowns, history search, scrollback search, text selection, link highlight, voice, and **Bash / Remember mode exit**. This is when the prompt is empty (Esc leaves `!` / `#` mode and returns to the normal prompt, even while a turn is running). Bare `/feedback` opens the feedback form. Esc closes it.
+**Steal-Esc (runs before the mid-turn hint and clear / rewind):** overlays, modals, slash/file/completion dropdowns, history search, scrollback search, text selection, link highlight, voice, and **Bash or Remember mode exit**. This is when the prompt is empty (Esc leaves `!` / `#` mode and returns to the normal prompt, even while a turn is running). Bare `/feedback` opens the feedback form. Esc closes it.
 
 **Ctrl+C vs Esc:** with a non-empty draft while a turn runs, Ctrl+C clears the draft and keeps the turn. A second Ctrl+C on an empty prompt cancels. Mid-turn, Esc cancels in one press and leaves the draft alone. Idle non-empty Ctrl+C clears in one press. Esc requires presses within 800ms. The clears differ in what they leave behind: `Esc Esc` stashes the draft, so `Ctrl+S` (or `Ctrl+Z` pressed right after) brings it back, while `Ctrl+C` discards it (`Ctrl+Z` still undoes that clear, text only).
 
@@ -307,7 +307,7 @@ Bindings that only fire on the welcome screen (before any agent session is open)
 | `Ctrl+I` | Import Claude settings (when available) |
 | `Ctrl+Shift+I` | Dismiss the Claude import row (when available) |
 
-`Ctrl+W`, `Ctrl+I`, and `Ctrl+Shift+I` are only active on the welcome screen. `Ctrl+R` opens the session picker on both the welcome screen and inside an agent session (where it opens as a modal overlay, same as the `/resume` command). With `ui.mouse_reporting_toggle` enabled, `Ctrl+R` toggles mouse capture while the scrollback pane is focused. The picker is still on `Ctrl+R` from the prompt. `Ctrl+S` is the prompt stash inside a session (it does nothing on the welcome screen, which has no draft to set aside). `Ctrl+Q` is the same global Quit binding documented above, not a welcome-specific handler.
+`Ctrl+R` opens the session picker on both the welcome screen and inside an agent session (where it opens as a modal overlay, same as the `/resume` command). With `ui.mouse_reporting_toggle` enabled, `Ctrl+R` toggles mouse capture while the scrollback pane is focused. The picker is still on `Ctrl+R` from the prompt. `Ctrl+S` is the prompt stash inside a session (it does nothing on the welcome screen, which has no draft to set aside). `Ctrl+Q` is the same global Quit binding documented above, not a welcome-specific handler.
 
 ---
 

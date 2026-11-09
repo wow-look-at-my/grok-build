@@ -1157,7 +1157,6 @@ pub enum SessionUpdate {
     /// The role then runs on the session model. The pager shows this as a
     /// warning, so a configured model is never replaced in silence.
     GoalRoleModelFallback {
-        /// `"planner"`, `"strategist"`, `"skeptic"` or `"summarizer"`.
         role: String,
         #[serde(default, skip_serializing_if = "Option::is_none")]
         skeptic_idx: Option<u32>,

@@ -1,4 +1,5 @@
-//! `@sonnet`, `@haiku` and `@opus`: the user spawns a background subagent on a model family.
+
+// model_mention.rs holds MODEL_MENTION_FAMILIES.
 
 use super::*;
 
