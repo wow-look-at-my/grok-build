@@ -3503,11 +3503,7 @@ impl MvpAgent {
                 .and_then(|sid| self.resident_handle(sid).map(|h| h.reasoning_effort))
                 .flatten()
                 .or_else(|| self.models_manager.current_reasoning_effort())
-                .or_else(|| {
-                    self
-                        .models_manager
-                        .model_default_reasoning_effort(model_id.0.as_ref())
-                })
+                .or_else(|| self.models_manager.default_effort_for(model_id.0.as_ref()))
         } else {
             None
         };

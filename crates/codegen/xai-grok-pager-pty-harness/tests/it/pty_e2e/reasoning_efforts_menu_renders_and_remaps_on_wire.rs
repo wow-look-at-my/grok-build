@@ -50,6 +50,8 @@ async fn reasoning_efforts_menu_renders_and_remaps_on_wire() {
 
     // Dismiss the dropdown and clear the composer before issuing the command.
     harness.inject_keys(keys::ESC).expect("dismiss dropdown");
+    // An ESC followed at once by another byte reads as Alt plus that key. The pause keeps Ctrl+U a plain kill-to-BOL.
+    harness.update(Duration::from_millis(200));
     harness
         .inject_keys(b"\x15")
         .expect("clear composer (Ctrl+U)");
@@ -61,6 +63,7 @@ async fn reasoning_efforts_menu_renders_and_remaps_on_wire() {
         .inject_keys(b"/effort deep\r")
         .expect("set effort deep");
     harness.update(Duration::from_millis(400));
+    let screen_after_effort = harness.screen_contents();
     harness
         .inject_keys(format!("{PROMPT}\r").as_bytes())
         .expect("submit second prompt");
@@ -74,8 +77,13 @@ async fn reasoning_efforts_menu_renders_and_remaps_on_wire() {
         .any(|b| b.pointer("/reasoning/effort").and_then(|v| v.as_str()) == Some("xhigh"));
     assert!(
         sent_xhigh,
-        "`/effort deep` must send the mapped canonical reasoning.effort=xhigh\nbodies: {:#?}",
-        content.request_bodies()
+        "`/effort deep` must send the mapped canonical reasoning.effort=xhigh\n\
+         screen after /effort:\n{screen_after_effort}\nsent efforts: {:?}",
+        content
+            .request_bodies()
+            .iter()
+            .map(|b| b.pointer("/reasoning/effort").cloned())
+            .collect::<Vec<_>>()
     );
 
     harness.quit().expect("clean quit");

@@ -1342,6 +1342,72 @@ async fn apply_supported_effort_assigns_only_when_supported() {
     );
     assert_eq!(none_cfg.reasoning_effort, Some(ReasoningEffort::Low));
 }
+/// A model that takes an effort never goes out without one. Nothing chosen
+/// gives the catalog default, else the menu's default tier. Only an explicit
+/// `none` turns reasoning off.
+#[tokio::test]
+async fn an_effort_capable_model_always_carries_an_effort() {
+    use crate::agent::config::{EndpointsConfig, ModelEntry};
+    use crate::sampling::EffortTarget;
+    use xai_grok_sampling_types::{ReasoningEffort, ReasoningEffortOption};
+    let agent = build_minimal_agent_for_tests();
+    let option = |value: ReasoningEffort| ReasoningEffortOption {
+        id: value.as_ref().to_string(),
+        value,
+        label: value.as_ref().to_string(),
+        description: None,
+        default: false,
+    };
+    let mut menu_model = ModelEntry::fallback("menu-model", &EndpointsConfig::default());
+    menu_model.info.supports_reasoning_effort = true;
+    menu_model.info.reasoning_efforts = vec![
+        option(ReasoningEffort::None),
+        option(ReasoningEffort::Low),
+        option(ReasoningEffort::Medium),
+        option(ReasoningEffort::High),
+    ];
+    agent
+        .models_manager
+        .insert_test_entry("menu-model", menu_model.clone());
+    let plain = ModelEntry::fallback("plain-model", &EndpointsConfig::default());
+    agent
+        .models_manager
+        .insert_test_entry("plain-model", plain.clone());
+    let sid = acp::SessionId::new("always-an-effort");
+
+    let mut cfg = agent.prepare_sampling_config_for_model(&menu_model, None);
+    cfg.reasoning_effort = None;
+    agent
+        .models_manager
+        .apply_supported_effort(&mut cfg, None, &sid, EffortTarget::NewSession);
+    assert_eq!(
+        cfg.reasoning_effort,
+        Some(ReasoningEffort::Medium),
+        "no choice is not a choice of `none`"
+    );
+
+    let mut off = agent.prepare_sampling_config_for_model(&menu_model, None);
+    agent.models_manager.apply_supported_effort(
+        &mut off,
+        Some(ReasoningEffort::None),
+        &sid,
+        EffortTarget::ModelSwitch,
+    );
+    assert_eq!(off.reasoning_effort, Some(ReasoningEffort::None));
+
+    let mut plain_cfg = agent.prepare_sampling_config_for_model(&plain, None);
+    plain_cfg.reasoning_effort = None;
+    agent.models_manager.apply_supported_effort(
+        &mut plain_cfg,
+        None,
+        &sid,
+        EffortTarget::NewSession,
+    );
+    assert_eq!(
+        plain_cfg.reasoning_effort, None,
+        "a model that takes no effort gets none"
+    );
+}
 /// Setting `reasoning_effort` without switching the id runs, and bills, whatever the entry opened on.
 /// The status line would still read `low`.
 #[tokio::test]
@@ -1621,6 +1687,22 @@ async fn load_effort_precedence_prefers_meta_hint_over_persisted() {
     assert_eq!(
         restore_effort_via_load(None, Some(ReasoningEffort::Low)).await,
         Some(ReasoningEffort::Low),
+    );
+}
+/// The real restore path never lands an effort-capable session on no effort.
+/// Only an explicit `none` turns reasoning off.
+#[tokio::test]
+async fn a_restored_session_with_no_effort_anywhere_still_gets_one() {
+    use xai_grok_sampling_types::ReasoningEffort;
+    let landed = restore_effort_via_load(None, None).await;
+    assert!(
+        landed.is_some_and(|effort| effort != ReasoningEffort::None),
+        "nothing chose an effort, so the default applies: {landed:?}"
+    );
+    assert_eq!(
+        restore_effort_via_load(Some(ReasoningEffort::None), None).await,
+        Some(ReasoningEffort::None),
+        "an explicit none is kept"
     );
 }
 /// A session persisted under a routing *slug* (not the catalog map key) must still get reasoning modes and a selected model.
@@ -4307,8 +4389,10 @@ fn parse_session_kind_matrix() {
 fn reject_chat_kind_without_feature_errors_without_chat_feature() {
     use serde_json::json;
     assert!(
-        reject_chat_kind_without_feature(json!({"example.invalid/session": {"kind": "chat"}}).as_object())
-            .is_err()
+        reject_chat_kind_without_feature(
+            json!({"example.invalid/session": {"kind": "chat"}}).as_object()
+        )
+        .is_err()
     );
     assert!(reject_chat_kind_without_feature(None).is_ok());
     assert!(
@@ -7763,7 +7847,10 @@ async fn answer_folder_trust_request(
     let xai_acp_lib::AcpClientMessage::ExtMethod(args) = msg else {
         panic!("expected an ext_method reverse-request, got a different message");
     };
-    assert_eq!(args.request.method.as_ref(), "example.invalid/folder_trust/request");
+    assert_eq!(
+        args.request.method.as_ref(),
+        "example.invalid/folder_trust/request"
+    );
     let params: serde_json::Value = serde_json::from_str(args.request.params.get()).unwrap();
     let resp: acp::ExtResponse = acp::ExtResponse::new(std::sync::Arc::from(
         serde_json::value::to_raw_value(&serde_json::json!({ "outcome": outcome })).unwrap(),
@@ -8560,7 +8647,10 @@ async fn emit_announcements_gate_emits_updates_baseline_and_bumps_gen() {
             let xai_acp_lib::AcpClientMessage::ExtNotification(args) = msg else {
                 panic!("expected ExtNotification, got another message kind");
             };
-            assert_eq!(args.request.method.as_ref(), "example.invalid/announcements/update");
+            assert_eq!(
+                args.request.method.as_ref(),
+                "example.invalid/announcements/update"
+            );
             let parsed: serde_json::Value =
                 serde_json::from_str(args.request.params.get()).expect("valid JSON payload");
             parsed
@@ -8615,7 +8705,10 @@ async fn emit_announcements_gate_keeps_baseline_on_failed_send_and_retries() {
     let xai_acp_lib::AcpClientMessage::ExtNotification(args) = msg else {
         panic!("expected ExtNotification, got another message kind");
     };
-    assert_eq!(args.request.method.as_ref(), "example.invalid/announcements/update");
+    assert_eq!(
+        args.request.method.as_ref(),
+        "example.invalid/announcements/update"
+    );
     assert_eq!(
         *agent.last_emitted_announcements.borrow(),
         vec![ann("a")],
@@ -8762,7 +8855,10 @@ mod soft_default_settings_emit {
                 let xai_acp_lib::AcpClientMessage::ExtNotification(args) = msg else {
                     panic!("expected ExtNotification, got {msg:?}");
                 };
-                assert_eq!(args.request.method.as_ref(), "example.invalid/settings/update");
+                assert_eq!(
+                    args.request.method.as_ref(),
+                    "example.invalid/settings/update"
+                );
                 let params: serde_json::Value =
                     serde_json::from_str(args.request.params.get()).expect("parse params");
                 assert_eq!(

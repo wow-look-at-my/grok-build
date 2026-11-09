@@ -239,12 +239,17 @@ impl ModelState {
         if !supports_reasoning_effort_meta(info.meta.as_ref()) {
             return Vec::new();
         }
-        parse_reasoning_efforts_meta(info.meta.as_ref()).unwrap_or_else(legacy_effort_options)
+        let mut options =
+            parse_reasoning_efforts_meta(info.meta.as_ref()).unwrap_or_else(legacy_effort_options);
+        // Every model lists its levels in one order, whatever order the provider sent.
+        xai_grok_shell::sampling::types::order_effort_options(&mut options);
+        options
     }
 
-    /// The effort row the pickers highlight when the menu for `id` opens. `None` leaves the cursor on the first row.
+    /// The effort row the pickers highlight when the menu for `id` opens. `None` only for a model with no menu.
     /// Precedence: the session's live effort when `id` is the current model, else the model's `meta.reasoningEffort`,
-    /// else the option flagged `default`. A candidate counts only if the menu offers its value.
+    /// else the menu's default level (`default_reasoning_effort`). A candidate counts only if the menu offers its
+    /// value. The first row is never the fallback: the menu lists strongest first.
     pub(crate) fn preselected_effort_option_for(
         &self,
         id: &acp::ModelId,
@@ -260,7 +265,10 @@ impl ModelState {
             .and_then(|info| parse_reasoning_effort_meta(info.meta.as_ref()));
         live.and_then(offered)
             .or_else(|| meta_default.and_then(offered))
-            .or_else(|| options.iter().find(|opt| opt.default))
+            .or_else(|| {
+                xai_grok_shell::sampling::types::default_reasoning_effort(&options)
+                    .and_then(offered)
+            })
             .cloned()
     }
 
@@ -548,14 +556,15 @@ mod tests {
                 { "id": "deep", "value": "xhigh", "label": "Deep", "description": "Max" },
             ],
         })));
+        // The server's fields come through as sent; the rows are ordered strongest first.
         let opts = state.reasoning_effort_options();
         let [first, second] = opts.as_slice() else {
             panic!("expected 2 options, got {}", opts.len());
         };
-        assert_eq!(first.label, "Balanced");
-        assert_eq!(first.value, ReasoningEffort::Medium);
-        assert_eq!(second.id, "deep");
-        assert_eq!(second.description.as_deref(), Some("Max"));
+        assert_eq!(first.id, "deep");
+        assert_eq!(first.description.as_deref(), Some("Max"));
+        assert_eq!(second.label, "Balanced");
+        assert_eq!(second.value, ReasoningEffort::Medium);
     }
 
     #[test]
@@ -740,13 +749,14 @@ mod tests {
         })));
         assert_eq!(Some("high".to_owned()), preselected_id(&state));
 
-        // A meta level the menu does not offer is skipped, and without a default flag nothing is preselected
+        // A meta level the menu does not offer is skipped. With no default flag, the menu's default level is
+        // preselected, never the first (strongest) row.
         let state = state_with_meta(Some(serde_json::json!({
             "supportsReasoningEffort": true,
             "reasoningEffort": "none",
             "reasoningEfforts": [{ "value": "xhigh" }, { "value": "high" }],
         })));
-        assert_eq!(None, preselected_id(&state));
+        assert_eq!(Some("high".to_owned()), preselected_id(&state));
 
         // Built-in fallback menu: its rows never carry `default`, so meta is the only source
         let state = state_with_meta(Some(serde_json::json!({
@@ -754,6 +764,41 @@ mod tests {
             "reasoningEffort": "high",
         })));
         assert_eq!(Some("high".to_owned()), preselected_id(&state));
+    }
+
+    /// Every provider's menu shows strongest first, and opening it lands on the
+    /// model's default level, never on `max` because the provider listed it first.
+    #[test]
+    fn a_provider_menu_is_reordered_and_opens_on_its_default() {
+        for listed in [
+            serde_json::json!(["max", "xhigh", "high", "medium", "low", "none"]),
+            serde_json::json!(["none", "low", "medium", "high", "xhigh", "max"]),
+            serde_json::json!(["high", "none", "max", "low", "xhigh", "medium"]),
+        ] {
+            let state = state_with_meta(Some(serde_json::json!({
+                "supportsReasoningEffort": true,
+                "reasoningEfforts": listed,
+            })));
+            let id = acp::ModelId::new(Arc::from("m"));
+            let order: Vec<String> = state
+                .reasoning_effort_options_for(&id)
+                .into_iter()
+                .map(|option| option.id)
+                .collect();
+            assert_eq!(
+                order,
+                ["max", "xhigh", "high", "medium", "low", "none"],
+                "listed {listed}"
+            );
+            assert_eq!(
+                state
+                    .preselected_effort_option_for(&id)
+                    .map(|option| option.id)
+                    .as_deref(),
+                Some("medium"),
+                "listed {listed}"
+            );
+        }
     }
 
     #[test]
