@@ -213,6 +213,7 @@ CI is the source of truth and builds every pushed branch. A branch that is only 
 
 - JSON bodies of 64 KiB. This covers and up go out zstd-compressed toward the cli-chat-proxy that lists `zstd` in its settings. And toward any origin whose last response with an `Accept-Encoding` header listed `zstd` (RFC 7694, `xai-grok-sampler/src/request_compression.rs`). A later `Accept-Encoding` without `zstd` stops it for that origin.
 - `GROK_REQUEST_COMPRESSION=0` maps to `RequestCompression::Off`, which no advertisement overrides.
+- An origin that also sends `X-Zstd-Delta: sha256` keeps request bodies (ai-proxy). Each later body there is a zstd frame against the client's previous one, named in `X-Zstd-Base` (`SamplingClient::send_net`). A 409 with `X-Zstd-Base-Missing` sends the same body once more as a full frame. The base is per client and shared by its clones.
 
 ## Stream-timing notes
 
