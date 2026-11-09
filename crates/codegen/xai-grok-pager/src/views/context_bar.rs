@@ -363,7 +363,6 @@ mod tests {
 
     #[test]
     fn test_context_bar_hover_bar_grows_with_token_string() {
-
         let theme = Theme::default();
         let short = context_bar_line(Some(500), Some(1_000_000), true, &theme).unwrap();
         let long = context_bar_line(Some(8_500), Some(1_000_000), true, &theme).unwrap();
