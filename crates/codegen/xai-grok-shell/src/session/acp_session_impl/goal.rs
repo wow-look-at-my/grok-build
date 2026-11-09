@@ -1222,8 +1222,9 @@ impl SessionActor {
         token_budget: Option<i64>,
         mode: crate::session::goal_tracker::GoalMode,
     ) -> GoalSetupOutcome {
-        // A lite goal has no planner to write its steps. It starts the way `/todo <objective>` does.
-        if mode == crate::session::goal_tracker::GoalMode::Lite {
+        // A goal with no planner to write its steps starts the way `/todo <objective>` does.
+        // A goal never runs without todos: the capture fails when it adds nothing.
+        if mode == crate::session::goal_tracker::GoalMode::Lite || !self.goal_planner_enabled {
             let capture_id = format!("goal-{}", uuid::Uuid::new_v4());
             if let Err(error) = self.run_todo_capture(objective, false, &capture_id).await {
                 return GoalSetupOutcome::Message(format!(
@@ -2271,6 +2272,17 @@ impl SessionActor {
 
     /// The live todo list as `(id, content, status)`, in list order. `None`
     /// when the resource is missing, which is not the same as an empty list.
+    /// Whether the session's todo list has a pending or in-progress item.
+    /// A missing todo resource reads as no open item.
+    pub(super) async fn goal_has_open_todo(&self) -> bool {
+        use crate::tools::todo::TodoStatus;
+        self.goal_todo_snapshot().await.is_some_and(|todos| {
+            todos.iter().any(|(_, _, status)| {
+                matches!(status, TodoStatus::Pending | TodoStatus::InProgress)
+            })
+        })
+    }
+
     async fn goal_todo_snapshot(
         &self,
     ) -> Option<Vec<(String, String, crate::tools::todo::TodoStatus)>> {

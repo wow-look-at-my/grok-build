@@ -136,27 +136,36 @@ async fn goal_round_sends_follow_up_typed_during_a_foreground_subagent() {
     let content = ContentController::start().await.expect("start content");
     let flag = content.home().join("goal_fg_hold_flag");
     script_subagent_turn(&content, false, &flag, "GOAL_PARENT_DONE", 2);
-    let verdict = json!({
-        "decision": "candidate_complete",
-        "evidence": "the subagent ran",
-        "next_step": "none",
-        "blocker_key": ""
-    })
-    .to_string();
-    for (endpoint, response) in [
+    // A goal starts only with a todo, so the capture side call writes one.
+    let capture =
+        json!({"todos": [{"id": "c1", "content": "build the project", "status": "pending"}]})
+            .to_string();
+    for (endpoint, events) in [
         (
             InferenceEndpoint::Responses,
-            ScriptedResponse::sse(sse::responses_api_script_exact(&verdict, "test-model")),
+            sse::responses_api_reasoning_then_tool_call_events(
+                "one step",
+                "call_capture_1",
+                "todo_write",
+                &capture,
+                "test-model",
+            ),
         ),
         (
             InferenceEndpoint::ChatCompletions,
-            ScriptedResponse::sse(sse::chat_completion_script_exact(&verdict, "test-model")),
+            sse::chat_completions_reasoning_then_tool_call_events(
+                "one step",
+                "call_capture_1",
+                "todo_write",
+                &capture,
+                "test-model",
+            ),
         ),
     ] {
         let _ = content.expect_response(
-            format!("goal verdict ({endpoint:?})"),
+            format!("todo capture ({endpoint:?})"),
             InferenceRequestMatcher::auxiliary(endpoint),
-            response,
+            ScriptedResponse::sse(events),
         );
     }
 
@@ -167,7 +176,7 @@ async fn goal_round_sends_follow_up_typed_during_a_foreground_subagent() {
         DEFAULT_COLS,
         &content,
         &["--yolo", "--trust"],
-        // A full goal with no planner and no verifier: the evaluator is the only side call.
+        // A full goal with no planner and no verifier: the todo capture is the only side call.
         &[
             ("GROK_GOAL", "1"),
             ("GROK_GOAL_PLANNER", "0"),
@@ -180,7 +189,8 @@ async fn goal_round_sends_follow_up_typed_during_a_foreground_subagent() {
         .wait_for_text(WELCOME_SCREEN_SENTINEL, WELCOME_TIMEOUT)
         .expect("welcome");
     harness
-        .inject_keys(b"/goal build the project")
+        // The open todo bounces every round. The budget ends the goal at the first round end.
+        .inject_keys(b"/goal build the project --budget 1")
         .expect("type goal");
     harness.update(Duration::from_millis(300));
     harness.inject_keys(b"\r").expect("submit goal");

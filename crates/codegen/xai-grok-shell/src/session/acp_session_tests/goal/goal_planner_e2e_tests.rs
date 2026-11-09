@@ -448,6 +448,13 @@ async fn write_existing_todo(actor: &SessionActor, id: &str, content: &str) {
         .expect("an existing todo must be writable");
 }
 
+/// Put one open item on the session's list. A goal never runs without todos, so a plan
+/// published onto an empty list pauses the goal.
+async fn give_the_session_an_open_todo(actor: &SessionActor) {
+    arm_todo_writes(actor).await;
+    write_existing_todo(actor, "t-open", "do the work").await;
+}
+
 /// The work items the scripted planner puts on its OWN todo list with
 /// `todo_write` while it plans — the source of the session's seeded list.
 const PLANNER_TODOS: &[&str] = &[
@@ -810,6 +817,11 @@ async fn a_planner_that_named_no_items_leaves_the_list_untouched() {
                 live_todos(&actor).await.is_empty(),
                 "no todo call means no items — the plan prose is not mined for them",
             );
+            assert!(snap.status.is_paused(), "a goal never runs without todos");
+            assert_eq!(
+                snap.pause_message.as_deref(),
+                Some(planner_listed_no_todos_pause_message().as_str()),
+            );
         })
         .await;
 }
@@ -1091,6 +1103,7 @@ async fn planner_success_stamps_plan_file_on_orchestration() {
             let (tx, spawn_count) =
                 spawn_planner_coordinator(SpawnBehaviour::WritePlanThenDone { body: b"# Plan\n" });
             let (actor, _tmp) = make_planner_actor(Some(tx), true).await;
+            give_the_session_an_open_todo(&actor).await;
             create_test_goal(&actor);
             let plan_path = actor.goal_tracker.lock().plan_path();
             let baseline_path = actor.goal_tracker.lock().plan_baseline_path();
@@ -1201,6 +1214,7 @@ async fn planner_snapshots_plan_baseline_once_and_does_not_overwrite() {
                 body: b"# Plan v1\n",
             });
             let (actor, _tmp) = make_planner_actor(Some(tx), true).await;
+            give_the_session_an_open_todo(&actor).await;
             create_test_goal(&actor);
             let baseline_path = actor.goal_tracker.lock().plan_baseline_path();
 
@@ -1341,6 +1355,7 @@ async fn planner_clears_planning_latch_before_publishing_the_plan() {
                 spawn_planner_coordinator(SpawnBehaviour::WritePlanThenDone { body: b"# Plan\n" });
             let (actor, _tmp, mut persistence_rx) =
                 make_planner_actor_capturing(Some(tx), true).await;
+            give_the_session_an_open_todo(&actor).await;
             create_test_goal(&actor);
             let plan_path = actor.goal_tracker.lock().plan_path();
 
@@ -1504,6 +1519,7 @@ async fn planner_reopens_spawn_admission_blocked_by_prior_cancel() {
                     body: b"# Plan\n",
                 });
             let (actor, _tmp) = make_planner_actor(Some(tx), true).await;
+            give_the_session_an_open_todo(&actor).await;
             create_test_goal(&actor);
 
             actor.maybe_run_goal_planner("do X").await;
@@ -1891,6 +1907,7 @@ async fn lifecycle_fail_pause_resume_retry_success() {
             });
 
             let (actor, _tmp) = make_planner_actor(Some(tx), true).await;
+            give_the_session_an_open_todo(&actor).await;
             create_test_goal(&actor);
 
             actor.maybe_run_goal_planner("do X").await;
@@ -2173,6 +2190,7 @@ async fn setup_goal_reminder_is_plan_aware_when_planner_enabled() {
                 body: b"# Plan\n\n1. do it\n",
             });
             let (actor, _tmp) = make_planner_actor(Some(tx), true).await;
+            give_the_session_an_open_todo(&actor).await;
             let plan_path = actor.goal_tracker.lock().plan_path();
 
             let GoalSetupOutcome::Inference { reminder } =
@@ -2208,14 +2226,21 @@ async fn setup_goal_reminder_is_plan_aware_when_planner_enabled() {
         .await;
 }
 
-/// End-to-end gate (disabled side, the default today): with the planner off, `setup_goal` writes no plan and the reminder renders the no-plan block.
+/// End-to-end gate (disabled side, the default today). With the planner off, `setup_goal` captures the objective onto the
+/// todo list, writes no plan, and the reminder renders the no-plan block.
 /// There is no dangling `Plan:` pointer and no plan-aware phrasing, while the discipline and slim TRACKING/TEST sections remain.
 #[tokio::test(flavor = "current_thread")]
 async fn setup_goal_reminder_is_no_plan_when_planner_disabled() {
     let local = tokio::task::LocalSet::new();
     local
         .run_until(async {
-            let (actor, _tmp) = make_planner_actor(None, false).await;
+            let server = xai_grok_test_support::MockInferenceServer::start()
+                .await
+                .expect("mock inference server");
+            server.enqueue_response("/v1/responses", lite_goal_capture());
+            let (mut actor, _tmp) = make_planner_actor_unshared(None, false).await;
+            arm_todo_writes(&mut actor).await;
+            point_model_at(&actor, &server).await;
 
             let GoalSetupOutcome::Inference { reminder } =
                 actor.setup_goal("ship it", None, GoalMode::Full).await
@@ -2229,6 +2254,37 @@ async fn setup_goal_reminder_is_no_plan_when_planner_disabled() {
             assert!(
                 !reminder.contains("\nPlan: "),
                 "no-plan reminder must not carry a `Plan:` pointer:\n{reminder}"
+            );
+            assert_eq!(
+                live_todo_contents(&actor).await,
+                vec![LITE_GOAL_CAPTURED_STEP.to_string()],
+                "a goal with no planner starts with its objective captured on the list"
+            );
+        })
+        .await;
+}
+
+/// A goal never runs without todos: with the planner off, a capture that adds nothing starts no goal.
+#[tokio::test(flavor = "current_thread")]
+async fn a_planner_less_goal_does_not_start_when_the_capture_fails() {
+    let local = tokio::task::LocalSet::new();
+    local
+        .run_until(async {
+            let (actor, _tmp) = make_planner_actor(None, false).await;
+            let GoalSetupOutcome::Message(message) =
+                actor.setup_goal("ship it", None, GoalMode::Full).await
+            else {
+                panic!("a failed capture must not start the goal");
+            };
+            assert!(
+                message.starts_with(
+                    "Goal not started: putting the objective on the todo list failed:"
+                ),
+                "{message}"
+            );
+            assert!(
+                actor.goal_tracker.lock().snapshot().is_none(),
+                "no goal was created"
             );
         })
         .await;
@@ -2396,6 +2452,7 @@ async fn resume_after_planner_failure_succeeds_without_infra_recap() {
                     body: b"# Plan\n",
                 });
             let (actor, _tmp) = make_planner_actor(Some(tx), true).await;
+            give_the_session_an_open_todo(&actor).await;
             create_test_goal(&actor);
             actor.maybe_run_goal_planner("do X").await;
             assert_eq!(
