@@ -34,9 +34,11 @@ pub enum AuthScheme {
 )]
 #[serde(rename_all = "lowercase")]
 pub enum RequestCompression {
+    /// Compress only toward an origin whose response sent `Accept-Encoding: zstd`.
     #[default]
     None,
     Zstd,
+    /// Never compress. `GROK_REQUEST_COMPRESSION=0` sets this.
     Off,
 }
 
