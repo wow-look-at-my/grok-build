@@ -612,8 +612,9 @@ impl Default for ExecuteConfig {
     }
 }
 
-// The Raw structs are the shape of pager.json. Their doc comments are the descriptions in schemas/pager.schema.json.
-// A new section also needs a runtime twin and a From conversion. Regenerate the schema after a change.
+// The Raw structs are the shape of pager.json. Their doc comments are the
+// descriptions in schemas/pager.schema.json. A new section also needs a
+// runtime twin and a From conversion.
 
 /// The grok TUI appearance file, `$GROK_HOME/pager.json`. Every member is optional. An absent or `null` member keeps the built-in default.
 #[derive(Debug, Clone, Default, Serialize, Deserialize, JsonSchema)]
