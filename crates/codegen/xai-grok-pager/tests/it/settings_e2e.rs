@@ -2324,6 +2324,7 @@ fn settings_value_payload_matches_kind() {
             | SettingsKeyOutcome::Action(Action::SetRememberToolApprovals(_))
             | SettingsKeyOutcome::Action(Action::SetAskUserQuestionTimeoutEnabled(_))
             | SettingsKeyOutcome::Action(Action::SetSubagentModelInheritance(_))
+            | SettingsKeyOutcome::Action(Action::SetTwoPassCompaction(_))
             | SettingsKeyOutcome::Action(Action::SetShowTips(_))
             | SettingsKeyOutcome::Action(Action::SetRespectManualFolds(_))
             | SettingsKeyOutcome::Action(Action::SetShowThinkingBlocks(_))
