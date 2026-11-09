@@ -294,6 +294,7 @@ pub(super) fn handle_session_notification_with_origin(
     let root_session_id: &str = session_notif.session_id.0.as_ref();
     let changed = match session_notif.update {
         ref update @ (XaiSessionUpdate::AutoCompactStarted { .. }
+        | XaiSessionUpdate::CompactionModel { .. }
         | XaiSessionUpdate::AutoCompactCompleted { .. }
         | XaiSessionUpdate::AutoCompactFailed { .. }
         | XaiSessionUpdate::AutoCompactCancelled { .. }
@@ -692,6 +693,7 @@ pub(super) fn handle_session_notification_with_origin(
                     deferred_model_switch: None,
                     in_flight_prompt: None,
                     compact_held_prompt: None,
+                    compaction_model: None,
                     current_prompt_id: None,
                     created_via_new: false,
                 };
@@ -1640,6 +1642,7 @@ pub(super) fn handle_child_session_notification(
 ) -> bool {
     match update {
         XaiSessionUpdate::AutoCompactStarted { .. }
+        | XaiSessionUpdate::CompactionModel { .. }
         | XaiSessionUpdate::AutoCompactCompleted { .. }
         | XaiSessionUpdate::AutoCompactFailed { .. }
         | XaiSessionUpdate::AutoCompactCancelled { .. }
@@ -1992,13 +1995,21 @@ pub(super) fn apply_session_event(
                 session.compact_held_prompt = session.in_flight_prompt.clone();
             }
             session.in_flight_prompt = None;
-            session.set_compaction_activity(Some(TurnActivity::AutoCompacting));
+            session.compaction_model = None;
+            session.set_compaction_activity(Some(TurnActivity::AutoCompacting { model: None }));
             scrollback.push_block(RenderBlock::session_event(
                 SessionEvent::CompactionStarted {
                     percentage: *percentage,
                     reason: reason.clone(),
+                    model: None,
                 },
             ));
+            true
+        }
+        XaiSessionUpdate::CompactionModel { model } => {
+            session.compaction_model = Some(model.clone());
+            session.tracker.set_compaction_model(model);
+            scrollback.set_compaction_start_model(model);
             true
         }
         XaiSessionUpdate::AutoCompactCompleted {

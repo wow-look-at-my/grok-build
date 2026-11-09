@@ -783,6 +783,8 @@ pub struct AgentSession {
     /// Prompt held across auto-compact for reauth resubmit after `/login`.
     /// `in_flight_prompt` is cleared on compact start so cancel cannot rewind.
     pub compact_held_prompt: Option<InFlightPrompt>,
+    /// The model the running compaction request goes to, from the shell's `CompactionModel`.
+    pub compaction_model: Option<String>,
     /// Stable id for the prompt currently in flight, generated client-side at `Effect::SendPrompt` time and threaded through `PromptRequest._meta`.
     /// The agent echoes it back on every `SessionNotification` and `PromptResponse` it produces for that prompt.
     /// Any update whose `meta.promptId` is set and doesn't match this id is silently dropped. `None` between turns.
@@ -953,6 +955,7 @@ impl AgentSession {
     }
     /// Start a slash command (e.g., /compact).
     pub fn start_command(&mut self, command: AgentCommand) {
+        self.compaction_model = None;
         self.state = AgentState::CommandRunning {
             command,
             started_at: Instant::now(),
@@ -1174,6 +1177,7 @@ mod tests {
             scheduled_tasks: HashMap::new(),
             in_flight_prompt: None,
             compact_held_prompt: None,
+            compaction_model: None,
             current_prompt_id: None,
             created_via_new: false,
         }

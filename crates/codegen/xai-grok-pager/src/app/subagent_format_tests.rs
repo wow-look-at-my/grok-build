@@ -203,7 +203,16 @@ fn activity_label_rendered_for_each_turn_activity() {
     let cases: Vec<(TurnActivity, String)> = vec![
         (TurnActivity::Thinking, "Thinking".into()),
         (TurnActivity::Responding, "Responding".into()),
-        (TurnActivity::AutoCompacting, "Compacting".into()),
+        (
+            TurnActivity::AutoCompacting { model: None },
+            "Compacting".into(),
+        ),
+        (
+            TurnActivity::AutoCompacting {
+                model: Some("dense-model".into()),
+            },
+            "Compacting with dense-model".into(),
+        ),
         (
             TurnActivity::Retrying {
                 attempt: 2,

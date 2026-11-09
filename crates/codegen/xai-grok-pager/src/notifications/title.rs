@@ -220,7 +220,9 @@ fn write_activity(buf: &mut String, activity: &TurnActivity) {
                 write_truncated(buf, title, 30);
             }
         }
-        TurnActivity::AutoCompacting => buf.push_str("Compacting"),
+        TurnActivity::AutoCompacting { model } => buf.push_str(
+            crate::scrollback::blocks::compacting_label(model.as_deref()).trim_end_matches('…'),
+        ),
         TurnActivity::Retrying {
             attempt,
             max_retries,

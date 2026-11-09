@@ -1698,10 +1698,10 @@ mod resolve_turn_activity_tests {
     fn real_activity_passes_through() {
         let mut view = running_view();
         view.session
-            .set_compaction_activity(Some(TurnActivity::AutoCompacting));
+            .set_compaction_activity(Some(TurnActivity::AutoCompacting { model: None }));
         assert_eq!(
             view.resolve_turn_activity(),
-            Some(TurnActivity::AutoCompacting)
+            Some(TurnActivity::AutoCompacting { model: None })
         );
     }
     fn running_child(description: &str) -> crate::app::subagent::SubagentInfo {
