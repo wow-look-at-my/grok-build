@@ -9,6 +9,7 @@ pub mod collect;
 pub mod messages;
 pub mod ollama;
 pub mod responses;
+pub mod usage;
 
 pub use chat_completions::stream_chat_completions;
 pub use collect::collect_response;

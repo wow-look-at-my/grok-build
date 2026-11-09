@@ -10,6 +10,7 @@ use async_openai::types::responses::ResponseStreamEvent;
 use futures_util::StreamExt;
 use xai_grok_net::StatusCode;
 use xai_grok_sampler::SamplerConfig as SamplingConfig;
+use xai_grok_sampler::stream::usage::{CallUsage, MessagesUsageAccumulator};
 
 // Re-export compaction utilities from xai-chat-state so existing callers that import from this module continue to work
 pub use xai_chat_state::compaction_utils::{
@@ -295,6 +296,14 @@ pub(crate) struct CompactOutput {
     pub itl_max_ms: Option<u64>,
 }
 
+/// What one compaction call reported for billing.
+/// A provider can bill a call that then fails, so a failed call keeps this too.
+#[derive(Debug, Default, Clone)]
+pub(crate) struct CompactCallUsage {
+    pub reported: CallUsage,
+    pub api_duration_ms: Option<u64>,
+}
+
 impl CompactOutput {
     pub(crate) fn model_wait_ms(&self) -> Option<u64> {
         match (self.ttft_ms, self.stream_ms) {
@@ -425,6 +434,7 @@ mod compact_cancel_await_tests;
 /// `chat_history` must already include the summarization prompt as its final user message.
 /// The split lets callers persist the exact request payload before issuing it.
 /// Omitting them would shift the entire prefix and force a full prefill on the summarizer call.
+/// `call_usage` gets the usage and cost the provider reported, also when the call then fails.
 pub(crate) async fn generate_session_compact(
     chat_history: impl Into<
         crate::session::helpers::prepared_compaction_history::CompactionHistoryInput,
@@ -439,6 +449,7 @@ pub(crate) async fn generate_session_compact(
     wall_clock_budget_secs: u64,
     tool_choice: crate::util::config::CompactionToolChoice,
     cancel: &tokio_util::sync::CancellationToken,
+    call_usage: &mut CallUsage,
 ) -> Result<CompactOutput, CompactFailure> {
     if cancel.is_cancelled() {
         return Err(CompactFailure::Cancelled);
@@ -542,6 +553,9 @@ pub(crate) async fn generate_session_compact(
                 }
                 match chunk_result {
                     Ok(chunk) => {
+                        if let Some(u) = chunk.usage.as_ref() {
+                            call_usage.observe_chat_completions(u);
+                        }
                         if let Some(choice) = chunk.choices.first() {
                             let delta = &choice.delta;
                             if choice.finish_reason.is_some()
@@ -631,7 +645,7 @@ pub(crate) async fn generate_session_compact(
                     ));
                 }
                 match chunk_result {
-                    Ok(chunk) => {
+                    Ok(mut chunk) => {
                         if !matches!(
                             &chunk,
                             ResponseStreamEvent::ResponseCreated(_)
@@ -639,6 +653,15 @@ pub(crate) async fn generate_session_compact(
                                 | ResponseStreamEvent::ResponseQueued(_)
                         ) {
                             last_progress_at = std::time::Instant::now();
+                        }
+                        match &mut chunk {
+                            ResponseStreamEvent::ResponseCompleted(event) => {
+                                *call_usage = CallUsage::from_responses(&mut event.response);
+                            }
+                            ResponseStreamEvent::ResponseIncomplete(event) => {
+                                *call_usage = CallUsage::from_responses(&mut event.response);
+                            }
+                            _ => {}
                         }
                         match &chunk {
                             ResponseStreamEvent::ResponseOutputTextDelta(text_delta_event) => {
@@ -725,6 +748,7 @@ pub(crate) async fn generate_session_compact(
                 Err(e) => return Err(classify_sampling_error(e)),
             };
             // Collect the streamed response (Messages API event types)
+            let mut usage_acc = MessagesUsageAccumulator::default();
             let mut timing = StreamTiming::new();
             let mut truncated = false;
             let mut stop_reason: Option<String> = None;
@@ -763,6 +787,10 @@ pub(crate) async fn generate_session_compact(
                             last_progress_at = std::time::Instant::now();
                         }
                         match event {
+                        xai_grok_sampling_types::messages::MessageStreamEvent::MessageStart { message } => {
+                            usage_acc.observe_start(&message.usage);
+                            *call_usage = usage_acc.finish();
+                        }
                         xai_grok_sampling_types::messages::MessageStreamEvent::ContentBlockDelta {
                             delta: xai_grok_sampling_types::messages::StreamDelta::TextDelta { text },
                             ..
@@ -770,7 +798,9 @@ pub(crate) async fn generate_session_compact(
                             timing.record_delta();
                             content.push_str(&text);
                         }
-                        xai_grok_sampling_types::messages::MessageStreamEvent::MessageDelta { delta, .. } => {
+                        xai_grok_sampling_types::messages::MessageStreamEvent::MessageDelta { delta, usage } => {
+                            usage_acc.observe_delta(&usage);
+                            *call_usage = usage_acc.finish();
                             if let Some(sr) = delta.stop_reason {
                                 truncated = matches!(
                                     sr,
@@ -847,6 +877,9 @@ pub(crate) async fn generate_session_compact(
                 match chunk_result {
                     Ok(chunk) => {
                         last_progress_at = std::time::Instant::now();
+                        if chunk.done {
+                            *call_usage = CallUsage::from_ollama_done(&chunk);
+                        }
                         // A line carrying only `error` is a failed run, not a
                         // finished one; accepting it would compact the
                         // conversation down to a partial summary.

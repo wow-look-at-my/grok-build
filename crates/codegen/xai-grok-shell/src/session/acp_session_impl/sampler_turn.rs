@@ -12,6 +12,14 @@ fn classifier_request_fits_context(input_tokens: u64, context_window: u64) -> bo
     input_tokens <= context_window.saturating_sub(CLASSIFIER_REQUEST_TOKEN_RESERVE)
 }
 
+/// Which ledger slot a model call bills: a main-loop call also counts as a turn round.
+#[derive(Clone, Copy, Debug, PartialEq, Eq)]
+pub(crate) enum ModelCallKind {
+    MainLoop,
+    /// A call outside the main loop, such as compaction.
+    SideCall,
+}
+
 /// Per-prompt cap on the Length tool-call salvage streak. Matches the agent implementation's `MAX_RETRY_ITERATIONS`.
 pub(super) const MAX_OUTPUT_TOKEN_LIMIT_RETRIES: u32 = 5;
 
@@ -2427,21 +2435,12 @@ impl SessionActor {
             self.chat_state_handle
                 .record_prompt_measurement(xai_chat_state::ProviderUsage::from_token_usage(u));
             self.chat_state_handle.record_last_turn_usage(u.clone());
-            // Cost priority. Server-reported ticks → server-reported USD float
-            // (both already resolved by the sampler into `cost_usd_ticks`) →
-            // computed cost from token usage × the model's per-token pricing.
-            // Which `model_pricing::resolve` takes from config or the catalog.
-            let cost_ticks = response.cost_usd_ticks.or_else(|| {
-                let model_id = response.assistant().and_then(|a| a.model_id.clone());
-                let model_id = model_id.as_deref().unwrap_or("");
-                let pricing = crate::agent::model_pricing::resolve(model_id);
-                xai_grok_sampling_types::compute_cost_ticks(Some(u), &pricing)
-            });
-            self.chat_state_handle.record_model_call_usage(
+            let cost_ticks = self.record_model_call_cost(
+                ModelCallKind::MainLoop,
                 response.assistant().and_then(|a| a.model_id.clone()),
-                u.clone(),
+                u,
                 api_duration_ms,
-                cost_ticks,
+                response.cost_usd_ticks,
             );
             self.signals_handle()
                 .record_token_usage(u.completion_tokens, u.reasoning_tokens);
@@ -2459,6 +2458,68 @@ impl SessionActor {
             // TODO: a `None` usage outside these contexts is left unmarked, so a genuine mid-turn omission understates spend with no incomplete flag
             None
         }
+    }
+
+    /// Bill one model call into the prompt and session ledgers and return the cost recorded.
+    /// The cost is the provider-reported one (ticks, else the USD float the sampler converted).
+    /// Otherwise it is `usage` priced at the rates `model_pricing::resolve` finds for `model_id`.
+    /// This touches no context-window accounting.
+    pub(crate) fn record_model_call_cost(
+        &self,
+        kind: ModelCallKind,
+        model_id: Option<String>,
+        usage: &xai_grok_sampling_types::TokenUsage,
+        api_duration_ms: Option<u64>,
+        reported_cost_ticks: Option<i64>,
+    ) -> Option<i64> {
+        let cost_ticks = reported_cost_ticks.or_else(|| {
+            let pricing = crate::agent::model_pricing::resolve(model_id.as_deref().unwrap_or(""));
+            xai_grok_sampling_types::compute_cost_ticks(Some(usage), &pricing)
+        });
+        match kind {
+            ModelCallKind::MainLoop => self.chat_state_handle.record_model_call_usage(
+                model_id,
+                usage.clone(),
+                api_duration_ms,
+                cost_ticks,
+            ),
+            ModelCallKind::SideCall => self.chat_state_handle.record_side_call_usage(
+                model_id,
+                usage.clone(),
+                api_duration_ms,
+                cost_ticks,
+            ),
+        }
+        cost_ticks
+    }
+
+    /// The session ledger's cost total in USD ticks, or `None` when nothing is priced or the ledger did not answer.
+    pub(crate) async fn reported_session_cost_ticks(&self) -> Option<i64> {
+        let ledger = self.chat_state_handle.try_get_session_usage().await.ok()?;
+        xai_grok_sampling_types::reported_cost_ticks(ledger.totals.cost_usd_ticks)
+    }
+
+    /// Bill one compaction call as a side call priced at `model_id`, the model the compaction request named.
+    /// A call that reported neither usage nor cost bills nothing.
+    pub(crate) fn record_compaction_call(
+        &self,
+        model_id: &str,
+        call: crate::session::helpers::session_compact::CompactCallUsage,
+    ) {
+        let xai_grok_sampler::stream::usage::CallUsage {
+            usage,
+            cost_usd_ticks,
+        } = call.reported;
+        if usage.is_none() && cost_usd_ticks.is_none() {
+            return;
+        }
+        self.record_model_call_cost(
+            ModelCallKind::SideCall,
+            Some(model_id.to_owned()),
+            &usage.unwrap_or_default(),
+            call.api_duration_ms,
+            cost_usd_ticks,
+        );
     }
 
     /// Persist one response's items without re-estimating model output when provider usage already includes it.

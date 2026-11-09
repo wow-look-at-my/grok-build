@@ -466,11 +466,7 @@ impl ChatStateActor {
         api_duration_ms: Option<u64>,
         cost_usd_ticks: Option<i64>,
     ) {
-        let model_key = match model_id.as_deref() {
-            Some(id) if !id.is_empty() => id,
-            _ => self.state.sampling_config.model.as_str(),
-        }
-        .to_owned();
+        let model_key = self.usage_model_key(model_id);
         self.state
             .prompt_usage
             .get_or_insert_default()
@@ -481,6 +477,34 @@ impl ChatStateActor {
             api_duration_ms,
             cost_usd_ticks,
         );
+    }
+
+    pub(super) fn record_side_call_usage(
+        &mut self,
+        model_id: Option<String>,
+        usage: &xai_grok_sampling_types::TokenUsage,
+        api_duration_ms: Option<u64>,
+        cost_usd_ticks: Option<i64>,
+    ) {
+        let model_key = self.usage_model_key(model_id);
+        self.state
+            .prompt_usage
+            .get_or_insert_default()
+            .record_side_call(&model_key, usage, api_duration_ms, cost_usd_ticks);
+        self.state.session_usage.record_side_call(
+            &model_key,
+            usage,
+            api_duration_ms,
+            cost_usd_ticks,
+        );
+    }
+
+    /// The ledger key of a call: its model id, else the session model.
+    fn usage_model_key(&self, model_id: Option<String>) -> String {
+        match model_id {
+            Some(id) if !id.is_empty() => id,
+            _ => self.state.sampling_config.model.clone(),
+        }
     }
 
     pub(super) fn record_subagent_usage(
