@@ -868,7 +868,7 @@ A full file with the default values of the sections below:
 
 ### Prompt
 
-`prompt.collapse_unfocused` collapses the prompt while the scrollback has focus. `prompt.mouse_hover` highlights the prompt under the mouse. `prompt.show_prefix` draws the prompt prefix character.
+`prompt.collapse_unfocused` collapses the prompt while the scrollback focus. `prompt.mouse_hover` highlights the prompt under the mouse. `prompt.show_prefix` draws the prompt prefix character.
 
 Compact mode is not persisted here — control it at runtime with `ui.compact_mode` or the `/compact-mode` command.
 
