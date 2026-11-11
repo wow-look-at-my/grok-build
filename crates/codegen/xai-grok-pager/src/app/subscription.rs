@@ -495,12 +495,19 @@ mod tests {
         // A verification that got meta is answered: it never retries.
         assert!(!verify_check_retry(Some(3), Some(&meta), 1));
         // Neither does one that ran out of attempts: the gate is promoted then.
-        assert!(!verify_check_retry(Some(3), None, GATE_VERIFY_CHECK_ATTEMPTS));
+        assert!(!verify_check_retry(
+            Some(3),
+            None,
+            GATE_VERIFY_CHECK_ATTEMPTS
+        ));
         // A check that holds no gate (watch, focus, paywall chain) asks once.
         assert!(!verify_check_retry(None, None, 1));
         // An answer without meta from a verification is no evidence, so it asks again.
         for attempt in 1..GATE_VERIFY_CHECK_ATTEMPTS {
-            assert!(verify_check_retry(Some(3), None, attempt), "attempt {attempt}");
+            assert!(
+                verify_check_retry(Some(3), None, attempt),
+                "attempt {attempt}"
+            );
         }
     }
 }
