@@ -2,7 +2,7 @@
 
 The toggle is `[ui].split_and_tee_commands`, default off, row "Split and tee commands (experimental)" in the settings modal. A session reads it when it starts (`spawn.rs`), and only for a terminal on this machine. The stage files sit next to the session's own logs, and an ACP client terminal cannot write them there.
 
-It does things.
+It does things: it splits a `;`/`&&` chain into one tool call per command. It keeps every stage of a pipe. It turns a trailing `| tail` into a view over the kept output.
 
 ## 1. A joined bash call becomes one tool call per command
 
@@ -40,7 +40,7 @@ cargo test 2>&1 | grep FAIL | sort
 
 A last stage that is a bare `tail` over the pipe is taken out of the pipe. The command runs without it. The whole output is kept, and the result shows those lines of it. Tail reads all of its input anyway. As a result, the command costs the same. The exit code is then the real command's, not tail's.
 
-The footer says so.
+The result footer names the view and reports the real command's exit code.
 
 ## Reading it back
 
