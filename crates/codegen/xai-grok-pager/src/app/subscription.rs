@@ -34,6 +34,23 @@ pub(crate) const SUBSCRIPTION_CHECK_DEBOUNCE: std::time::Duration =
 /// Generous on purpose: the check can chain a `/user` fetch, a JWT refresh, and a settings re-fetch.
 pub(crate) const GATE_VERIFY_TIMEOUT: std::time::Duration = std::time::Duration::from_secs(30);
 
+/// How many times a verifying check asks the shell before its answer without meta promotes the held gate.
+pub(crate) const GATE_VERIFY_CHECK_ATTEMPTS: u32 = 4;
+
+/// The pause between those asks.
+pub(crate) const GATE_VERIFY_CHECK_RETRY_DELAY: std::time::Duration =
+    std::time::Duration::from_millis(250);
+
+/// True when a verifying check must ask again instead of promoting the gate
+/// it holds.
+pub(crate) fn verify_check_retry(
+    verify: Option<u64>,
+    meta: Option<&serde_json::Value>,
+    attempt: u32,
+) -> bool {
+    verify.is_some() && meta.is_none() && attempt < GATE_VERIFY_CHECK_ATTEMPTS
+}
+
 impl AppView {
     /// Consumer xAI session auth: not an API key, not an enterprise team.
     /// Subscription gates and the watch only apply to these sessions.
@@ -470,5 +487,20 @@ mod tests {
 
         assert!(app.pending_gate_verification.is_none());
         assert!(app.has_access());
+    }
+
+    #[test]
+    fn a_verifying_check_retries_an_answer_without_meta() {
+        let meta = serde_json::json!({ "email": "user@test.invalid" });
+        // A verification that got meta is answered: it never retries.
+        assert!(!verify_check_retry(Some(3), Some(&meta), 1));
+        // Neither does one that ran out of attempts: the gate is promoted then.
+        assert!(!verify_check_retry(Some(3), None, GATE_VERIFY_CHECK_ATTEMPTS));
+        // A check that holds no gate (watch, focus, paywall chain) asks once.
+        assert!(!verify_check_retry(None, None, 1));
+        // An answer without meta from a verification is no evidence, so it asks again.
+        for attempt in 1..GATE_VERIFY_CHECK_ATTEMPTS {
+            assert!(verify_check_retry(Some(3), None, attempt), "attempt {attempt}");
+        }
     }
 }

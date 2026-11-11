@@ -833,41 +833,47 @@ pub(super) async fn send_auth_cancel(tx: &AcpAgentTx, request_seq: u64) -> TaskR
     }
     TaskResult::AuthCancelComplete
 }
-pub(super) async fn send_check_subscription(
+/// One `example.invalid/auth/check_subscription` round trip: the `meta` the shell answered with, or why the RPC failed.
+async fn check_subscription_once(
     tx: &AcpAgentTx,
-    verify: Option<u64>,
-) -> TaskResult {
+) -> Result<Option<serde_json::Value>, String> {
     let req = acp::ExtRequest::new(
         "example.invalid/auth/check_subscription",
         serde_json::value::to_raw_value(&serde_json::json!({}))
             .expect("serialize check_subscription params")
             .into(),
     );
-    match acp_send(req, tx).await {
-        Ok(resp) => {
-            let meta = serde_json::from_str::<serde_json::Value>(resp.0.get())
-                .ok()
-                .and_then(|v| v.get("meta").cloned());
-            TaskResult::CheckSubscriptionComplete {
+    let resp = acp_send(req, tx).await.map_err(|e| {
+        tracing::warn!(error = %e, "check_subscription failed");
+        crate::unified_log::warn(
+            "subscription.check.rpc_failed",
+            None,
+            Some(serde_json::json!({ "error": e.to_string() })),
+        );
+        e.to_string()
+    })?;
+    Ok(serde_json::from_str::<serde_json::Value>(resp.0.get())
+        .ok()
+        .and_then(|v| v.get("meta").cloned()))
+}
+
+pub(super) async fn send_check_subscription(
+    tx: &AcpAgentTx,
+    verify: Option<u64>,
+) -> TaskResult {
+    let mut attempt = 1;
+    loop {
+        let meta = check_subscription_once(tx).await.ok().flatten();
+        // A verifying check that came back without meta could not run, and its
+        // answer would promote the gate it holds: ask again before believing it.
+        if !crate::app::subscription::verify_check_retry(verify, meta.as_ref(), attempt) {
+            return TaskResult::CheckSubscriptionComplete {
                 verify,
                 meta,
-            }
+            };
         }
-        Err(e) => {
-            tracing::warn!(error = %e, "check_subscription failed");
-            crate::unified_log::warn(
-                "subscription.check.rpc_failed",
-                None,
-                Some(serde_json::json!({
-                    "verify": verify,
-                    "error": e.to_string(),
-                })),
-            );
-            TaskResult::CheckSubscriptionComplete {
-                verify,
-                meta: None,
-            }
-        }
+        attempt += 1;
+        tokio::time::sleep(crate::app::subscription::GATE_VERIFY_CHECK_RETRY_DELAY).await;
     }
 }
 /// Any failure answers unresolved; the next launch asks again.
