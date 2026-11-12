@@ -9,6 +9,24 @@ pub(crate) struct GoalBackground {
     pub(crate) waiting: std::sync::atomic::AtomicBool,
     /// Tasks that a harness subagent (planner, verifier) left running when it ended.
     pub(crate) harness_task_ids: parking_lot::Mutex<std::collections::HashSet<String>>,
+    /// Tool calls that a queued user message moved to the background and that still run.
+    pub(crate) detached_calls: Arc<std::sync::atomic::AtomicUsize>,
+}
+
+/// Counts one detached tool call as live background work until it drops.
+pub(super) struct DetachedCallGuard(Arc<std::sync::atomic::AtomicUsize>);
+
+impl DetachedCallGuard {
+    pub(super) fn enter(live: Arc<std::sync::atomic::AtomicUsize>) -> Self {
+        live.fetch_add(1, std::sync::atomic::Ordering::AcqRel);
+        Self(live)
+    }
+}
+
+impl Drop for DetachedCallGuard {
+    fn drop(&mut self) {
+        self.0.fetch_sub(1, std::sync::atomic::Ordering::AcqRel);
+    }
 }
 
 /// The background work of this session that has not finished.
@@ -95,7 +113,10 @@ impl SessionActor {
             &listed,
             session_id,
             &self.goal_background.harness_task_ids.lock(),
-        );
+        ) + self
+            .goal_background
+            .detached_calls
+            .load(std::sync::atomic::Ordering::Acquire);
         let subagents = match &self.tool_context.subagent_event_tx {
             Some(tx) => {
                 xai_grok_tools::implementations::grok_build::task::backend::ChannelBackend::new(

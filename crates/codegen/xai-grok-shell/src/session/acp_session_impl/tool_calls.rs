@@ -161,6 +161,7 @@ async fn report_detached_call(
     output_dir: std::path::PathBuf,
     owner_session_id: String,
     start_time: std::time::SystemTime,
+    live: super::goal_hold::DetachedCallGuard,
 ) {
     let (text, failed) = match call.await {
         Ok(Ok(result)) => {
@@ -208,6 +209,8 @@ async fn report_detached_call(
         is_backgrounded: true,
     };
     tracing::info!(%task_id, tool = %tool_name, failed, "detached call finished");
+    // Before the completion, so the session that reads it counts this call as finished.
+    drop(live);
     notifications
         .send(xai_grok_tools::notification::types::ToolNotification::TaskCompleted(snapshot));
 }
@@ -933,6 +936,7 @@ impl SessionActor {
                     .unwrap_or(ForegroundHandoff::None);
                 let tool_bridge = Arc::clone(&tool_bridge);
                 let tool_notifications = tool_notifications.clone();
+                let detached_calls = Arc::clone(&self.goal_background.detached_calls);
                 let prepared = Arc::new(prepared.clone());
                 let authored_tool_kind = self
                     .agent
@@ -1169,6 +1173,7 @@ impl SessionActor {
                                 workflow_smoke_check_session_dir.join("background_tool_calls"),
                                 session_id.to_string(),
                                 started,
+                                super::goal_hold::DetachedCallGuard::enter(detached_calls),
                             ));
                             Ok(detached_call_tool_result(&task_id))
                         }
