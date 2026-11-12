@@ -247,3 +247,94 @@ async fn goal_turn_idles_on_background_work_and_is_checked_after_the_wake() {
     harness.inject_keys(b"\x11").expect("ctrl-q confirm");
     harness.quit().expect("reap pager");
 }
+
+/// The model starts a background command and then only thinks: its reply has no message and no tool call.
+/// That reply does not end the turn. The model is asked again, and the turn ends with the message it then sends.
+#[cfg(unix)]
+#[tokio::test(flavor = "multi_thread", worker_threads = 2)]
+#[ignore = "PTY e2e; run with cargo test -p xai-grok-pager-pty-harness --test it -- --ignored"]
+async fn thinking_only_reply_after_a_background_start_is_asked_again() {
+    const THOUGHT: &str = "GOAL_THOUGHT_MARK the user already knows that the build runs";
+    let content = ContentController::start().await.expect("start content");
+    let build_flag = content.home().join("goal_think_build_flag");
+    expect_todo_capture(&content);
+
+    let _build = expect_tool_turn(
+        &content,
+        "call_goal_think_build",
+        "run_terminal_command",
+        json!({
+            "command": format!(
+                "while [ ! -e {} ]; do /bin/sleep 0.2; done",
+                build_flag.display()
+            ),
+            "description": "flag-gated build",
+            "is_background": true
+        })
+        .to_string(),
+    );
+    let thinking_only = content.expect_agent_turn_with_responses(
+        "thinking only",
+        ScriptedResponse::sse(sse::responses_api_reasoning_only_events(
+            THOUGHT,
+            "test-model",
+        )),
+        ScriptedResponse::sse(sse::chat_completion_script_with_reasoning(
+            THOUGHT,
+            "",
+            "test-model",
+        )),
+    );
+    let _wait = content.expect_agent_turn("wait message", WAIT_MESSAGE);
+    content.set_response("GOAL_THINK_FALLBACK");
+
+    let binary = pager_binary().expect("resolve pager binary");
+    let mut harness = PtyHarness::spawn_with_content_env_in_dir(
+        &binary,
+        160,
+        DEFAULT_COLS,
+        &content,
+        &["--yolo", "--trust"],
+        &[("GROK_GOAL", "1")],
+        Some(content.home()),
+    )
+    .expect("spawn pager");
+    harness
+        .wait_for_text(WELCOME_SCREEN_SENTINEL, WELCOME_TIMEOUT)
+        .expect("welcome");
+    harness
+        .inject_keys(b"/goal --lite build the project")
+        .expect("type goal");
+    harness.update(Duration::from_millis(300));
+    harness.inject_keys(b"\r").expect("submit goal");
+
+    let idle = wait_until(Duration::from_secs(120), || {
+        harness.update(Duration::from_millis(100));
+        let screen = harness.screen_contents();
+        screen.contains(WAIT_MESSAGE) && screen.contains(WAITING_ROW)
+    });
+    let screen = harness.screen_contents();
+    assert!(
+        idle,
+        "the turn must end with a message after the thinking-only reply\nscreen:\n{screen}\n{}",
+        dump_non_system_messages(&content.request_bodies())
+    );
+    assert!(
+        thinking_only.is_satisfied(),
+        "the thinking-only reply must have been served before the message\nscreen:\n{screen}"
+    );
+    assert!(
+        !build_flag.exists() && goal_check_requests(&content) == 0,
+        "the goal waits on the build with no goal check\nscreen:\n{screen}"
+    );
+    assert!(
+        !screen.contains("GOAL_THINK_FALLBACK"),
+        "the turn ends on the wait message: no further model reply follows it\nscreen:\n{screen}"
+    );
+
+    harness.update(Duration::from_millis(500));
+    harness.inject_keys(b"\x11").expect("ctrl-q once");
+    harness.update(Duration::from_millis(200));
+    harness.inject_keys(b"\x11").expect("ctrl-q confirm");
+    harness.quit().expect("reap pager");
+}
