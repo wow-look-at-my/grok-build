@@ -260,7 +260,24 @@ fn a_goal_turn_waits_on_background_work_with_no_goal_check_until_the_wake_turn_e
                 result.is_ok(),
                 "the wake turn must end normally: {result:?}"
             );
-            let paths: Vec<String> = server.requests().into_iter().map(|r| r.path).collect();
+            let paths: Vec<String> = server
+                .request_bodies()
+                .iter()
+                .map(|body| {
+                    let last = body
+                        .get("messages")
+                        .and_then(|m| m.as_array())
+                        .and_then(|m| m.last())
+                        .map(|m| m.to_string())
+                        .unwrap_or_default();
+                    last.chars().take(160).collect()
+                })
+                .collect();
+            let paths = (
+                paths,
+                format!("{result:?}"),
+                actor.goal_tracker.lock().status(),
+            );
             let pause = actor
                 .goal_tracker
                 .lock()
