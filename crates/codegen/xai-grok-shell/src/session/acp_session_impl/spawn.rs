@@ -1036,6 +1036,7 @@ pub(crate) async fn spawn_session_actor(
                 },
             ),
             embedding_credentials: embed_credentials,
+            usage_sink: crate::session::billed_client::session_usage_sink(&chat_state_handle),
         };
         let backend = crate::session::memory::MemoryBackendImpl::from_session_params(
             storage.clone(),
@@ -2195,6 +2196,7 @@ pub(crate) async fn spawn_session_actor(
         let embed_dims = embed_config.dimensions;
         let sampling_base_url = embed_base_url.clone();
         let sampling_api_key = embed_api_key.clone();
+        let reindex_usage_sink = session.usage_sink();
         let session_id_for_reindex = session_info.id.to_string();
         let chunks_added_counter = session.memory.chunks_added.clone();
         let reindex_handle = xai_spawn::spawn_local(async move {
@@ -2227,6 +2229,7 @@ pub(crate) async fn spawn_session_actor(
                             &embed_config,
                             sampling_base_url,
                             api_key,
+                            reindex_usage_sink,
                         )
                     {
                         crate::session::memory::embed_missing_chunks(&index, &provider).await

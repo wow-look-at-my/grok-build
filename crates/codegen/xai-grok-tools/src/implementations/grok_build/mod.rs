@@ -41,6 +41,7 @@ pub mod kill_task;
 pub mod list_dir;
 pub mod lsp;
 pub mod media_bearer;
+pub(crate) mod media_client;
 pub mod monitor;
 pub mod read_file;
 pub mod scheduler;

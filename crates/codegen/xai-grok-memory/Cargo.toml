@@ -17,6 +17,7 @@ blake3 = { workspace = true }
 chrono = { workspace = true }
 dunce = { workspace = true }
 flate2 = { workspace = true }
+indexmap = { workspace = true }
 xai-gix-status = { workspace = true }
 libc = { workspace = true }
 notify = { workspace = true }
@@ -35,6 +36,8 @@ xai-grok-auth = { workspace = true }
 xai-grok-config-types = { workspace = true }
 xai-grok-http = { workspace = true }
 xai-grok-net = { workspace = true }
+xai-grok-sampler = { workspace = true }
+xai-grok-sampling-types = { path = "../xai-grok-sampling-types" }
 xai-grok-tools = { workspace = true }
 xai-grok-version = { workspace = true }
 xai-sqlite-journal = { workspace = true }
@@ -48,6 +51,7 @@ windows = { workspace = true }
 
 [dev-dependencies]
 filetime = { workspace = true }
+wiremock = { workspace = true }
 
 [lints]
 workspace = true

@@ -246,7 +246,12 @@ fn image_client(base_url: &str, mgr: &Arc<AuthManager>) -> ImageGenClient {
         edit_model_override: None,
         tier_restricted: false,
     };
-    ImageGenClient::new(&config, Some(Arc::new(SharedAuthKeyProvider(mgr.clone())))).unwrap()
+    ImageGenClient::new(&config, Some(Arc::new(SharedAuthKeyProvider(mgr.clone()))))
+        .unwrap()
+        // No session ledger owns these tests, so the sink bills nowhere.
+        .with_usage_sink(Some(xai_grok_sampler::no_session_sink(
+            "xai-grok-login side call bearer test",
+        )))
 }
 
 fn image_response() -> ResponseTemplate {
