@@ -17,7 +17,7 @@ pub use grok_build::{
     AskUserQuestionTool, BashTool, CopyFileTool, EnterPlanModeTool, ExitPlanModeTool, GrepTool,
     KillTaskTool, ListDirTool, MoveFileTool, ReadFileTool, SearchReplaceTool,
     SendSubagentMessageDisposition, SendSubagentMessageTool, TaskOutputTool, TaskTool,
-    TodoWriteTool, WaitTasksTool, WebFetchTool, WebSearchTool,
+    TodoWriteTool, WebFetchTool, WebSearchTool,
 };
 pub use memory::{MemoryGetImpl, MemorySearchImpl};
 pub use opencode::{
