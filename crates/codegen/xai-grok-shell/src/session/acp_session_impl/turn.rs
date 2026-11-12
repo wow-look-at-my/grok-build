@@ -1326,11 +1326,6 @@ impl SessionActor {
             let mut salvage =
                 super::length_salvage::LengthSalvage::new(self.length_salvage_budget());
             loop {
-                if self.goal_harness_enabled() {
-                    let goal_loop_active = self.goal_tracker.lock().status()
-                        == Some(crate::session::goal_tracker::GoalStatus::Active);
-                    self.set_goal_loop_active_resource(goal_loop_active).await;
-                }
                 let round = self
                     .process_conversation_turn_with_recovery(
                         prompt_id,
@@ -1375,6 +1370,23 @@ impl SessionActor {
                         tracing::info!(
                             "goal turn: yielding to queued user prompts; continuation re-arms \
                              at turn end"
+                        );
+                        break round;
+                    }
+                    // The goal checker runs only when the session has nothing left to wait for.
+                    // The turn ends here, and the completion wake starts the next one.
+                    if let Some(hold) = self.goal_check_hold().await {
+                        xai_grok_telemetry::unified_log::info(
+                            "shell.goal.check_held",
+                            Some(self.session_info.id.0.as_ref()),
+                            Some(serde_json::json!({
+                                "prompt_id": prompt_id,
+                                "hold": format!("{hold:?}"),
+                            })),
+                        );
+                        tracing::info!(
+                            ?hold,
+                            "goal turn: ending the turn without the goal checker"
                         );
                         break round;
                     }
@@ -1984,7 +1996,8 @@ impl SessionActor {
             "injected mid-turn monitor events as hidden synthetic user message"
         );
     }
-    /// Success. Reset `goal_continuation_streak` to 0. Then call `maybe_queue_goal_continuation` unless `suppress_goal_continuation` (stationarity silent EndTurn).
+    /// Success. Clear `goal_continuation_streak`. Then call `resume_goal_or_wait` unless `suppress_goal_continuation` (stationarity silent EndTurn).
+    /// It queues no continuation while background work runs or a wake is queued.
     /// When the goal is not `Active` (`goal_active_now == false`), both branches are skipped.
     /// Neither streak moves and the existing pause cause is preserved.
     pub(crate) async fn handle_turn_end(
@@ -2000,7 +2013,7 @@ impl SessionActor {
             self.goal_continuation_streak
                 .store(0, std::sync::atomic::Ordering::Relaxed);
             if !suppress_goal_continuation {
-                self.maybe_queue_goal_continuation().await;
+                self.resume_goal_or_wait().await;
             }
             return;
         }

@@ -1051,6 +1051,11 @@ impl SessionActor {
         if !self.goal_harness_enabled() {
             return;
         }
+        let task_ids: Vec<String> = task_ids.into_iter().collect();
+        self.goal_background
+            .harness_task_ids
+            .lock()
+            .extend(task_ids.iter().cloned());
         let mut set = self.goal_turn_task_ids.lock();
         set.extend(task_ids);
     }
@@ -1875,22 +1880,6 @@ impl SessionActor {
         };
         let records = self.subagent_token_records.lock();
         fold_active_tokens_by_model(records.values(), &goal_id, current_model_id)
-    }
-
-    /// Push the tool-layer `GoalLoopActive` flag so per-tool-call SUBAGENT
-    /// completion reminders suppress themselves while the goal loop drives
-    /// the turn (the loop consumes its own subagent results).
-    pub(super) async fn set_goal_loop_active_resource(&self, active: bool) {
-        self.tool_context
-            .goal_loop_active_gate
-            .store(active, std::sync::atomic::Ordering::Relaxed);
-        self.agent
-            .borrow()
-            .tool_bridge()
-            .update_resource(
-                xai_grok_tools::implementations::grok_build::task::types::GoalLoopActive(active),
-            )
-            .await;
     }
 }
 

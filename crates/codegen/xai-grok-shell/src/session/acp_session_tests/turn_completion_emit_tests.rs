@@ -709,10 +709,6 @@ async fn cancel_without_running_task_persists_none_elapsed() {
                 let mut state = actor.state.lock().await;
                 state.pending_inputs.push_back(item);
             }
-            let goal_was_active = actor
-                .tool_context
-                .goal_loop_active_gate
-                .load(std::sync::atomic::Ordering::Relaxed);
             let report = actor.turn_report.claim_for_gate().expect("report claim");
             let outcome = actor
                 .cancel_running_task(crate::session::CancelOptions {
@@ -733,13 +729,6 @@ async fn cancel_without_running_task_persists_none_elapsed() {
             assert_eq!(
                 report.commit(),
                 super::turn_report_slot::CommitOutcome::Reported
-            );
-            assert_eq!(
-                actor
-                    .tool_context
-                    .goal_loop_active_gate
-                    .load(std::sync::atomic::Ordering::Relaxed),
-                goal_was_active
             );
             let state = actor.state.lock().await;
             assert!(state.running_task.is_none());

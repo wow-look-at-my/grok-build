@@ -15,6 +15,7 @@ mod env_op_compile;
 mod exit_error_dead_stderr;
 mod exit_timeout;
 mod leader_pty_e2e;
+mod live_model;
 mod mcp_toggle_cli;
 mod orphan_reap;
 mod plan_approval_resume;

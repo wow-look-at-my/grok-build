@@ -265,7 +265,6 @@ impl From<&xai_grok_tools::types::ToolInput> for AccessKind {
             },
             ToolInput::TodoWrite(_)
             | ToolInput::TaskOutput(_)
-            | ToolInput::WaitTasks(_)
             | ToolInput::KillTask(_)
             | ToolInput::Skill(_)
             | ToolInput::MemorySearch(_)

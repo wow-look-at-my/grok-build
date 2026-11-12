@@ -51,6 +51,15 @@ fn assert_emit_background_tasks_snapshot(cmd_rx: &mut mpsc::UnboundedReceiver<Se
     }
 }
 
+/// A completed task ends with the snapshot request and then `BackgroundWorkSettled`.
+fn assert_completed_task_tail(cmd_rx: &mut mpsc::UnboundedReceiver<SessionCommand>) {
+    assert_emit_background_tasks_snapshot(cmd_rx);
+    assert!(
+        matches!(cmd_rx.try_recv(), Ok(SessionCommand::BackgroundWorkSettled)),
+        "a completed task must tell the session that background work settled"
+    );
+}
+
 #[allow(clippy::type_complexity)]
 fn make_test_config_full() -> (
     NotificationBridgeConfig,
@@ -101,7 +110,6 @@ fn make_test_config_full_raw() -> (
         read_tool_name: Arc::new(std::sync::OnceLock::new()),
         auto_wake_enabled: true,
         queue_exit_reminder_on_approved_exit: Arc::new(std::sync::atomic::AtomicBool::new(false)),
-        goal_loop_active: Arc::new(std::sync::atomic::AtomicBool::new(false)),
         background_tasks_snapshot_pending: Arc::new(std::sync::atomic::AtomicBool::new(false)),
         emit_local_background_tasks: Arc::new(std::sync::atomic::AtomicBool::new(true)),
     };
@@ -191,67 +199,10 @@ async fn bash_task_completed_injects_bash_task_completed_source() {
     }
 }
 
-/// While a goal loop is active, a completed background bash task must NOT fire the synthetic auto-wake prompt. An async "task completed" wake mid-goal derails a weak model.
-/// It must also NOT be marked reserved (so the `TaskCompletionReminder` is free to drain it). The pager's `example.invalid/task_completed` notification still fires.
-#[tokio::test]
-async fn bash_task_completed_suppresses_auto_wake_during_goal_loop() {
-    let (config, mut gateway_rx, _persistence_rx, mut cmd_rx) = make_test_config_full();
-    config
-        .task_output_tool_name
-        .set(Some("get_command_or_subagent_output".to_string()))
-        .expect("slot is fresh in this test fixture");
-    config
-        .goal_loop_active
-        .store(true, std::sync::atomic::Ordering::Relaxed);
-    let snapshot = make_task_snapshot("bg-goal", TaskKind::Bash);
-    let mut offsets = HashMap::new();
-
-    handle_notification(
-        &config,
-        ToolNotification::TaskCompleted(snapshot),
-        &mut offsets,
-    )
-    .await;
-
-    // No synthetic prompt / CopyFile / InjectNotification while the goal loop drives the turn, only the Notification hook dispatch
-    match cmd_rx
-        .try_recv()
-        .expect("expected DispatchNotificationHook for task_complete")
-    {
-        SessionCommand::DispatchNotificationHook {
-            notification_type, ..
-        } => assert_eq!(notification_type, "task_complete"),
-        _ => panic!("unexpected session command"),
-    }
-    assert_emit_background_tasks_snapshot(&mut cmd_rx);
-    assert!(
-        cmd_rx.try_recv().is_err(),
-        "goal-loop-active bash completion must not inject auto-wake commands"
-    );
-    // Not marked reserved: the `TaskCompletionReminder` must be free to drain it
-    assert!(
-        config.task_completion_reservations.snapshot().is_empty(),
-        "goal-loop-active completion must not be marked reserved"
-    );
-    // The pager UI notification must still be emitted.
-    let mut found_ext = false;
-    while let Ok(msg) = gateway_rx.try_recv() {
-        if let xai_acp_lib::AcpClientMessage::ExtNotification(args) = msg
-            && args.request.method.as_ref() == "example.invalid/task_completed"
-        {
-            found_ext = true;
-        }
-    }
-    assert!(
-        found_ext,
-        "example.invalid/task_completed ExtNotification must still be sent for UI"
-    );
-}
-
-/// With the goal loop inactive (the default for a normal session), a completed bash task DOES fire the synthetic auto-wake prompt.
+/// A completed bash task fires the synthetic auto-wake prompt, in a goal session too: the bridge has no goal gate.
 /// It is also marked reserved so the `TaskCompletionReminder` suppresses the duplicate reminder.
 #[tokio::test]
-async fn bash_task_completed_auto_wakes_and_reserves_without_goal_loop() {
+async fn bash_task_completed_auto_wakes_and_reserves() {
     let (config, mut cmd_rx) = make_test_config();
     config
         .task_output_tool_name
@@ -277,7 +228,7 @@ async fn bash_task_completed_auto_wakes_and_reserves_without_goal_loop() {
         cmd_rx.try_recv(),
         Ok(SessionCommand::DispatchNotificationHook { .. })
     ));
-    assert_emit_background_tasks_snapshot(&mut cmd_rx);
+    assert_completed_task_tail(&mut cmd_rx);
     assert_eq!(
         config.task_completion_reservations.snapshot(),
         vec!["bg-normal".to_string()],
@@ -378,7 +329,7 @@ async fn task_completed_notification_stamps_will_wake() {
         cmd_rx.try_recv(),
         Ok(SessionCommand::DispatchNotificationHook { .. })
     ));
-    assert_emit_background_tasks_snapshot(&mut cmd_rx);
+    assert_completed_task_tail(&mut cmd_rx);
     let mut persisted = false;
     while let Ok(message) = persistence_rx.try_recv() {
         if let PersistenceMsg::Update(crate::session::storage::SessionUpdate::Xai(update)) = message
@@ -487,7 +438,7 @@ async fn timed_out_monitor_admission_queues_one_fallback_and_late_actor_drops_pr
         cmd_rx.try_recv(),
         Ok(SessionCommand::DispatchNotificationHook { .. })
     ));
-    assert_emit_background_tasks_snapshot(&mut cmd_rx);
+    assert_completed_task_tail(&mut cmd_rx);
     assert!(cmd_rx.try_recv().is_err());
     assert_eq!(task_completed_will_wake(&mut gateway_rx), Some(false));
     assert!(
@@ -522,44 +473,6 @@ async fn task_completed_stamps_will_wake_false_when_session_channel_closed() {
     assert!(config.task_completion_reservations.contains("bg-dead"));
     config.task_completion_reservations.release("bg-dead");
     assert!(!config.task_completion_reservations.contains("bg-dead"));
-}
-
-/// The goal-loop arm sits BEFORE the `auto_wake_enabled == false` `InjectNotification` fallback.
-/// So an auto-wake-DISABLED completion mid-goal must also be suppressed: it must NOT fall through to the idle-gated `InjectNotification`.
-/// The test guards against a future reorder that would leak a mid-goal notification.
-#[tokio::test]
-async fn bash_task_completed_auto_wake_disabled_still_suppressed_during_goal_loop() {
-    let (mut config, mut cmd_rx) = make_test_config();
-    config.auto_wake_enabled = false;
-    config
-        .goal_loop_active
-        .store(true, std::sync::atomic::Ordering::Relaxed);
-    let snapshot = make_task_snapshot("bg-disabled-goal", TaskKind::Bash);
-    let mut offsets = HashMap::new();
-
-    handle_notification(
-        &config,
-        ToolNotification::TaskCompleted(snapshot),
-        &mut offsets,
-    )
-    .await;
-
-    // No InjectNotification during the goal loop, even with auto-wake disabled.
-    match cmd_rx
-        .try_recv()
-        .expect("expected DispatchNotificationHook for task_complete")
-    {
-        SessionCommand::DispatchNotificationHook {
-            notification_type, ..
-        } => assert_eq!(notification_type, "task_complete"),
-        _ => panic!("unexpected session command"),
-    }
-    assert_emit_background_tasks_snapshot(&mut cmd_rx);
-    assert!(
-        cmd_rx.try_recv().is_err(),
-        "goal-loop-active completion must not InjectNotification with auto-wake disabled"
-    );
-    assert!(config.task_completion_reservations.snapshot().is_empty());
 }
 
 /// Natural monitor exit (including exit code 0) must auto-wake immediately the same way bash does, not only via the idle-gated MonitorEvent path.
@@ -631,7 +544,7 @@ async fn monitor_task_completed_auto_wakes_with_monitor_ended_message() {
         cmd_rx.try_recv(),
         Ok(SessionCommand::DispatchNotificationHook { .. })
     ));
-    assert_emit_background_tasks_snapshot(&mut cmd_rx);
+    assert_completed_task_tail(&mut cmd_rx);
     assert_eq!(
         config.task_completion_reservations.snapshot(),
         vec!["mon-456".to_string()],
@@ -664,7 +577,7 @@ async fn declined_quiet_monitor_wake_queues_canonical_deferred_completion() {
         cmd_rx.try_recv(),
         Ok(SessionCommand::DispatchNotificationHook { .. })
     ));
-    assert_emit_background_tasks_snapshot(&mut cmd_rx);
+    assert_completed_task_tail(&mut cmd_rx);
     assert!(cmd_rx.try_recv().is_err());
     let mut persisted_completion = false;
     while let Ok(message) = persistence_rx.try_recv() {
@@ -737,7 +650,7 @@ async fn monitor_explicitly_killed_skips_auto_wake() {
         } => assert_eq!(notification_type, "task_complete"),
         _ => panic!("unexpected session command"),
     }
-    assert_emit_background_tasks_snapshot(&mut cmd_rx);
+    assert_completed_task_tail(&mut cmd_rx);
     assert!(
         cmd_rx.try_recv().is_err(),
         "model-tool-killed monitor must not auto-wake"
@@ -794,40 +707,6 @@ async fn ui_killed_monitor_auto_wakes_and_tells_model_not_to_restart() {
         Some(true),
         "UI/Stop monitor kill with no delivered result must stamp will_wake: true"
     );
-}
-
-/// Goal-loop suppression applies to monitor completions too.
-#[tokio::test]
-async fn monitor_task_completed_suppressed_during_goal_loop() {
-    let (config, mut cmd_rx) = make_test_config();
-    config
-        .goal_loop_active
-        .store(true, std::sync::atomic::Ordering::Relaxed);
-    let snapshot = make_task_snapshot("mon-goal", TaskKind::Monitor);
-    let mut offsets = HashMap::new();
-
-    handle_notification(
-        &config,
-        ToolNotification::TaskCompleted(snapshot),
-        &mut offsets,
-    )
-    .await;
-
-    match cmd_rx
-        .try_recv()
-        .expect("expected DispatchNotificationHook for task_complete")
-    {
-        SessionCommand::DispatchNotificationHook {
-            notification_type, ..
-        } => assert_eq!(notification_type, "task_complete"),
-        _ => panic!("unexpected session command"),
-    }
-    assert_emit_background_tasks_snapshot(&mut cmd_rx);
-    assert!(
-        cmd_rx.try_recv().is_err(),
-        "goal-loop-active monitor completion must not auto-wake"
-    );
-    assert!(config.task_completion_reservations.snapshot().is_empty());
 }
 
 #[tokio::test]
@@ -1225,7 +1104,8 @@ async fn task_completed_requests_background_tasks_snapshot() {
             SessionCommand::Prompt { .. }
             | SessionCommand::DropMonitorNotifications { .. }
             | SessionCommand::InjectNotification { .. }
-            | SessionCommand::CopyFile { .. } => {}
+            | SessionCommand::CopyFile { .. }
+            | SessionCommand::BackgroundWorkSettled => {}
             _ => panic!("unexpected session command alongside completion snapshot"),
         }
     }
@@ -1488,7 +1368,7 @@ async fn block_waited_task_skips_auto_wake_prompt() {
         } => assert_eq!(notification_type, "task_complete"),
         _ => panic!("unexpected session command"),
     }
-    assert_emit_background_tasks_snapshot(&mut cmd_rx);
+    assert_completed_task_tail(&mut cmd_rx);
     assert!(
         cmd_rx.try_recv().is_err(),
         "block_waited completion should not send Prompt or InjectNotification"
@@ -1530,7 +1410,7 @@ async fn explicitly_killed_task_skips_auto_wake_prompt() {
         } => assert_eq!(notification_type, "task_complete"),
         _ => panic!("unexpected session command"),
     }
-    assert_emit_background_tasks_snapshot(&mut cmd_rx);
+    assert_completed_task_tail(&mut cmd_rx);
     assert!(
         cmd_rx.try_recv().is_err(),
         "delivered kill completion should not send Prompt or InjectNotification"
@@ -1566,7 +1446,7 @@ async fn teardown_killed_task_skips_auto_wake_prompt() {
         } => assert_eq!(notification_type, "task_complete"),
         _ => panic!("unexpected session command"),
     }
-    assert_emit_background_tasks_snapshot(&mut cmd_rx);
+    assert_completed_task_tail(&mut cmd_rx);
     assert!(
         cmd_rx.try_recv().is_err(),
         "teardown kill with no waiter must not enqueue Prompt"
@@ -1719,7 +1599,7 @@ async fn bash_task_completed_falls_back_when_auto_wake_disabled() {
         }
         _ => panic!("expected DispatchNotificationHook"),
     }
-    assert_emit_background_tasks_snapshot(&mut cmd_rx);
+    assert_completed_task_tail(&mut cmd_rx);
 }
 
 #[tokio::test]

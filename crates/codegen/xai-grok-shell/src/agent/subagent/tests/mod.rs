@@ -691,7 +691,6 @@ fn should_auto_wake_subagent_truth_table() {
         auto_wake_enabled: true,
         block_waited: false,
         explicitly_killed: false,
-        goal_loop_active: false,
         parent_channel_open: true,
     };
     assert!(should_auto_wake_subagent(wakeable));
@@ -714,10 +713,6 @@ fn should_auto_wake_subagent_truth_table() {
         },
         AutoWakeInputs {
             explicitly_killed: true,
-            ..wakeable
-        },
-        AutoWakeInputs {
-            goal_loop_active: true,
             ..wakeable
         },
         AutoWakeInputs {
@@ -801,6 +796,7 @@ fn completed_followup_wakes_parent_with_exactly_one_prompt() {
     present_child_completion(completion, &gateway, will_wake);
     let mut finish_count = 0;
     let mut prompt_count = 0;
+    let mut settled_after_prompts = Vec::new();
     while let Ok(command) = parent_cmd_rx.try_recv() {
         match command {
             SessionCommand::XaiSessionNotification {
@@ -821,10 +817,16 @@ fn completed_followup_wakes_parent_with_exactly_one_prompt() {
                 assert!(prompt_id.starts_with("subagent-completed-"));
                 prompt_count += 1;
             }
+            SessionCommand::BackgroundWorkSettled => settled_after_prompts.push(prompt_count),
             _ => panic!("unexpected parent command"),
         }
     }
     assert_eq!((finish_count, prompt_count), (1, 1));
+    assert_eq!(
+        settled_after_prompts,
+        [1],
+        "the parent hears that background work settled one time, after the wake is queued"
+    );
 }
 #[test]
 fn inject_subagent_completed_prompt_sends_prompt() {
@@ -848,7 +850,6 @@ fn inject_subagent_completed_prompt_sends_prompt() {
         scheduler_delete_tool_name: Some("renamed_scheduler_delete"),
         scheduler_create_tool_name: Some("renamed_scheduler_create"),
         synthetic_trace_tx: &None,
-        goal_loop_active: &std::sync::atomic::AtomicBool::new(false),
     });
     match cmd_rx.try_recv().expect("expected synthetic Prompt") {
         SessionCommand::Prompt { prompt_id, prompt_blocks, verbatim, .. } => {
@@ -896,7 +897,6 @@ fn inject_subagent_completed_prompt_copies_capped_task_output() {
         scheduler_delete_tool_name: None,
         scheduler_create_tool_name: None,
         synthetic_trace_tx: &None,
-        goal_loop_active: &std::sync::atomic::AtomicBool::new(false),
     });
     let SessionCommand::Prompt { prompt_blocks, .. } = cmd_rx
         .try_recv()
@@ -942,7 +942,6 @@ fn inject_subagent_completed_prompt_omits_cleanup_without_loop_task() {
         scheduler_delete_tool_name: Some("scheduler_delete"),
         scheduler_create_tool_name: Some("scheduler_create"),
         synthetic_trace_tx: &None,
-        goal_loop_active: &std::sync::atomic::AtomicBool::new(false),
     });
     let SessionCommand::Prompt { prompt_blocks, .. } = cmd_rx
         .try_recv()
@@ -953,30 +952,6 @@ fn inject_subagent_completed_prompt_omits_cleanup_without_loop_task() {
     assert!(!prompt.contains("scheduler_delete"));
     assert!(!prompt.contains("no longer relevant"));
     assert!(!prompt.contains("Check the subagent output"));
-}
-#[test]
-fn inject_subagent_completed_prompt_bails_when_goal_loop_activates_in_gap() {
-    let (cmd_tx, mut cmd_rx) = mpsc::unbounded_channel::<SessionCommand>();
-    let request = auto_wake_test_request("sa-goal");
-    let result = SubagentResult {
-        success: true,
-        subagent_id: "sa-goal".into(),
-        child_session_id: "sa-goal".into(),
-        ..Default::default()
-    };
-    inject_subagent_completed_prompt(InjectParams {
-        subagent_id: "sa-goal",
-        result: &result,
-        request: &request,
-        snapshot: &test_snapshot(&request, &result),
-        parent_cmd_tx: Some(&cmd_tx),
-        task_output_tool_name: "get_command_or_subagent_output",
-        scheduler_delete_tool_name: None,
-        scheduler_create_tool_name: None,
-        synthetic_trace_tx: &None,
-        goal_loop_active: &std::sync::atomic::AtomicBool::new(true),
-    });
-    assert!(cmd_rx.try_recv().is_err(), "no prompt when the goal loop owns the cadence");
 }
 #[test]
 fn inject_subagent_completed_prompt_bails_when_parent_closed() {
@@ -1000,7 +975,6 @@ fn inject_subagent_completed_prompt_bails_when_parent_closed() {
         scheduler_delete_tool_name: None,
         scheduler_create_tool_name: None,
         synthetic_trace_tx: &Some(trace_tx),
-        goal_loop_active: &std::sync::atomic::AtomicBool::new(false),
     });
     assert!(trace_rx.try_recv().is_err(), "no prompt was sent, so no trace request follows");
 }

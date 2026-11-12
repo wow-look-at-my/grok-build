@@ -159,22 +159,6 @@ async fn memory_reapply_updates_future_spawn_contexts_only() {
     );
 }
 #[tokio::test]
-async fn subagent_spawn_context_shares_parent_goal_loop_gate() {
-    use std::sync::atomic::Ordering::Relaxed;
-    let agent = build_minimal_agent_for_tests();
-    let sid = acp::SessionId::new("parent-goal");
-    let handle = make_test_handle("test-model", false, None);
-    let parent_gate = handle.tool_context.goal_loop_active_gate.clone();
-    agent.insert_resident(&sid, handle);
-    let ctx = agent.build_subagent_spawn_context(sid.0.as_ref());
-    assert!(!ctx.goal_loop_active.load(Relaxed));
-    parent_gate.store(true, Relaxed);
-    assert!(
-        ctx.goal_loop_active.load(Relaxed),
-        "subagent context must observe the parent's goal-loop gate (same Arc)"
-    );
-}
-#[tokio::test]
 async fn subagent_spawn_context_disables_ask_user_question_from_enabled_parent() {
     let agent = build_minimal_agent_for_tests();
     let sid = acp::SessionId::new("parent-ask-enabled");

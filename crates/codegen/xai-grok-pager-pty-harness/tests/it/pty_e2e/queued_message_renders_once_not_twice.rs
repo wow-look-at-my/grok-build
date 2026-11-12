@@ -1,4 +1,4 @@
-//! PTY, flag-file driven like `endline_park_is_markerless`: the "queued message appears 2x" regression.
+//! PTY, flag-file driven: the "queued message appears 2x" regression.
 #[allow(unused_imports)]
 use super::common::*;
 
@@ -121,10 +121,9 @@ async fn queued_message_renders_once_not_twice() {
         "no request has been made since the follow-up was typed"
     );
 
-    // Tool a later call: block on the REAL task.
+    // A later tool call reads the REAL task. The read returns at once.
     let wait_args = json!({
-        "task_ids": [task_id],
-        "timeout_ms": 600_000
+        "task_ids": [task_id]
     })
     .to_string();
     let _wait_turn = expect_tool_turn(
@@ -160,11 +159,11 @@ async fn queued_message_renders_once_not_twice() {
         "a follow-up delivered mid-turn carries the interjection preamble: {delivered}"
     );
 
-    // Let the wait return so the turn wraps up.
+    // Let the background command exit.
     std::fs::write(&park_flag, b"done").expect("release flag");
     harness
         .wait_for_text("QONCE_WRAPUP", Duration::from_secs(60))
-        .expect("turn wraps up after the wait returns");
+        .expect("turn wraps up");
 
     // Exactly once end-to-end: one "❯ " block, no leftover queue row, and one
     // user message — never a second turn replaying the same text.
