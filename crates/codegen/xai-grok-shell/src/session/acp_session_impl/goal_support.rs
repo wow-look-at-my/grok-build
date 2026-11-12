@@ -1051,6 +1051,11 @@ impl SessionActor {
         if !self.goal_harness_enabled() {
             return;
         }
+        let task_ids: Vec<String> = task_ids.into_iter().collect();
+        self.goal_background
+            .harness_task_ids
+            .lock()
+            .extend(task_ids.iter().cloned());
         let mut set = self.goal_turn_task_ids.lock();
         set.extend(task_ids);
     }

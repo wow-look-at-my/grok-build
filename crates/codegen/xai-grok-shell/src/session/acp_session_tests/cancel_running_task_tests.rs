@@ -253,7 +253,7 @@ async fn persist_ack_waits_for_disk_flush_before_success() {
                     )),
                 )),
                 goal_turn_task_ids: parking_lot::Mutex::new(std::collections::HashSet::new()),
-                goal_waiting_on_background: std::sync::atomic::AtomicBool::new(false),
+                goal_background: Default::default(),
                 goal_continuation_streak: std::sync::atomic::AtomicU32::new(0),
                 workflow_manager: crate::session::workflow::manager::WorkflowManager::test_bundle()
                     .0,
@@ -808,7 +808,7 @@ async fn first_turn_memory_injection_disabled_does_not_persist_to_chat_history()
                     )),
                 )),
                 goal_turn_task_ids: parking_lot::Mutex::new(std::collections::HashSet::new()),
-                goal_waiting_on_background: std::sync::atomic::AtomicBool::new(false),
+                goal_background: Default::default(),
                 goal_continuation_streak: std::sync::atomic::AtomicU32::new(0),
                 workflow_manager: crate::session::workflow::manager::WorkflowManager::test_bundle()
                     .0,
@@ -1169,7 +1169,7 @@ async fn cancel_running_task_teardown_clears_running_and_pending_work() {
                 goal_turn_task_ids: parking_lot::Mutex::new(
                     std::collections::HashSet::new(),
                 ),
-                goal_waiting_on_background: std::sync::atomic::AtomicBool::new(false),
+                goal_background: Default::default(),
                 goal_continuation_streak: std::sync::atomic::AtomicU32::new(0),
                 workflow_manager: crate::session::workflow::manager::WorkflowManager::test_bundle()
                     .0,
@@ -2803,7 +2803,7 @@ async fn cancel_propagates_to_sampler_handle_so_no_further_emission() {
                 goal_turn_task_ids: parking_lot::Mutex::new(
                     std::collections::HashSet::new(),
                 ),
-                goal_waiting_on_background: std::sync::atomic::AtomicBool::new(false),
+                goal_background: Default::default(),
                 goal_continuation_streak: std::sync::atomic::AtomicU32::new(0),
                 workflow_manager: crate::session::workflow::manager::WorkflowManager::test_bundle()
                     .0,

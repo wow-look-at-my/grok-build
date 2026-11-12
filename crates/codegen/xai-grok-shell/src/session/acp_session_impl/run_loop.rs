@@ -204,6 +204,20 @@ impl SessionActor {
         let super::PromptOrigin::TaskCompleted { task_id } = origin else {
             return respond_to.send(true).is_ok().then_some(fallback);
         };
+        // The goal model did not start a task that a harness subagent left behind, so its end wakes nobody.
+        if self
+            .goal_background
+            .harness_task_ids
+            .lock()
+            .contains(task_id)
+        {
+            if let Some(reservations) = &self.tool_context.task_completion_reservations {
+                reservations.release(task_id);
+            }
+            self.mark_completions_reported(&[task_id.as_str()]).await;
+            let _ = respond_to.send(false);
+            return None;
+        }
         let gate_suppressed = self
             .tool_context
             .task_wake_suppressed

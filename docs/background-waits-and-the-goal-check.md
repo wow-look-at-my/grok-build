@@ -1,0 +1,9 @@
+# Background waits and the goal check
+
+- No tool call waits on a background task. `get_task_output` returns a snapshot at once, and there is no `wait_tasks` tool. A `timeout_ms` key in a call is ignored. A model that wants to wait ends its turn. A running task's snapshot says so.
+- A completion wakes the idle session. An active goal gets the same wakes: nothing drops a completion because a goal runs. A completed goal still drops late notifications (`maybe_drain_notifications`).
+- The goal checker (`run_goal_round_end`) runs only when a round ends with no hold. `goal_check_hold` (`acp_session_impl/goal_hold.rs`) names the hold. It is a queued wake or pending notification, or live background work. Unfinished terminal tasks and monitors of this session, running subagents, and active workflow runs. On a hold the turn ends. No evaluator, no panel and no continuation directive run.
+- `handle_turn_end` goes through `resume_goal_or_wait`. It queues the goal continuation only when there is no hold. The user sees one "Goal is waiting on …" line for each wait.
+- `SessionCommand::BackgroundWorkSettled` covers a completion that sends no wake, such as a task the user killed or a wake dropped as already reported. The notification bridge sends it after each `TaskCompleted`. The subagent presenter sends it after each child. An idle session with an active goal and no hold then queues the continuation (`resume_goal_after_background_settled`).
+- A task that a harness subagent (planner, verifier) left running is not the model's. `GoalBackground::harness_task_ids` holds its id. It holds no goal check, its wake is refused (`admit_task_completion_wake`), and its notification is dropped.
+- A background task that never exits (a dev server, a monitor) holds the goal check while it runs. The goal discipline prompt tells the model to stop the tasks it does not need before it ends the turn.

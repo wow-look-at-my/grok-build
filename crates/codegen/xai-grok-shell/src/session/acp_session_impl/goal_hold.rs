@@ -2,6 +2,15 @@
 
 use super::*;
 
+/// What the goal loop tracks about background work.
+#[derive(Default)]
+pub(crate) struct GoalBackground {
+    /// True while an active goal waits on background work and the user was told so.
+    pub(crate) waiting: std::sync::atomic::AtomicBool,
+    /// Tasks that a harness subagent (planner, verifier) left running when it ended.
+    pub(crate) harness_task_ids: parking_lot::Mutex<std::collections::HashSet<String>>,
+}
+
 /// The background work of this session that has not finished.
 #[derive(Debug, Clone, Copy, Default, PartialEq, Eq)]
 pub(super) struct LiveBackgroundWork {
@@ -58,15 +67,17 @@ pub(super) fn is_goal_hold_input(origin: &crate::session::PromptOrigin) -> bool 
 }
 
 /// Counts the unfinished terminal tasks of `session_id`. The terminal is shared, so another session's task does not count.
-/// A task with no recorded owner counts.
+/// A task with no recorded owner counts. A task in `harness_task_ids` does not.
 pub(super) fn count_live_tasks(
     tasks: &[xai_grok_tools::computer::types::TaskSnapshot],
     session_id: &str,
+    harness_task_ids: &std::collections::HashSet<String>,
 ) -> usize {
     tasks
         .iter()
         .filter(|task| {
             task.is_outstanding()
+                && !harness_task_ids.contains(&task.task_id)
                 && task
                     .owner_session_id
                     .as_deref()
@@ -79,9 +90,11 @@ impl SessionActor {
     /// Counts the background commands, monitors, subagents and workflows of this session that still run.
     pub(super) async fn live_background_work(&self) -> LiveBackgroundWork {
         let session_id = self.session_info.id.0.as_ref();
+        let listed = self.tool_bridge_handle().list_background_tasks().await;
         let tasks = count_live_tasks(
-            &self.tool_bridge_handle().list_background_tasks().await,
+            &listed,
             session_id,
+            &self.goal_background.harness_task_ids.lock(),
         );
         let subagents = match &self.tool_context.subagent_event_tx {
             Some(tx) => {
@@ -146,7 +159,8 @@ impl SessionActor {
                 self.announce_goal_wait(live).await;
             }
             None => {
-                self.goal_waiting_on_background
+                self.goal_background
+                    .waiting
                     .store(false, std::sync::atomic::Ordering::Relaxed);
                 self.maybe_queue_goal_continuation().await;
             }
@@ -165,7 +179,8 @@ impl SessionActor {
             })),
         );
         if self
-            .goal_waiting_on_background
+            .goal_background
+            .waiting
             .swap(true, std::sync::atomic::Ordering::Relaxed)
         {
             return;

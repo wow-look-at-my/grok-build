@@ -976,8 +976,7 @@ pub(crate) struct SessionActor {
     /// Either spawned by the goal model itself or reparented from a harness verifier/planner subagent on its exit.
     /// [`Self::maybe_drain_notifications`] drops their late completions once the goal is not `Active`.
     pub(crate) goal_turn_task_ids: parking_lot::Mutex<std::collections::HashSet<String>>,
-    /// True while an active goal waits on background work and the user was told so.
-    pub(crate) goal_waiting_on_background: std::sync::atomic::AtomicBool,
+    pub(crate) goal_background: goal_hold::GoalBackground,
     /// Consecutive non-completing (cancelled/errored) goal-mode turns while the goal is `Active`.
     /// Auto-pauses the goal with `GoalPauseReason::BackOff` once the counter reaches [`GOAL_CONTINUATION_BACKOFF_THRESHOLD`].
     /// In-memory only; session restart is itself a reset.

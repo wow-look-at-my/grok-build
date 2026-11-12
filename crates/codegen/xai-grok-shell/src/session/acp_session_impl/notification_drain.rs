@@ -565,15 +565,14 @@ impl SessionActor {
                 .collect();
 
             let (to_surface, dropped) = {
-                // The goal model waits for the tasks it started, so their notifications surface while the goal is active.
-                let no_ids = std::collections::HashSet::new();
-                let goal_turn_task_ids = self.goal_turn_task_ids.lock();
+                // The goal model waits for the tasks it started, so their
+                // notifications surface while the goal is active.
                 let dropped_origin = if goal_active {
-                    &no_ids
+                    self.goal_background.harness_task_ids.lock()
                 } else {
-                    &*goal_turn_task_ids
+                    self.goal_turn_task_ids.lock()
                 };
-                Self::split_goal_suppressed(suppress_all, dropped_origin, notifications)
+                Self::split_goal_suppressed(suppress_all, &dropped_origin, notifications)
             };
             if dropped > 0 {
                 tracing::info!(
@@ -664,7 +663,7 @@ impl SessionActor {
     /// Partition drained notifications into `(to_surface, dropped_count)`.
     /// `suppress_all` is the blanket gate of a completed goal (drop everything).
     /// Independently, notifications whose source task is in `goal_turn_task_ids` are dropped.
-    /// The caller passes an empty set while the goal is active.
+    /// While the goal is active the caller passes only the tasks that a harness subagent left behind.
     pub(super) fn split_goal_suppressed(
         suppress_all: bool,
         goal_turn_task_ids: &std::collections::HashSet<String>,

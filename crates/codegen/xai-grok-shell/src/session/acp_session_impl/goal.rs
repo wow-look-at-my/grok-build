@@ -1931,7 +1931,8 @@ impl SessionActor {
         ) {
             return GoalRoundDecision::EndTurn;
         }
-        self.goal_waiting_on_background
+        self.goal_background
+            .waiting
             .store(false, std::sync::atomic::Ordering::Relaxed);
         // A claim goes to review before the todo bounce. Open todos must not
         // send the agent back unheard when it says it cannot go on.

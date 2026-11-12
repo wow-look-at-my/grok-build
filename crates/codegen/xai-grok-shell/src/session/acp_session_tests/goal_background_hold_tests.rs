@@ -129,9 +129,20 @@ fn live_task_count_takes_only_unfinished_tasks_of_this_session() {
         terminal_task("other-running", false, Some("other")),
         terminal_task("no-owner-running", false, None),
     ];
-    assert_eq!(count_live_tasks(&tasks, "me"), 2);
-    assert_eq!(count_live_tasks(&tasks, "other"), 2);
-    assert_eq!(count_live_tasks(&[], "me"), 0);
+    let none = std::collections::HashSet::new();
+    assert_eq!(count_live_tasks(&tasks, "me", &none), 2);
+    assert_eq!(count_live_tasks(&tasks, "other", &none), 2);
+    assert_eq!(count_live_tasks(&[], "me", &none), 0);
+}
+
+#[test]
+fn a_task_left_by_a_harness_subagent_is_not_live_work() {
+    let tasks = [
+        terminal_task("verifier-server", false, Some("me")),
+        terminal_task("model-build", false, Some("me")),
+    ];
+    let harness = std::collections::HashSet::from(["verifier-server".to_string()]);
+    assert_eq!(count_live_tasks(&tasks, "me", &harness), 1);
 }
 
 #[tokio::test(flavor = "current_thread")]
@@ -241,7 +252,7 @@ async fn turn_end_queues_no_continuation_while_background_work_runs() {
                 "the session must stay idle while the subagent runs"
             );
             assert!(
-                actor.goal_waiting_on_background.load(Ordering::Relaxed),
+                actor.goal_background.waiting.load(Ordering::Relaxed),
                 "the wait is recorded so the user is told one time"
             );
 
@@ -257,7 +268,7 @@ async fn turn_end_queues_no_continuation_while_background_work_runs() {
                 queued_ids(&state)
             );
             assert!(
-                !actor.goal_waiting_on_background.load(Ordering::Relaxed),
+                !actor.goal_background.waiting.load(Ordering::Relaxed),
                 "the wait ends with the continuation"
             );
             if let Some(task) = state.running_task.take() {
@@ -366,6 +377,89 @@ async fn an_active_goal_surfaces_the_notification_of_its_own_task() {
             if let Some(task) = state.running_task.take() {
                 task.handle.abort();
             }
+        })
+        .await;
+}
+
+/// The goal model did not start a task that a verifier left running. Its completion must not start a turn.
+#[tokio::test(flavor = "current_thread")]
+async fn an_active_goal_drops_the_notification_of_a_harness_task() {
+    let local = tokio::task::LocalSet::new();
+    local
+        .run_until(async {
+            let actor = goal_actor(Arc::new(AtomicUsize::new(0))).await;
+            actor.record_reparented_goal_turn_task_ids(["verifier-server".to_string()]);
+            actor
+                .state
+                .lock()
+                .await
+                .pending_notifications
+                .push(PendingNotification {
+                    prompt_id: "bash-completed-verifier-server".into(),
+                    prompt_blocks: vec![],
+                    priority: NotificationPriority::Later,
+                    source: NotificationSource::BashTaskCompleted {
+                        task_id: "verifier-server".into(),
+                    },
+                });
+            let (completion_tx, _completion_rx) = tokio::sync::mpsc::unbounded_channel();
+            actor.clone().maybe_drain_notifications(completion_tx).await;
+            let state = actor.state.lock().await;
+            assert!(state.pending_notifications.is_empty());
+            assert!(state.running_task.is_none());
+            assert!(queued_ids(&state).is_empty());
+        })
+        .await;
+}
+
+#[tokio::test(flavor = "current_thread")]
+async fn a_harness_task_completion_is_refused_as_a_wake() {
+    let local = tokio::task::LocalSet::new();
+    local
+        .run_until(async {
+            let actor = goal_actor(Arc::new(AtomicUsize::new(0))).await;
+            actor.record_reparented_goal_turn_task_ids(["verifier-server".to_string()]);
+            let admission = |task_id: &str| {
+                let (respond_to, admitted) = oneshot::channel();
+                (
+                    crate::session::commands::TaskWakeAdmission {
+                        respond_to,
+                        fallback: crate::session::commands::TaskWakeFallback {
+                            prompt_id: format!("bash-completed-{task_id}"),
+                            prompt_blocks: vec![],
+                            source: NotificationSource::BashTaskCompleted {
+                                task_id: task_id.to_string(),
+                            },
+                        },
+                    },
+                    admitted,
+                )
+            };
+
+            let (harness, harness_admitted) = admission("verifier-server");
+            let origin =
+                crate::session::PromptOrigin::from_prompt_id("task-completed-verifier-server");
+            assert!(
+                actor
+                    .admit_task_completion_wake(&origin, harness)
+                    .await
+                    .is_none()
+            );
+            assert_eq!(harness_admitted.await, Ok(false));
+            assert!(
+                actor.state.lock().await.pending_notifications.is_empty(),
+                "a refused harness task leaves no fallback notification"
+            );
+
+            let (own, own_admitted) = admission("model-build");
+            let origin = crate::session::PromptOrigin::from_prompt_id("task-completed-model-build");
+            assert!(
+                actor
+                    .admit_task_completion_wake(&origin, own)
+                    .await
+                    .is_some()
+            );
+            assert_eq!(own_admitted.await, Ok(true));
         })
         .await;
 }
