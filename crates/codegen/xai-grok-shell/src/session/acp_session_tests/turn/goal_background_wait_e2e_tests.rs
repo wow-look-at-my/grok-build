@@ -117,6 +117,8 @@ async fn goal_actor(server: &MockInferenceServer, running: Arc<AtomicUsize>) -> 
         )
         .expect("bind_local_session");
 
+    // A turn reads the harness switch from `goal_enabled` again.
+    actor.goal_enabled = true;
     set_goal_harness_for_tests(&actor);
     {
         let mut tracker = actor.goal_tracker.lock();
