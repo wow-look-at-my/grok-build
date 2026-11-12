@@ -4166,7 +4166,6 @@ mod tests {
                 tool("GrokBuild:run_terminal_cmd"),
                 tool("GrokBuild:task"),
                 tool("GrokBuild:get_task_output"),
-                tool("GrokBuild:wait_tasks"),
                 tool("GrokBuild:kill_task"),
             ],
             behavior_preset: None,
@@ -4200,34 +4199,24 @@ mod tests {
             desc_of("run_terminal_cmd").contains("is_background"),
             "bash description must resolve params.execute.is_background"
         );
-        for name in ["get_task_output", "wait_tasks"] {
-            let desc = desc_of(name);
-            assert!(
-                desc.contains("is_background"),
-                "`{name}` description must resolve params.execute.is_background"
-            );
-            assert!(
-                desc.contains("run_in_background"),
-                "`{name}` description must resolve params.task.run_in_background"
-            );
-            let timeout = defs
-                .iter()
-                .find(|d| d.function.name == name)
-                .and_then(|d| d.function.parameters.pointer("/properties/timeout_ms"))
-                .unwrap_or_else(|| panic!("`{name}` should expose timeout_ms"));
-            assert!(
-                timeout.get("maximum").is_some(),
-                "`{name}`.timeout_ms must carry the resolved wait ceiling: {timeout}"
-            );
-            assert!(
-                !timeout
-                    .get("description")
-                    .and_then(|v| v.as_str())
-                    .unwrap_or("")
-                    .contains("{max_"),
-                "`{name}`.timeout_ms has an unresolved placeholder: {timeout}"
-            );
-        }
+        let desc = desc_of("get_task_output");
+        assert!(
+            desc.contains("is_background"),
+            "`get_task_output` description must resolve params.execute.is_background"
+        );
+        assert!(
+            desc.contains("run_in_background"),
+            "`get_task_output` description must resolve params.task.run_in_background"
+        );
+        let parameters = defs
+            .iter()
+            .find(|d| d.function.name == "get_task_output")
+            .map(|d| &d.function.parameters)
+            .expect("get_task_output must be defined");
+        assert!(
+            parameters.pointer("/properties/timeout_ms").is_none(),
+            "`get_task_output` must not expose a wait parameter: {parameters}"
+        );
     }
     #[test]
     fn validate_config_rejects_auto_bg_without_background_enabled() {
