@@ -1179,7 +1179,6 @@ impl ToolRegistryBuilder {
                             desc,
                             &client_name,
                             crate::DEFAULT_TOOL_OUTPUT_BYTES,
-                            xai_tool_types::max_wait_block_ms(),
                         ));
                 }
                 renderer.render_schema_descriptions(&mut definition.function.parameters);
@@ -1187,7 +1186,6 @@ impl ToolRegistryBuilder {
                     &mut definition.function.parameters,
                     &client_name,
                     crate::DEFAULT_TOOL_OUTPUT_BYTES,
-                    xai_tool_types::max_wait_block_ms(),
                 );
                 definition
             };

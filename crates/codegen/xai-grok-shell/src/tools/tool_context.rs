@@ -73,10 +73,6 @@ pub struct BlockingWaitState(parking_lot::Mutex<BlockingWaitInner>);
 struct BlockingWaitInner {
     depth: usize,
     generation: u64,
-    /// Union of waits aborted by a mid-turn interjection.
-    /// Concurrent aborts merge so a side-work wait cannot replace the implement set.
-    /// Extras drop only when the next interruptible wait contains every remembered id plus at least one new one.
-    interrupted_wait_ids: Option<Vec<String>>,
 }
 impl BlockingWaitState {
     pub(crate) fn new() -> Self {
@@ -89,49 +85,10 @@ impl BlockingWaitState {
     pub(crate) fn set_depth_for_test(&self, depth: usize) {
         self.0.lock().depth = depth;
     }
-    pub(crate) fn generation(&self) -> u64 {
-        self.0.lock().generation
-    }
-    /// Hold the wait-memory lock for one read-and-maybe-write so a parallel abort cannot land between a check and a clear.
-    /// No-op if `generation` does not match (cancel already reset).
-    pub(crate) fn update_interrupted_wait<R>(
-        &self,
-        generation: u64,
-        f: impl FnOnce(&mut Option<Vec<String>>) -> R,
-    ) -> Option<R> {
-        let mut inner = self.0.lock();
-        if inner.generation != generation {
-            return None;
-        }
-        Some(f(&mut inner.interrupted_wait_ids))
-    }
-    #[cfg(test)]
-    pub(crate) fn note_interrupted_wait(&self, ids: Vec<String>) {
-        self.update_interrupted_wait(self.generation(), |remembered| {
-            if ids.is_empty() {
-                return;
-            }
-            match remembered {
-                Some(existing) => {
-                    for id in ids {
-                        if !existing.contains(&id) {
-                            existing.push(id);
-                        }
-                    }
-                }
-                None => *remembered = Some(ids),
-            }
-        });
-    }
-    #[cfg(test)]
-    pub(crate) fn interrupted_wait_ids(&self) -> Option<Vec<String>> {
-        self.0.lock().interrupted_wait_ids.clone()
-    }
     pub(crate) fn reset(&self) {
         let mut state = self.0.lock();
         state.generation = state.generation.wrapping_add(1);
         state.depth = 0;
-        state.interrupted_wait_ids = None;
     }
 }
 pub(crate) struct BlockingWaitGuard {
@@ -139,9 +96,6 @@ pub(crate) struct BlockingWaitGuard {
     generation: u64,
 }
 impl BlockingWaitGuard {
-    pub(crate) fn generation(&self) -> u64 {
-        self.generation
-    }
     pub(crate) fn enter(state: Arc<BlockingWaitState>) -> Self {
         let generation = {
             let mut inner = state.0.lock();
@@ -239,9 +193,6 @@ pub struct ToolContext {
     pub scheduler_create_tool_name: Option<String>,
     /// When `false`, background task and subagent completions fall back to the idle-gated notification drain.
     pub auto_wake_enabled: bool,
-    /// When set, bash and subagent auto-wake synthetic prompts are suppressed.
-    /// Shared `Arc` written at one chokepoint; see `SessionActor::set_goal_loop_active_resource` for the rationale.
-    pub goal_loop_active_gate: Arc<std::sync::atomic::AtomicBool>,
     /// Count of interruptible blocking waits the running turn is parked in (via [`BlockingWaitGuard`]).
     /// `queue_input` reads it: a prompt arriving while non-zero takes the send-now path.
     pub blocking_wait_depth: Arc<BlockingWaitState>,
@@ -337,7 +288,6 @@ impl ToolContext {
             scheduler_delete_tool_name: None,
             scheduler_create_tool_name: None,
             auto_wake_enabled: true,
-            goal_loop_active_gate: Arc::new(std::sync::atomic::AtomicBool::new(false)),
             blocking_wait_depth: Arc::new(BlockingWaitState::new()),
             task_output_token_budget: None,
             sampler_retry_only_before_output: false,
@@ -435,7 +385,6 @@ mod tests {
                 scheduler_delete_tool_name: None,
                 scheduler_create_tool_name: None,
                 auto_wake_enabled: true,
-                goal_loop_active_gate: Arc::new(std::sync::atomic::AtomicBool::new(false)),
                 blocking_wait_depth: Arc::new(BlockingWaitState::new()),
                 task_output_token_budget: None,
                 sampler_retry_only_before_output: false,

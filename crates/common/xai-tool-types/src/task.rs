@@ -189,11 +189,11 @@ pub struct TaskToolInput {
 
     /// Whether to run the subagent in the background.
     ///
-    /// Returns immediately with a subagent_id. Use the task output tool to
-    /// retrieve results. This is set to true by default.
+    /// Returns immediately with a subagent_id. A completion message delivers
+    /// the result. This is set to true by default.
     #[schemars(
-        description = "Returns immediately with a subagent_id. Use the task output tool to \
-            retrieve results. This is set to true by default."
+        description = "Returns immediately with a subagent_id. A completion message delivers \
+            the result; to wait for it, end your turn. This is set to true by default."
     )]
     #[serde(
         default = "default_true",
@@ -1406,7 +1406,7 @@ pub fn build_task_description(naming: &TaskToolNaming) -> String {
         "Start a subagent that works on a task independently and reports back.\n\n\
          ## Usage notes\n\
          - When the agent is done, it returns a single message with its agent ID. Use that ID to resume the agent later for follow-up work.\n\
-         - {run_in_background_param}: Returns immediately with a subagent_id. Use {background_retrieval_tool} to retrieve results. This is set to true by default.\n\
+         - {run_in_background_param}: Returns immediately with a subagent_id. A completion message delivers the result; to wait for it, end your turn. {background_retrieval_tool} reads its output so far. This is set to true by default.\n\
          - Subagents receive a compacted version of project instructions (AGENTS.md). If the task requires detailed conventions (e.g., build rules, testing patterns), include the relevant rules directly in the prompt.\n\
          - When launching independent subagents, you MUST incorporate the results into the task based on requirements BEFORE concluding.\n\n\
          Resuming a previous agent ({resume_from_param}):\n\
@@ -2019,7 +2019,7 @@ mod tests {
         assert!(!desc.contains("subagent_type"));
         assert!(desc.contains("## Usage notes"));
         assert!(desc.contains(
-            "run_in_background: Returns immediately with a subagent_id. Use get_task_output to retrieve results. This is set to true by default."
+            "run_in_background: Returns immediately with a subagent_id. A completion message delivers the result; to wait for it, end your turn. get_task_output reads its output so far. This is set to true by default."
         ));
         assert!(desc.contains(
             "When launching independent subagents, you MUST incorporate the results into the task based on requirements BEFORE concluding."
@@ -2222,7 +2222,7 @@ mod tests {
         assert!(desc.contains("prior ${{ tools.by_kind.task }} call"));
         assert!(desc.contains("Use ${{ params.task.resume_from }} to continue"));
         assert!(desc.contains(
-            "${{ params.task.run_in_background }}: Returns immediately with a subagent_id. Use ${{ tools.by_kind.background_task_action }} to retrieve results. This is set to true by default."
+            "${{ params.task.run_in_background }}: Returns immediately with a subagent_id. A completion message delivers the result; to wait for it, end your turn. ${{ tools.by_kind.background_task_action }} reads its output so far. This is set to true by default."
         ));
         assert!(desc.contains("Use ${{ params.task.isolation }} to control"));
         assert!(!desc.contains("subagent_type"));

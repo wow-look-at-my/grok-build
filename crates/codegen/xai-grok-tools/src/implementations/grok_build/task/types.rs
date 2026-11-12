@@ -1189,14 +1189,6 @@ register_resource!(
     CurrentPromptIdResource
 );
 
-/// True while a `/goal` loop is active. Set by xai-grok-shell at turn start. When true, `TaskCompletionReminder`
-/// suppresses bg-task completion reminders (marking them reported) so async "task completed" nudges don't pull a weak
-/// model off the goal continuation (e.g. relaunching a killed dev server).
-#[derive(Debug, Clone, Copy, Default)]
-pub struct GoalLoopActive(pub bool);
-
-register_resource!("grok_build", "GoalLoopActive", GoalLoopActive);
-
 /// Thread-local tracing capture for behavioral log-emission tests.
 #[cfg(test)]
 pub(crate) mod test_capture {

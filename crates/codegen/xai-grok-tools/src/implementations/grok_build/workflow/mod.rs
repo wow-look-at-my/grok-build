@@ -296,7 +296,7 @@ impl std::fmt::Debug for WorkflowLaunchHandle {
 pub struct WorkflowToolOutput {
     pub run_id: String,
     #[schemars(
-        description = "Alias of run_id; workflow runs are not background tasks — do not pass to task_output/wait_tasks. Completion notifies automatically."
+        description = "Alias of run_id; workflow runs are not background tasks — do not pass to task_output. Completion notifies automatically."
     )]
     pub task_id: String,
     #[schemars(

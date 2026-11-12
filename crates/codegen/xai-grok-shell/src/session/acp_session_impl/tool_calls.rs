@@ -8,11 +8,7 @@ use xai_grok_hooks::result::HookDecision;
 use xai_grok_tools::implementations::grok_build::task::backend::ChannelBackend;
 #[path = "wait_interrupt.rs"]
 mod wait_interrupt;
-use wait_interrupt::{
-    InterruptedWaitFilter, WaitInterruptCause, apply_interrupted_wait_filter, finished_wait_ids,
-    interrupted_wait_tool_result, record_interruptible_wait_outcome, wait_for_wait_interrupt,
-    wait_task_ids_from_args,
-};
+use wait_interrupt::wait_for_wait_interrupt;
 #[derive(Default)]
 struct PreToolUseGate {
     hook_ask: Option<HookAsk>,
@@ -60,18 +56,6 @@ pub(super) fn tool_output_span_outcome(
             _ => "success",
         },
         Err(_) => "error",
-    }
-}
-/// Blocking wait tools that should abort when a mid-turn interjection is pending.
-fn is_interruptible_wait_tool(tool_name: &str, args: &serde_json::Value) -> bool {
-    match tool_name {
-        "get_task_output"
-        | "get_command_or_subagent_output"
-        | "get_task_or_subagent_output"
-        | "get_terminal_command_output" => xai_tool_types::task_output_waits_from_json(args),
-        "wait_tasks" | "wait_commands_or_subagents" | "wait_tasks_or_subagents" => true,
-        "Await" | "AwaitShell" => true,
-        _ => false,
     }
 }
 /// A `task` call that blocks the turn on its subagent. An omitted flag means background.
@@ -892,7 +876,6 @@ impl SessionActor {
         };
         let has_interruptible_wait = approved.iter().zip(&handoffs).any(|(prepared, handoff)| {
             *handoff != ForegroundHandoff::None
-                || is_interruptible_wait_tool(&prepared.tool_name, prepared.authored_arguments())
                 || is_foreground_task_call(&prepared.tool_name, prepared.authored_arguments())
         });
         let tool_bridge = self.tool_bridge_handle();
@@ -907,11 +890,10 @@ impl SessionActor {
             self.harvest_queued_prompts_into_interjections(true).await;
         }
         let pending_interjections = self.pending_interjections.clone();
-        let (parent_interject, running_turn, running_prompt_id) = {
+        let (parent_interject, running_prompt_id) = {
             let state = self.state.lock().await;
             (
                 state.message_delivery.interject_signal(),
-                state.running_task.as_ref().map(|task| task.epoch),
                 state.running_prompt_id().map(str::to_string),
             )
         };
@@ -941,8 +923,6 @@ impl SessionActor {
                 let blocking_wait_depth = self.tool_context.blocking_wait_depth.clone();
                 let session_cwd = session_cwd.clone();
                 let display_cwd = display_cwd.clone();
-                let interruptible =
-                    is_interruptible_wait_tool(&prepared.tool_name, prepared.authored_arguments());
                 let task_handoff =
                     is_foreground_task_call(&prepared.tool_name, prepared.authored_arguments())
                         .then(|| subagent_event_tx.clone().zip(running_prompt_id.clone()))
@@ -953,24 +933,7 @@ impl SessionActor {
                     .unwrap_or(ForegroundHandoff::None);
                 let tool_bridge = Arc::clone(&tool_bridge);
                 let tool_notifications = tool_notifications.clone();
-                let prepared = {
-                    let mut dispatch_prepared = prepared.clone();
-                    if interruptible
-                        && let InterruptedWaitFilter::Rewritten { kept, requested } =
-                            apply_interrupted_wait_filter(
-                                &blocking_wait_depth,
-                                &mut dispatch_prepared.parsed_args,
-                            )
-                    {
-                        tracing::info!(
-                            tool = %dispatch_prepared.tool_name,
-                            kept = kept.len(),
-                            requested,
-                            "strip post-interrupt side-work from wait_all"
-                        );
-                    }
-                    Arc::new(dispatch_prepared)
-                };
+                let prepared = Arc::new(prepared.clone());
                 let authored_tool_kind = self
                     .agent
                     .borrow()
@@ -1102,12 +1065,12 @@ impl SessionActor {
                             }
                         }
                     };
-                    let wait_guard = interruptible
-                        .then(|| BlockingWaitGuard::enter(blocking_wait_depth.clone()));
                     // `queue_input` harvests a message that arrives while the call runs.
                     let _handoff_guard = (handoff != ForegroundHandoff::None)
                         .then(|| BlockingWaitGuard::enter(blocking_wait_depth.clone()));
-                    let (result, wait_aborted) = if interruptible {
+                    let result = if let Some((event_tx, prompt_id)) = task_handoff {
+                        // A queued message cuts a foreground subagent short: it moves to the background before the call is dropped.
+                        let backend = ChannelBackend::for_session(event_tx, session_id.to_string());
                         async {
                             tokio::select! {
                                 biased;
@@ -1116,62 +1079,19 @@ impl SessionActor {
                                     Some(&shared_recovery),
                                     &prepared.tool_name,
                                     run_tool,
-                                ) => (result, false),
-                                cause = wait_for_wait_interrupt(
-                                    &pending_interjections,
-                                    &parent_interject,
-                                ) => {
-                                    tracing::info!(
-                                        tool = %prepared.tool_name,
-                                        ?cause,
-                                        "abort wait tool: interrupt pending"
-                                    );
-                                    match (cause, running_turn) {
-                                        (WaitInterruptCause::ParentInterject, Some(turn)) => {
-                                            parent_interject.note_wait_aborted(turn);
-                                        }
-                                        (WaitInterruptCause::ParentInterject, None)
-                                        | (WaitInterruptCause::HumanInterjection, _) => {}
-                                    }
-                                    (
-                                        Ok(interrupted_wait_tool_result(
-                                            prepared.authored_arguments(),
-                                            cause,
-                                        )),
-                                        true,
+                                ) => result,
+                                () = async {
+                                    wait_for_wait_interrupt(
+                                        &pending_interjections,
+                                        &parent_interject,
                                     )
-                                }
+                                    .await;
+                                    backend.hand_off_foreground_for_prompt(&prompt_id).await;
+                                } => Ok(backgrounded_task_tool_result()),
                             }
                         }
                         .instrument(tool_span)
                         .await
-                    } else if let Some((event_tx, prompt_id)) = task_handoff {
-                        // A queued message cuts a foreground subagent short: it moves to the background before the call is dropped.
-                        let backend = ChannelBackend::for_session(event_tx, session_id.to_string());
-                        (
-                            async {
-                                tokio::select! {
-                                    biased;
-                                    result = call_with_auth_retry(
-                                        am.as_ref(),
-                                        Some(&shared_recovery),
-                                        &prepared.tool_name,
-                                        run_tool,
-                                    ) => result,
-                                    () = async {
-                                        wait_for_wait_interrupt(
-                                            &pending_interjections,
-                                            &parent_interject,
-                                        )
-                                        .await;
-                                        backend.hand_off_foreground_for_prompt(&prompt_id).await;
-                                    } => Ok(backgrounded_task_tool_result()),
-                                }
-                            }
-                            .instrument(tool_span)
-                            .await,
-                            false,
-                        )
                     } else if handoff == ForegroundHandoff::Command {
                         // A running command makes no model request.
                         let call_id = prepared.call_id.clone();
@@ -1181,32 +1101,29 @@ impl SessionActor {
                             &prepared.tool_name,
                             run_tool,
                         );
-                        (
-                            async {
-                                tokio::pin!(call);
-                                tokio::select! {
-                                    biased;
-                                    result = &mut call => return result,
-                                    () = async {
-                                        wait_for_wait_interrupt(
-                                            &pending_interjections,
-                                            &parent_interject,
-                                        )
+                        async {
+                            tokio::pin!(call);
+                            tokio::select! {
+                                biased;
+                                result = &mut call => return result,
+                                () = async {
+                                    wait_for_wait_interrupt(
+                                        &pending_interjections,
+                                        &parent_interject,
+                                    )
+                                    .await;
+                                    background_command_for_queued_message(&tool_bridge, &call_id)
                                         .await;
-                                        background_command_for_queued_message(&tool_bridge, &call_id)
-                                            .await;
-                                    } => {}
-                                }
-                                tracing::info!(
-                                    tool = %prepared.tool_name,
-                                    "moved foreground command to background: queued message pending"
-                                );
-                                call.await
+                                } => {}
                             }
-                            .instrument(tool_span)
-                            .await,
-                            false,
-                        )
+                            tracing::info!(
+                                tool = %prepared.tool_name,
+                                "moved foreground command to background: queued message pending"
+                            );
+                            call.await
+                        }
+                        .instrument(tool_span)
+                        .await
                     } else if handoff == ForegroundHandoff::Detach {
                         // The call runs on its own task.
                         let started = std::time::SystemTime::now();
@@ -1224,70 +1141,49 @@ impl SessionActor {
                                 .await
                             })
                         };
-                        (
-                            async {
-                                tokio::select! {
-                                    biased;
-                                    joined = &mut call => return joined.unwrap_or_else(|join| {
-                                        Err(xai_tool_runtime::ToolError::custom(
-                                            "tool_dispatch",
-                                            format!("the call ended without a result: {join}"),
-                                        ))
-                                    }),
-                                    _ = wait_for_wait_interrupt(
-                                        &pending_interjections,
-                                        &parent_interject,
-                                    ) => {}
-                                }
-                                let task_id = format!("bg-{}", prepared.call_id);
-                                tracing::info!(
-                                    tool = %prepared.tool_name,
-                                    %task_id,
-                                    "moved tool call to background: queued message pending"
-                                );
-                                xai_spawn::spawn(report_detached_call(
-                                    call,
-                                    tool_notifications,
-                                    task_id.clone(),
-                                    prepared.tool_name.clone(),
-                                    workflow_smoke_check_session_dir.join("background_tool_calls"),
-                                    session_id.to_string(),
-                                    started,
-                                ));
-                                Ok(detached_call_tool_result(&task_id))
+                        async {
+                            tokio::select! {
+                                biased;
+                                joined = &mut call => return joined.unwrap_or_else(|join| {
+                                    Err(xai_tool_runtime::ToolError::custom(
+                                        "tool_dispatch",
+                                        format!("the call ended without a result: {join}"),
+                                    ))
+                                }),
+                                _ = wait_for_wait_interrupt(
+                                    &pending_interjections,
+                                    &parent_interject,
+                                ) => {}
                             }
-                            .instrument(tool_span)
-                            .await,
-                            false,
-                        )
+                            let task_id = format!("bg-{}", prepared.call_id);
+                            tracing::info!(
+                                tool = %prepared.tool_name,
+                                %task_id,
+                                "moved tool call to background: queued message pending"
+                            );
+                            xai_spawn::spawn(report_detached_call(
+                                call,
+                                tool_notifications,
+                                task_id.clone(),
+                                prepared.tool_name.clone(),
+                                workflow_smoke_check_session_dir.join("background_tool_calls"),
+                                session_id.to_string(),
+                                started,
+                            ));
+                            Ok(detached_call_tool_result(&task_id))
+                        }
+                        .instrument(tool_span)
+                        .await
                     } else {
-                        (
-                            call_with_auth_retry(
-                                am.as_ref(),
-                                Some(&shared_recovery),
-                                &prepared.tool_name,
-                                run_tool,
-                            )
-                            .instrument(tool_span)
-                            .await,
-                            false,
+                        call_with_auth_retry(
+                            am.as_ref(),
+                            Some(&shared_recovery),
+                            &prepared.tool_name,
+                            run_tool,
                         )
+                        .instrument(tool_span)
+                        .await
                     };
-                    if let Some(guard) = wait_guard.as_ref() {
-                        let waited = wait_task_ids_from_args(prepared.authored_arguments());
-                        let finished = if wait_aborted {
-                            Vec::new()
-                        } else {
-                            result.as_ref().map(finished_wait_ids).unwrap_or_default()
-                        };
-                        record_interruptible_wait_outcome(
-                            &blocking_wait_depth,
-                            guard.generation(),
-                            waited,
-                            wait_aborted,
-                            &finished,
-                        );
-                    }
                     let duration_ms = exec_start.elapsed().as_millis() as u64;
                     let outcome = tool_output_span_outcome(&result);
                     let display_path = display_cwd.as_deref().map(std::path::Path::new);
@@ -2812,7 +2708,6 @@ impl SessionActor {
             ToolInput::ReferenceToVideo(_) => (acp::ToolKind::Other, vec![], vec![]),
             ToolInput::MCPTool(_) => (acp::ToolKind::Other, vec![], vec![]),
             ToolInput::TaskOutput(_) => (acp::ToolKind::Other, vec![], vec![]),
-            ToolInput::WaitTasks(_) => (acp::ToolKind::Other, vec![], vec![]),
             ToolInput::KillTask(_) => (acp::ToolKind::Other, vec![], vec![]),
             ToolInput::Skill(skill) => {
                 xai_grok_telemetry::session_ctx::log_event(
@@ -4063,21 +3958,7 @@ mod plan_approval_helper_tests {
 }
 #[cfg(test)]
 mod wait_interrupt_tests {
-    use super::{
-        BlockingWaitGuard, WaitInterruptCause, is_interruptible_wait_tool,
-        should_flush_held_queue_before_wait,
-    };
-    #[test]
-    fn interrupted_wait_result_does_not_consume_the_waited_task() {
-        let result = super::interrupted_wait_tool_result(
-            &serde_json::json!({"task_ids": ["bg-running"], "timeout_ms": 120_000}),
-            WaitInterruptCause::HumanInterjection,
-        );
-        assert!(
-            xai_grok_tools::reminders::task_completion::consumed_completion_ids(&result.output)
-                .is_empty()
-        );
-    }
+    use super::{BlockingWaitGuard, should_flush_held_queue_before_wait};
     #[test]
     fn wait_start_flush_skips_queue_mode() {
         assert!(should_flush_held_queue_before_wait(true, true));
@@ -4086,29 +3967,6 @@ mod wait_interrupt_tests {
             "queue mode harvests instead of promoting"
         );
         assert!(!should_flush_held_queue_before_wait(false, true));
-    }
-    #[test]
-    fn interruptible_wait_tool_only_when_timeout_positive() {
-        assert!(is_interruptible_wait_tool(
-            "get_command_or_subagent_output",
-            &serde_json::json!({"task_ids": ["t"], "timeout_ms": 120_000})
-        ));
-        assert!(!is_interruptible_wait_tool(
-            "get_task_output",
-            &serde_json::json!({"task_ids": ["t"], "timeout_ms": 0})
-        ));
-        assert!(!is_interruptible_wait_tool(
-            "get_task_output",
-            &serde_json::json!({"task_ids": ["t"]})
-        ));
-        assert!(is_interruptible_wait_tool(
-            "wait_commands_or_subagents",
-            &serde_json::json!({"task_ids": ["t"]})
-        ));
-        assert!(!is_interruptible_wait_tool(
-            "read_file",
-            &serde_json::json!({"target_file": "/tmp/x"})
-        ));
     }
     /// `BlockingWaitGuard` counts nested waits; drop always decrements.
     #[test]

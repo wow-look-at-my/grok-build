@@ -196,12 +196,43 @@ fn cursor_shell_can_background(
 }
 const TASK_LIFECYCLE_TOOLS: &[&str] = &[
     "get_task_output",
-    "wait_tasks",
     "kill_task",
     "scheduler_create",
     "scheduler_delete",
     "scheduler_list",
 ];
+/// Names of the blocking wait tool. Nothing registers a tool under them. A model
+/// waits by ending its turn, and a completion message wakes it.
+const REMOVED_WAIT_TOOL_NAMES: &[&str] = &[
+    "wait_tasks",
+    "wait_commands_or_subagents",
+    "wait_tasks_or_subagents",
+];
+
+/// Whether a tool id or name refers to the blocking wait tool.
+fn names_removed_wait_tool(name: &str) -> bool {
+    REMOVED_WAIT_TOOL_NAMES.contains(&short_tool_name(name))
+}
+
+/// Drops each wait-tool entry with a warning. Finalize rejects an id it does
+/// not know, so an old config that keeps one must not reach it.
+fn drop_removed_wait_tools(
+    tool_config: &mut xai_grok_tools::registry::types::ToolServerConfig,
+    agent: &str,
+) {
+    tool_config.tools.retain(|tc| {
+        let removed = names_removed_wait_tool(&tc.id);
+        if removed {
+            tracing::warn!(
+                agent,
+                tool = %tc.id,
+                "tool list names the wait tool, which does not exist; dropping it"
+            );
+        }
+        !removed
+    });
+}
+
 fn strip_task_lifecycle(tool_config: &mut xai_grok_tools::registry::types::ToolServerConfig) {
     tool_config
         .tools
@@ -748,6 +779,7 @@ impl AgentBuilder {
                 definition.name
             )));
         }
+        drop_removed_wait_tools(&mut tool_config, &definition.name);
         let is_parent_grok_build = matches!(
             definition.builtin_name,
             Some(
@@ -1003,7 +1035,7 @@ impl AgentBuilder {
                 .tools
                 .iter()
                 .any(|t| AGENT_TASK_CLASSIFIER_RE.is_match(t));
-            let task_deps = ["task", "get_task_output", "kill_task", "wait_tasks"];
+            let task_deps = ["task", "get_task_output", "kill_task"];
             let registered_tool_ids = tool_bridge_builder.known_tool_ids();
             let present_kinds: std::collections::HashSet<ToolKind> =
                 tool_config.tools.iter().filter_map(|tc| tc.kind).collect();
@@ -1016,6 +1048,14 @@ impl AgentBuilder {
                     continue;
                 }
                 if t.starts_with("mcp__") {
+                    continue;
+                }
+                if names_removed_wait_tool(t) {
+                    tracing::warn!(
+                        agent = %definition.name,
+                        tool = %t,
+                        "tools allowlist names the wait tool, which does not exist; ignoring it"
+                    );
                     continue;
                 }
                 if tool_config.tools.iter().any(|tc| tool_id_eq(t, &tc.id)) {
@@ -1407,7 +1447,7 @@ context (e.g., a parallel search while you continue working).\n\
 Prefer doing the work yourself unless delegation is clearly necessary.\n\
 \n\
 Usage: specify a short ${{ params.task.description }} and a detailed ${{ params.task.prompt }}.\n\
-${{ params.task.run_in_background }}: Returns immediately with a subagent_id. Use the task output tool to retrieve results. This is set to true by default.";
+${{ params.task.run_in_background }}: Returns immediately with a subagent_id. A completion message delivers the result; to wait for it, end your turn. This is set to true by default.";
 const TASK_MODEL_PARAM: &str = "${{ params.task.model }}";
 fn task_model_guidance(selection: TaskModelSelection, model_slugs: &[String]) -> String {
     if selection == TaskModelSelection::Inherited {
@@ -2299,6 +2339,39 @@ mod tests {
             "a custom child toolset must not be able to reintroduce workflow: {names:?}"
         );
     }
+    /// A config or agent definition that still names the wait tool, under any of
+    /// its names, starts the session and gets no wait tool.
+    #[tokio::test]
+    async fn a_config_that_names_the_wait_tool_still_builds_without_it() {
+        use xai_grok_tools::implementations::grok_build::ReadFileTool;
+        use xai_grok_tools::registry::types::ToolConfig;
+        let mut definition = crate::config::AgentDefinition::general_purpose();
+        definition.inject_default_tools = false;
+        definition.tool_config.tools = vec![
+            (&ReadFileTool).into(),
+            ToolConfig::from_id("GrokBuild:wait_tasks").with_name("wait_commands_or_subagents"),
+        ];
+        definition.tools = vec![
+            "read_file".to_string(),
+            "wait_tasks_or_subagents".to_string(),
+        ];
+        let names =
+            workflow_tool_names(crate::prompt::context::PromptAudience::Primary, definition).await;
+        assert!(
+            names.iter().any(|name| name == "read_file"),
+            "the other tools must survive: {names:?}"
+        );
+        for gone in [
+            "wait_tasks",
+            "wait_commands_or_subagents",
+            "wait_tasks_or_subagents",
+        ] {
+            assert!(
+                !names.iter().any(|name| name == gone),
+                "{gone} must not be offered: {names:?}"
+            );
+        }
+    }
     #[tokio::test]
     async fn child_workflow_strip_leaves_unrelated_tools() {
         let primary = workflow_tool_names(
@@ -2747,7 +2820,6 @@ mod tests {
             "spawn_subagent",
             "get_command_or_subagent_output",
             "kill_command_or_subagent",
-            "wait_commands_or_subagents",
             "scheduler_create",
         ] {
             assert!(
