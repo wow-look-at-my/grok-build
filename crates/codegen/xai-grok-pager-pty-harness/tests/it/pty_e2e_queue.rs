@@ -40,6 +40,8 @@ mod esc_idle_empty_no_messages_is_swallowed_noop;
 mod esc_mid_turn_cancels_from_prompt_preserves_draft;
 #[path = "pty_e2e/esc_mid_turn_cancels_from_scrollback.rs"]
 mod esc_mid_turn_cancels_from_scrollback;
+#[path = "pty_e2e/goal_waits_on_background_work.rs"]
+mod goal_waits_on_background_work;
 #[path = "pty_e2e/mid_turn_slash_dropdown_esc_dismisses_not_cancel.rs"]
 mod mid_turn_slash_dropdown_esc_dismisses_not_cancel;
 #[path = "pty_e2e/queue_and_interjection_lifecycle.rs"]
