@@ -261,6 +261,8 @@ Set, manage, or check an autonomous goal. Grok works across rounds and only mark
 
 The `--budget` here is a **token** budget for the goal run, separate from the agent-count budgets that workflows use. `/goal` appears when goal mode is enabled for the session. The host evaluates each model round and runs adversarial verification on completion candidates.
 
+While a background task, subagent or workflow of the goal still runs, the host evaluates nothing. Grok ends its turn, the session waits, and a completion message wakes it. The evaluation runs when a round ends with no background work left.
+
 ### `/deep-research <query>`
 
 Kick off a background research workflow. It plans a bounded set of questions, gathers structured claims with source evidence, cross-checks each claim on an independent verifier shard, and renders only the claims that survive, with their verified source locators. Failed shards, dropped claims, and researcher uncertainties are reported as coverage limitations, and the report is marked **Partial** whenever any remain.

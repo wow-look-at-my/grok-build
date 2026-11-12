@@ -46,7 +46,6 @@ pub fn max_calls_per_batch(kind: ToolKind, limits: &MediaGenBatchLimits) -> Opti
         | ToolKind::WebSearch
         | ToolKind::WebFetch
         | ToolKind::BackgroundTaskAction
-        | ToolKind::WaitTasksAction
         | ToolKind::KillTaskAction
         | ToolKind::List
         | ToolKind::Skill
