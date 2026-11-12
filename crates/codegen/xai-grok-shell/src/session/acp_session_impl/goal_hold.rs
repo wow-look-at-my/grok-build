@@ -57,23 +57,32 @@ pub(super) fn is_goal_hold_input(origin: &crate::session::PromptOrigin) -> bool 
         )
 }
 
+/// Counts the unfinished terminal tasks of `session_id`. The terminal is shared, so another session's task does not count.
+/// A task with no recorded owner counts.
+pub(super) fn count_live_tasks(
+    tasks: &[xai_grok_tools::computer::types::TaskSnapshot],
+    session_id: &str,
+) -> usize {
+    tasks
+        .iter()
+        .filter(|task| {
+            task.is_outstanding()
+                && task
+                    .owner_session_id
+                    .as_deref()
+                    .is_none_or(|owner| owner == session_id)
+        })
+        .count()
+}
+
 impl SessionActor {
     /// Counts the background commands, monitors, subagents and workflows of this session that still run.
     pub(super) async fn live_background_work(&self) -> LiveBackgroundWork {
         let session_id = self.session_info.id.0.as_ref();
-        let tasks = self
-            .tool_bridge_handle()
-            .list_background_tasks()
-            .await
-            .into_iter()
-            .filter(|task| {
-                task.is_outstanding()
-                    && task
-                        .owner_session_id
-                        .as_deref()
-                        .is_none_or(|owner| owner == session_id)
-            })
-            .count();
+        let tasks = count_live_tasks(
+            &self.tool_bridge_handle().list_background_tasks().await,
+            session_id,
+        );
         let subagents = match &self.tool_context.subagent_event_tx {
             Some(tx) => {
                 xai_grok_tools::implementations::grok_build::task::backend::ChannelBackend::new(

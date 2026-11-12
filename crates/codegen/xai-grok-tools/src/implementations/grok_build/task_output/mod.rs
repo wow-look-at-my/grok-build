@@ -1,13 +1,9 @@
 //! `get_task_output` tool — output/status for one or many background tasks.
 //!
-//! Positive `timeout_ms` waits (multi-id = wait-all). Also provides helpers used
-//! by the legacy `wait_tasks` tool.
+//! Every call is a non-blocking snapshot.
 
 pub mod terminal_command;
-pub mod wait_tasks;
-use std::time::Duration;
 pub use terminal_command::GetTerminalCommandOutputTool;
-pub use wait_tasks::WaitTasksTool;
 
 use crate::DEFAULT_TOOL_OUTPUT_BYTES;
 use crate::implementations::BashTool;
@@ -25,121 +21,37 @@ use xai_tool_types::{
     MultiTaskOutputResult, TaskOutputOutput, TaskOutputResult, TaskOutputToolInput,
 };
 
-/// Default wait budget when a caller is already in wait mode but omitted `timeout_ms` (legacy
-/// `wait_tasks` / internal `capped_wait_timeout`). On `get_task_output`, omitting `timeout_ms` is a
-/// non-blocking snapshot — this constant is not applied unless a wait is active.
-pub(crate) const DEFAULT_WAIT_TIMEOUT: Duration = Duration::from_secs(30);
-
-/// The blocking-wait ceiling: `GROK_MAX_WAIT_BLOCK_MS`, else `MAX_WAIT_BLOCK_MS_DEFAULT`. The same
-/// value fills `{max_wait_ms}` in the descriptions, so a wait can never exceed what the model was
-/// told it may ask for.
-pub(crate) fn max_wait_block() -> Duration {
-    Duration::from_millis(xai_tool_types::max_wait_block_ms())
-}
-
-/// Resolve a model-supplied `timeout_ms` into the effective blocking-wait
-/// duration: default when omitted, then clamped to `cap` so a single wait call
-/// can never wedge the turn for longer than the ceiling.
-pub(crate) fn capped_wait_timeout(timeout_ms: Option<u64>, cap: Duration) -> Duration {
-    let base = timeout_ms
-        .map(Duration::from_millis)
-        .unwrap_or(DEFAULT_WAIT_TIMEOUT);
-    base.min(cap)
-}
-
-/// The caller's requested wait before capping, or the default when omitted.
-fn requested_wait_timeout(timeout_ms: Option<u64>) -> Duration {
-    timeout_ms
-        .map(Duration::from_millis)
-        .unwrap_or(DEFAULT_WAIT_TIMEOUT)
-}
-
-#[derive(Clone, Copy, Debug, PartialEq, Eq)]
-pub(crate) enum WaitHint {
-    NotRequested,
-    Elapsed {
-        requested: Duration,
-        waited: Duration,
-    },
-    ReturnedEarly,
-}
-
 #[derive(Clone, Copy, Debug, PartialEq, Eq)]
 pub(crate) enum WaitSubject {
     Task,
     Subagent,
 }
 
-impl WaitSubject {
-    fn noun(self) -> &'static str {
-        match self {
-            WaitSubject::Task => "task",
-            WaitSubject::Subagent => "subagent",
-        }
-    }
-}
-
-fn still_running_do_not_cancel(subject: WaitSubject) -> String {
-    let noun = subject.noun();
+/// The hint that ends every snapshot of a live task or subagent.
+fn still_running_hint(subject: WaitSubject) -> &'static str {
     // Bash tasks have no follow-up channel; only subagents can be told to stop.
-    let cancel_clause = match subject {
+    match subject {
+        WaitSubject::Task => {
+            "Still running. This tool does not wait. Do other work now. When you have nothing \
+             else to do, end your turn: a completion message is delivered when the task \
+             finishes. Unless the user specified, do not kill this task."
+        }
         WaitSubject::Subagent => {
-            format!("Unless the user specified, do not kill this {noun} and do not tell it to stop")
-        }
-        WaitSubject::Task => format!("Unless the user specified, do not kill this {noun}"),
-    };
-    format!(
-        "{cancel_clause} just because this wait returned. \
-         It is still working. You will be notified automatically when it completes. \
-         Do other work, or wait again with a longer timeout_ms."
-    )
-}
-
-fn still_running_wait_hint(hint: WaitHint, subject: WaitSubject) -> String {
-    let tail = still_running_do_not_cancel(subject);
-    match hint {
-        WaitHint::Elapsed { requested, waited } => {
-            let waited_label = format_waited_duration(waited);
-            let lead = if requested > waited {
-                let requested_label = format_waited_duration(requested);
-                format!(
-                    "Waited {waited_label}, the per-call maximum, of the {requested_label} you requested."
-                )
-            } else {
-                format!("Waited the requested {waited_label}.")
-            };
-            format!("{lead} {tail}")
-        }
-        WaitHint::ReturnedEarly => {
-            format!("Wait returned early because another finished. {tail}")
-        }
-        WaitHint::NotRequested => {
-            format!("Use timeout_ms to wait for completion. {tail}")
+            "Still running. This tool does not wait. Do other work now. When you have nothing \
+             else to do, end your turn: a completion message is delivered when the subagent \
+             finishes. Unless the user specified, do not kill this subagent and do not tell it \
+             to stop."
         }
     }
 }
 
-fn format_waited_duration(d: Duration) -> String {
-    let ms = d.as_millis();
-    if ms < 1000 {
-        format!("{ms}ms")
-    } else {
-        format!("{}s", ms / 1000)
-    }
+fn with_still_running_hint(body: String, subject: WaitSubject) -> String {
+    format!("{body}\n\n{}", still_running_hint(subject))
 }
 
-fn with_still_running_wait_hint(body: String, hint: WaitHint, subject: WaitSubject) -> String {
-    format!("{body}\n\n{}", still_running_wait_hint(hint, subject))
-}
-
-fn apply_running_wait_hint(
-    mut result: TaskOutputResult,
-    hint: WaitHint,
-    subject: WaitSubject,
-) -> TaskOutputResult {
+fn apply_running_hint(mut result: TaskOutputResult, subject: WaitSubject) -> TaskOutputResult {
     if result.status == "running" {
-        result.output =
-            with_still_running_wait_hint(std::mem::take(&mut result.output), hint, subject);
+        result.output = with_still_running_hint(std::mem::take(&mut result.output), subject);
     }
     result
 }
@@ -174,7 +86,7 @@ pub(crate) fn background_bash_requires_exprs() -> Vec<Expr<ToolRequirement>> {
     vec![grok_build_bash, grok_build_concise_bash, opencode_bash]
 }
 
-/// Shared `requires_expr` for both `get_task_output` and `wait_tasks`.
+/// The `requires_expr` of `get_task_output`.
 pub(crate) fn task_output_requires_expr() -> Expr<ToolRequirement> {
     use crate::types::tool_metadata::ToolMetadata;
     let task_tool = Expr::Value(ToolRequirement::Tool {
@@ -234,7 +146,6 @@ impl TaskOutputTool {
     async fn run_single_task(
         &self,
         task_id: &str,
-        timeout_ms: Option<u64>,
         ctx: &xai_tool_runtime::ToolCallContext,
         resources: SharedResources,
         output_byte_limit: Option<usize>,
@@ -253,26 +164,7 @@ impl TaskOutputTool {
             )
         };
 
-        let waits = xai_tool_types::task_output_waits(timeout_ms);
-        let wait_cap = max_wait_block();
-        let wait_hint = if waits {
-            WaitHint::Elapsed {
-                requested: requested_wait_timeout(timeout_ms),
-                waited: capped_wait_timeout(timeout_ms, wait_cap),
-            }
-        } else {
-            WaitHint::NotRequested
-        };
-        let snapshot = if waits {
-            // Cap the blocking wait so a large `timeout_ms` can't wedge the turn;
-            // the model is pinged on completion regardless (see `capped_wait_timeout`).
-            let timeout = capped_wait_timeout(timeout_ms, wait_cap);
-            terminal.wait_for_completion(task_id, Some(timeout)).await
-        } else {
-            terminal.get_task(task_id).await
-        };
-
-        if let Some(snapshot) = snapshot {
+        if let Some(snapshot) = terminal.get_task(task_id).await {
             let read_file_name;
             {
                 let res = resources.lock().await;
@@ -292,9 +184,8 @@ impl TaskOutputTool {
                 snapshot.output.push_str(&format!("\n[lpi {line}]"));
             }
 
-            return Ok(TaskOutputOutput::Result(apply_running_wait_hint(
+            return Ok(TaskOutputOutput::Result(apply_running_hint(
                 snapshot_to_result(snapshot, &read_file_name, max_output_bytes),
-                wait_hint,
                 WaitSubject::Task,
             )));
         }
@@ -306,20 +197,10 @@ impl TaskOutputTool {
                 .get::<SubagentBackendResource>()
                 .cloned()
         };
-        // Same cap as the bash path: a blocking subagent query can't wedge the
-        // turn beyond the wait cap (the parent is pinged when the child finishes).
-        let query_timeout_ms = if waits {
-            Some(capped_wait_timeout(timeout_ms, wait_cap).as_millis() as u64)
-        } else {
-            timeout_ms
-        };
         if let Some(backend) = backend
-            && let Some(snapshot) = backend
-                .backend()
-                .query(task_id, waits, query_timeout_ms)
-                .await
+            && let Some(snapshot) = backend.backend().query(task_id, false, None).await
         {
-            return Ok(format_subagent_snapshot(&snapshot, wait_hint));
+            return Ok(format_subagent_snapshot(&snapshot));
         }
 
         // Neither found

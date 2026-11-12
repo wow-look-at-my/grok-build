@@ -315,24 +315,18 @@ impl SessionActor {
                 *current = None;
             }
         }
-        self.tool_context
-            .goal_loop_active_gate
-            .store(false, std::sync::atomic::Ordering::Relaxed);
         let prompt_id = prompt_id.to_owned();
         self.agent
             .borrow()
             .tool_bridge()
             .update_resources_with(move |resources| {
-                use xai_grok_tools::implementations::grok_build::task::types::{
-                    CurrentPromptIdResource, GoalLoopActive,
-                };
+                use xai_grok_tools::implementations::grok_build::task::types::CurrentPromptIdResource;
                 if resources
                     .get::<CurrentPromptIdResource>()
                     .is_some_and(|current| current.0 == prompt_id)
                 {
                     resources.insert(CurrentPromptIdResource(String::new()));
                 }
-                resources.insert(GoalLoopActive(false));
             })
             .await;
     }

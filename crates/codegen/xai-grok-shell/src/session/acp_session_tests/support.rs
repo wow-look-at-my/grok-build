@@ -549,6 +549,7 @@ async fn create_test_actor_inner(
             )),
         )),
         goal_turn_task_ids: parking_lot::Mutex::new(std::collections::HashSet::new()),
+        goal_waiting_on_background: std::sync::atomic::AtomicBool::new(false),
         goal_continuation_streak: std::sync::atomic::AtomicU32::new(0),
         workflow_manager: crate::session::workflow::manager::WorkflowManager::test_bundle().0,
         workflow_launch_tx: tokio::sync::mpsc::unbounded_channel().0,

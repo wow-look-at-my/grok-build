@@ -1805,14 +1805,18 @@ async fn wake_missing_from_buffer_falls_back_to_injected_body() {
         })
         .await;
 }
+/// An active goal waits on its background subagents by ending the turn, so the wake must reach the model.
 #[tokio::test(flavor = "current_thread")]
-async fn wake_turn_under_goal_loop_is_silent_and_marks() {
+async fn wake_turn_under_goal_loop_delivers_the_digest() {
     let local = tokio::task::LocalSet::new();
     local
         .run_until(async {
-            let (gateway_tx, _) =
+            let (gateway_tx, gateway_rx) =
                 tokio::sync::mpsc::unbounded_channel::<xai_acp_lib::AcpClientMessage>();
-            let (persistence_tx, _) = tokio::sync::mpsc::unbounded_channel::<PersistenceMsg>();
+            drain_gateway(gateway_rx);
+            let (persistence_tx, persistence_rx) =
+                tokio::sync::mpsc::unbounded_channel::<PersistenceMsg>();
+            drain_persistence(persistence_rx);
             let mut actor = create_test_actor(0, 256_000, 85, gateway_tx, persistence_tx).await;
             set_goal_harness_for_tests(&actor);
             actor.goal_tracker.lock().create_goal(
@@ -1832,57 +1836,31 @@ async fn wake_turn_under_goal_loop_is_silent_and_marks() {
                 ],
             );
             let actor = std::sync::Arc::new(actor);
-            let conversation_len_before = actor.chat_state_handle.get_conversation().await.len();
-            let result = run_wake_turn(&actor, "sa-goal", None).await;
+            run_wake_turn_to_commit(&actor, "sa-goal").await;
             assert!(
-                matches!(
-                    result,
-                    Ok(crate::session::commands::PromptTurnOk {
-                        stop_reason: acp::StopReason::EndTurn,
-                        total_tokens: 0,
-                        ..
-                    })
-                ),
-                "a wake under the goal loop ends silently: {result:?}"
+                fake.returned().is_empty(),
+                "the wake turn must not drain the coordinator: {:?}",
+                fake.returned()
             );
-            assert_eq!(
-                actor.chat_state_handle.get_conversation().await.len(),
-                conversation_len_before
-            );
+            let conversation = actor.chat_state_handle.get_conversation().await;
+            let digest = conversation
+                .iter()
+                .find(|item| {
+                    matches!(
+                        item,
+                        ConversationItem::User(u)
+                            if u.synthetic_reason == SyntheticReason::SubagentCompleted
+                    )
+                })
+                .map(|item| item.text_content())
+                .expect("the wake turn must commit its message under an active goal");
             for id in ["sa-goal", "sa-goal-sibling"] {
+                assert!(digest.contains(id), "digest must name {id}: {digest}");
                 assert!(
                     already_reported(&actor, id).await,
-                    "{id} must be dropped as reported"
+                    "{id} must be marked reported at the digest's commit"
                 );
             }
-            assert!(fake.returned().is_empty());
-        })
-        .await;
-}
-/// That gate is the shared `Arc` the notification bridge (bash auto-wake) and subagent spawn contexts read.
-/// Both the `true` set and the `false` reset funnel through this single method, so this also covers the reset paths.
-/// Deleting the `store` line (or cloning the wrong Arc into the bridge) would break production suppression silently.
-#[tokio::test(flavor = "current_thread")]
-async fn set_goal_loop_active_resource_mirrors_into_gate() {
-    use std::sync::atomic::Ordering::Relaxed;
-    let local = tokio::task::LocalSet::new();
-    local
-        .run_until(async {
-            let (gateway_tx, _) =
-                tokio::sync::mpsc::unbounded_channel::<xai_acp_lib::AcpClientMessage>();
-            let (persistence_tx, _) = tokio::sync::mpsc::unbounded_channel::<PersistenceMsg>();
-            let actor = create_test_actor(0, 256_000, 85, gateway_tx, persistence_tx).await;
-            assert!(!actor.tool_context.goal_loop_active_gate.load(Relaxed));
-            actor.set_goal_loop_active_resource(true).await;
-            assert!(
-                actor.tool_context.goal_loop_active_gate.load(Relaxed),
-                "set(true) must mirror into the shared gate"
-            );
-            actor.set_goal_loop_active_resource(false).await;
-            assert!(
-                !actor.tool_context.goal_loop_active_gate.load(Relaxed),
-                "set(false) must clear the shared gate"
-            );
         })
         .await;
 }
