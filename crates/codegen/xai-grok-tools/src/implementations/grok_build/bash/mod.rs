@@ -4392,8 +4392,10 @@ mod tests {
                 "tool desc must match the post-background cap: {desc}"
             );
             assert!(
-                desc.contains("get_task_output"),
-                "tool desc must name the get-output tool via ToolKind: {desc}"
+                desc.contains(
+                    "a completion message is delivered when it exits; to wait for it, end your turn."
+                ),
+                "tool desc must tell the model to end its turn to wait: {desc}"
             );
             assert!(
                 desc.contains("when the timeout fires on an explicit"),
