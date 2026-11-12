@@ -2019,6 +2019,9 @@ mod foreground_task_queued_message_tests;
 #[path = "acp_session_tests/goal_background_hold_tests.rs"]
 mod goal_background_hold_tests;
 #[cfg(test)]
+#[path = "acp_session_tests/turn/goal_background_wait_e2e_tests.rs"]
+mod goal_background_wait_e2e_tests;
+#[cfg(test)]
 #[path = "acp_session_tests/history_flatten_tests.rs"]
 mod history_flatten_tests;
 #[cfg(test)]
