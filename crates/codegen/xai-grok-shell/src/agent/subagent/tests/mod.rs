@@ -796,6 +796,7 @@ fn completed_followup_wakes_parent_with_exactly_one_prompt() {
     present_child_completion(completion, &gateway, will_wake);
     let mut finish_count = 0;
     let mut prompt_count = 0;
+    let mut settled_after_prompts = Vec::new();
     while let Ok(command) = parent_cmd_rx.try_recv() {
         match command {
             SessionCommand::XaiSessionNotification {
@@ -816,10 +817,16 @@ fn completed_followup_wakes_parent_with_exactly_one_prompt() {
                 assert!(prompt_id.starts_with("subagent-completed-"));
                 prompt_count += 1;
             }
+            SessionCommand::BackgroundWorkSettled => settled_after_prompts.push(prompt_count),
             _ => panic!("unexpected parent command"),
         }
     }
     assert_eq!((finish_count, prompt_count), (1, 1));
+    assert_eq!(
+        settled_after_prompts,
+        [1],
+        "the parent hears that background work settled one time, after the wake is queued"
+    );
 }
 #[test]
 fn inject_subagent_completed_prompt_sends_prompt() {
