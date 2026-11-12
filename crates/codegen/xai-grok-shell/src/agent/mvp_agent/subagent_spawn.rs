@@ -405,10 +405,6 @@ impl MvpAgent {
                 .cfg
                 .borrow()
                 .is_feature_enabled(crate::agent::config::Feature::AutoWake),
-            goal_loop_active: parent_handle
-                .as_ref()
-                .map(|h| h.tool_context.goal_loop_active_gate.clone())
-                .unwrap_or_else(|| std::sync::Arc::new(std::sync::atomic::AtomicBool::new(false))),
             parent_terminal_backend: parent_terminal_backend.clone(),
             parent_notification_handle: parent_notification_handle.clone(),
             parent_scheduler_handle: parent_scheduler_handle.clone(),

@@ -99,14 +99,6 @@ fn input_title(
                 many => format!("Get task output: {} tasks", many.len()),
             }
         }
-        ToolInput::WaitTasks(wait) => format!(
-            "Wait tasks: {} ids, mode={}",
-            wait.task_ids.len(),
-            match &wait.mode {
-                xai_tool_types::WaitMode::WaitAny => "wait_any",
-                xai_tool_types::WaitMode::WaitAll => "wait_all",
-            }
-        ),
         ToolInput::KillTask(kill_task) => format!("Kill task: {}", kill_task.task_id),
         ToolInput::Skill(skill) => format!("Skill: {}", skill.skill),
         ToolInput::Dynamic(_)

@@ -294,6 +294,7 @@ async fn test_e2e_idle_resume_refreshes_model_metadata() {
                     )),
                 )),
                 goal_turn_task_ids: parking_lot::Mutex::new(std::collections::HashSet::new()),
+                goal_background: Default::default(),
                 goal_continuation_streak: std::sync::atomic::AtomicU32::new(0),
                 workflow_manager: crate::session::workflow::manager::WorkflowManager::test_bundle()
                     .0,

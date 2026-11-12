@@ -75,11 +75,6 @@ fn daemon_tool_table() -> Vec<(&'static str, Value, Class)> {
             Class::Read,
         ),
         (
-            "wait_commands_or_subagents",
-            json!({"task_ids": ["t1"], "mode": "wait_all"}),
-            Class::Read,
-        ),
-        (
             "spawn_subagent",
             json!({"prompt": "p", "description": "d", "subagent_type": "general-purpose"}),
             Class::Tool,

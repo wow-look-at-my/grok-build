@@ -6,7 +6,7 @@ Grok runs long-lived processes without blocking the conversation. This document 
 
 ## Background Commands
 
-Set `background: true` on the `run_terminal_command` tool to run a command in the background. It returns a task ID immediately; retrieve output with `get_command_or_subagent_output`.
+Set `background: true` on the `run_terminal_command` tool to run a command in the background. It returns a task ID immediately. A completion message reaches the agent when the command finishes.
 
 ### How It Works
 
@@ -17,14 +17,9 @@ Set `background: true` on the `run_terminal_command` tool to run a command in th
 
 ### Getting Output
 
-Use `get_command_or_subagent_output` to check a background command or subagent. Pass `task_ids` as a list (one id is a one-element array; maximum 20):
+Use `get_command_or_subagent_output` to read a background command or subagent. Pass `task_ids` as a list (one id is a one-element array. Maximum 20). The tool never waits: it returns the current output, status, and exit code at once.
 
-- Omit `timeout_ms`, or pass `0`, for a non-blocking snapshot.
-- A positive `timeout_ms` waits for completion. Several ids wait until **all** complete.
-
-A positive `timeout_ms` is clamped to **1 hour** (`3600000` ms). Hosts with a shorter transport deadline set `GROK_MAX_WAIT_BLOCK_MS` (plain milliseconds; unparseable values keep the default).
-
-If the wait returns while the child is still running, leave it alone: do not kill it or tell it to stop. Completion wakes the parent automatically. Poll again only if you need another snapshot.
+To wait for a task, the agent ends its turn. The session goes idle, and a completion message wakes the agent when the task finishes. A still-running task is left alone: the agent does not kill it or tell it to stop.
 
 ### Killing Background Tasks
 
@@ -192,7 +187,7 @@ Whenever background work is still running while the agent looks idle — between
 
 It counts running background commands, monitors, scheduled `/loop` tasks, and background subagents, and updates live as each finishes. Any of them can wake the agent for a new turn (commands and subagents on completion, monitors on events, loops on their timer), so the cue stays up until nothing is left. The running counts live only on this status line: completions land in the transcript as a single "Task completed" chip, and "Worked for" markers stay plain — the transcript never repeats or restates the running counts.
 
-While a turn is waiting on background work (blocked in `get_command_or_subagent_output`), the status line adds a hint that typing takes over immediately:
+While a turn is blocked on a foreground command or subagent, the status line adds a hint that typing takes over immediately:
 
 ```
 ◎ 1 command still running · send a message to interrupt
@@ -248,5 +243,5 @@ Each error or warning appears as a notification in the conversation.
 - **Use `monitor` for real-time event streams** (log tailing, file watching)
 - **Use `scheduler_create` with `recurring: false`** for delayed one-shot tasks
 - **Keep monitor filters tight** — prefer `grep --line-buffered` over raw log streams
-- **Do not use sleep loops** in normal commands to poll — use `get_command_or_subagent_output` with `timeout_ms` instead
+- **Do not use sleep loops** in normal commands to poll — end the turn instead, and the completion message wakes the agent
 - **Set reasonable poll intervals** — 30s+ for remote APIs to avoid rate limits, shorter for local checks

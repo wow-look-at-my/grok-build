@@ -152,14 +152,13 @@ async fn detect_continue_parent_work(
 /// retrieval tool's schema (which the host may rename), not task's own.
 pub(crate) async fn resolve_background_notice_names(
     resources: &SharedResources,
-) -> (String, String, String) {
+) -> (String, String) {
     let canonical = xai_tool_types::BackgroundNoticeNaming::CANONICAL;
     let res = resources.lock().await;
     let Some(renderer) = res.get::<crate::types::template_renderer::TemplateRenderer>() else {
         return (
             canonical.task_output_tool.to_string(),
             canonical.task_ids_param.to_string(),
-            canonical.timeout_ms_param.to_string(),
         );
     };
     (
@@ -170,10 +169,6 @@ pub(crate) async fn resolve_background_notice_names(
         renderer
             .param_for_kind(ToolKind::BackgroundTaskAction, "task_ids")
             .unwrap_or(canonical.task_ids_param)
-            .to_string(),
-        renderer
-            .param_for_kind(ToolKind::BackgroundTaskAction, "timeout_ms")
-            .unwrap_or(canonical.timeout_ms_param)
             .to_string(),
     )
 }
@@ -709,12 +704,11 @@ impl xai_tool_runtime::Tool for TaskTool {
                 });
             }
 
-            let (task_output_tool, task_ids_param, timeout_ms_param) =
+            let (task_output_tool, task_ids_param) =
                 resolve_background_notice_names(&resources).await;
             let naming = xai_tool_types::BackgroundNoticeNaming {
                 task_output_tool: &task_output_tool,
                 task_ids_param: &task_ids_param,
-                timeout_ms_param: &timeout_ms_param,
             };
 
             let continue_parent =
@@ -738,15 +732,14 @@ impl xai_tool_runtime::Tool for TaskTool {
         let result = result?;
 
         // 5b. The await budget expired and the coordinator auto-backgrounded the
-        // still-running child — return a task_id to poll, like the background
-        // branch above (the result arrives via auto-wake or a later poll).
+        // still-running child — return its id, like the background branch
+        // above (the result arrives as a completion message).
         if result.backgrounded {
-            let (task_output_tool, task_ids_param, timeout_ms_param) =
+            let (task_output_tool, task_ids_param) =
                 resolve_background_notice_names(&resources).await;
             let naming = xai_tool_types::BackgroundNoticeNaming {
                 task_output_tool: &task_output_tool,
                 task_ids_param: &task_ids_param,
-                timeout_ms_param: &timeout_ms_param,
             };
             let notified_on_completion = notified_on_completion(&resources).await;
             let continue_parent =
@@ -1315,12 +1308,13 @@ mod tests {
                 );
                 assert!(
                     text.text.contains("subagent_id:"),
-                    "should include a task_id to poll: {}",
+                    "should include the subagent id: {}",
                     text.text
                 );
                 assert!(
-                    text.text.contains("timeout_ms"),
-                    "should instruct the model to wait: {}",
+                    text.text.contains("To wait for it, end your turn.")
+                        && !text.text.contains("timeout_ms"),
+                    "should tell the model to end its turn to wait: {}",
                     text.text
                 );
                 assert!(

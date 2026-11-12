@@ -48,7 +48,6 @@ impl ToolKind {
             ToolKind::WebSearch => "Web Search",
             ToolKind::WebFetch => "Web Fetch",
             ToolKind::BackgroundTaskAction => "Background Task",
-            ToolKind::WaitTasksAction => "Wait for Tasks",
             ToolKind::KillTaskAction => "Kill Task",
             ToolKind::Skill => "Skill",
             ToolKind::MemorySearch => "Memory Search",
@@ -101,7 +100,6 @@ impl ToolKind {
             | ToolKind::Execute
             | ToolKind::Plan
             | ToolKind::BackgroundTaskAction
-            | ToolKind::WaitTasksAction
             | ToolKind::KillTaskAction
             | ToolKind::Skill
             | ToolKind::Task

@@ -140,10 +140,6 @@ fn task_tool_config() -> ToolConfig {
 fn task_output_tool_config() -> ToolConfig {
     ToolConfig::from(&grok_build::TaskOutputTool).with_name("get_command_or_subagent_output")
 }
-/// `wait_tasks` becomes `wait_commands_or_subagents`.
-fn wait_tasks_tool_config() -> ToolConfig {
-    ToolConfig::from(&grok_build::WaitTasksTool).with_name("wait_commands_or_subagents")
-}
 /// `kill_task` becomes `kill_command_or_subagent`.
 fn kill_task_tool_config() -> ToolConfig {
     ToolConfig::from(&grok_build::KillTaskTool).with_name("kill_command_or_subagent")
@@ -279,7 +275,6 @@ fn grok_build_core_toolset_with(
         kill_task_tool_config(),
         (&grok_build::TodoWriteTool).into(),
         task_output_tool_config(),
-        wait_tasks_tool_config(),
         task_tool_config(),
         (&grok_build::SchedulerCreateTool).into(),
         (&grok_build::SchedulerDeleteTool).into(),
@@ -339,7 +334,6 @@ pub fn grok_build_hashline_toolset(
         kill_task_tool_config(),
         (&grok_build::TodoWriteTool).into(),
         task_output_tool_config(),
-        wait_tasks_tool_config(),
         task_tool_config(),
         (&grok_build::WebSearchTool).into(),
         (&grok_build::SchedulerCreateTool).into(),
@@ -371,7 +365,6 @@ fn explore_toolset() -> ToolServerConfig {
             (&grok_build::SendMessageTool).into(),
             task_tool_config(),
             task_output_tool_config(),
-            wait_tasks_tool_config(),
             kill_task_tool_config(),
         ],
         behavior_preset: None,
@@ -438,7 +431,6 @@ fn orchestrator_toolset() -> ToolServerConfig {
             // Subagent orchestration
             task_tool_config(),
             task_output_tool_config(),
-            wait_tasks_tool_config(),
             kill_task_tool_config(),
             // Skills and MCP
             (&search_tool::SearchTool).into(),
@@ -524,7 +516,6 @@ fn grok_build_ask_user_toolset() -> ToolServerConfig {
             kill_task_tool_config(),
             (&grok_build::TodoWriteTool).into(),
             task_output_tool_config(),
-            wait_tasks_tool_config(),
             task_tool_config(),
             (&grok_build::SchedulerCreateTool).into(),
             (&grok_build::SchedulerDeleteTool).into(),
@@ -1707,7 +1698,7 @@ mod tests {
     #[test]
     fn explore_can_spawn_only_read_only_subagents() {
         let ids: Vec<String> = explore_toolset().tools.into_iter().map(|t| t.id).collect();
-        for tool in [task_tool_config(), wait_tasks_tool_config()] {
+        for tool in [task_tool_config(), task_output_tool_config()] {
             assert!(ids.contains(&tool.id), "explore lacks {}", tool.id);
         }
         assert!(!ids.contains(&bash_tool_config().id));
@@ -1750,7 +1741,6 @@ mod tests {
         for delegating in [
             task_tool_config(),
             task_output_tool_config(),
-            wait_tasks_tool_config(),
             kill_task_tool_config(),
         ] {
             assert!(

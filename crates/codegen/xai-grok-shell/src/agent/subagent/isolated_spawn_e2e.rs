@@ -141,7 +141,6 @@ fn spawn_ctx(parent_cwd: PathBuf) -> SubagentSpawnContext {
         scheduler_delete_tool_name: None,
         scheduler_create_tool_name: None,
         auto_wake_enabled: true,
-        goal_loop_active: Arc::new(std::sync::atomic::AtomicBool::new(false)),
         parent_terminal_backend: None,
         parent_notification_handle: None,
         parent_scheduler_handle: None,

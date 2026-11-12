@@ -29,7 +29,6 @@ use xai_tool_types::BackgroundNoticeNaming;
 pub struct BackgroundNoticeNames {
     pub task_output_tool: String,
     pub task_ids_param: String,
-    pub timeout_ms_param: String,
     pub notified_on_completion: bool,
 }
 
@@ -38,7 +37,6 @@ impl BackgroundNoticeNames {
         BackgroundNoticeNaming {
             task_output_tool: &self.task_output_tool,
             task_ids_param: &self.task_ids_param,
-            timeout_ms_param: &self.timeout_ms_param,
         }
     }
 }
@@ -122,13 +120,12 @@ impl ToolBridge {
     pub async fn background_notice_naming(&self) -> BackgroundNoticeNames {
         use crate::implementations::grok_build::task;
         let resources = &self.registry.resources;
-        let (task_output_tool, task_ids_param, timeout_ms_param) =
+        let (task_output_tool, task_ids_param) =
             task::resolve_background_notice_names(resources).await;
         let notified_on_completion = task::notified_on_completion(resources).await;
         BackgroundNoticeNames {
             task_output_tool,
             task_ids_param,
-            timeout_ms_param,
             notified_on_completion,
         }
     }
