@@ -722,6 +722,8 @@ pub enum SessionCommand {
         respond_to: Option<oneshot::Sender<()>>,
         pending: Option<std::sync::Arc<std::sync::atomic::AtomicBool>>,
     },
+    /// A background task, subagent or workflow of this session ended.
+    BackgroundWorkSettled,
     /// Put a `CurrentModeUpdate` on the ordered event pipeline, behind the
     /// text chunks the turn already queued.
     EnqueueCurrentModeUpdate {

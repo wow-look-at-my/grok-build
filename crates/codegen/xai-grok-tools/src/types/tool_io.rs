@@ -37,7 +37,6 @@ use serde::{Deserialize, Serialize};
 use xai_tool_types::KillTaskToolInput;
 use xai_tool_types::TaskOutputToolInput;
 use xai_tool_types::TaskToolInput;
-use xai_tool_types::WaitTasksToolInput;
 /// Raw input for an MCP (Model Context Protocol) tool call.
 #[derive(Debug, Clone, serde::Serialize, serde::Deserialize)]
 pub struct MCPToolInput {
@@ -60,7 +59,6 @@ pub enum ToolInput {
     Skill(SkillInput),
     MCPTool(MCPToolInput),
     TaskOutput(TaskOutputToolInput),
-    WaitTasks(WaitTasksToolInput),
     KillTask(KillTaskToolInput),
     Task(TaskToolInput),
     WebSearch(WebSearchInput),

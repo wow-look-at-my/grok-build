@@ -71,7 +71,6 @@ pub enum ToolKind {
     WebSearch,
     WebFetch,
     BackgroundTaskAction,
-    WaitTasksAction,
     KillTaskAction,
     List,
     Skill,

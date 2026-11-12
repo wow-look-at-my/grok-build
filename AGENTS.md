@@ -69,6 +69,10 @@ CI is the source of truth and builds every pushed branch. A branch that is only 
 
 [docs/a-blocking-wait-is-a-gap-in-queue-mode-too.md](docs/a-blocking-wait-is-a-gap-in-queue-mode-too.md) holds this section.
 
+## Background waits and the goal check
+
+[docs/background-waits-and-the-goal-check.md](docs/background-waits-and-the-goal-check.md) holds this section: no tool waits on a background task. The goal checker holds while background work runs.
+
 ## `/context` shows provider counts only
 
 - The bar and legend are the last request's usage JSON: cache read, cache write, uncached input, output (`ProviderUsage` in `xai_chat_state::context_ledger`). No bytes/4 estimate is drawn. Before any request reports usage, the bar is empty and says so.

@@ -530,7 +530,7 @@ mod tests {
 
         // Regression: an execute tool WITHOUT `is_background` in its schema (e.g. OpenCode's foreground-only bash) seeds
         // `params.execute` from its real fields only. `param_for_kind` must report the missing field as absent so
-        // `get_task_output` / `wait_tasks` don't tell the model to pass `is_background=true` to a tool that has no such field.
+        // `get_task_output` does not tell the model to pass `is_background=true` to a tool. That tool has no such field.
         let opencode_bash = make_renderer(
             &[(ToolKind::Execute, "bash")],
             &[(
@@ -770,7 +770,7 @@ mod tests {
 
 Usage notes:
 - Use the task_id from a command run with ${{ params.execute.is_background }}=true, or a subagent launched with ${{ params.task.run_in_background }}=true
-- Omit timeout_ms (or pass 0) for a non-blocking status poll; set a positive timeout_ms to wait up to that many milliseconds for completion (capped at ~10 min)."#;
+- This tool never waits. It returns the current output, status, and exit code at once"#;
         let rendered = r.render(desc).expect("task_output description must render");
         let _ = std::fs::write("/tmp/task_output_tool_description.txt", &rendered);
         assert!(
@@ -778,7 +778,7 @@ Usage notes:
             "must not leak raw template source: {rendered}"
         );
         assert!(rendered.contains("background=true"));
-        assert!(rendered.contains("Omit timeout_ms") || rendered.contains("positive timeout_ms"));
+        assert!(rendered.contains("This tool never waits."));
     }
 
     #[tokio::test]

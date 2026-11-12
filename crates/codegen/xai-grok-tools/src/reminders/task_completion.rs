@@ -17,7 +17,7 @@ use crate::implementations::grok_build::task::types::{
     SubagentCompletionSummary, SubagentCompletionsRequest, SubagentEvent, SubagentEventSender,
     SubagentSnapshotStatus,
 };
-use crate::implementations::grok_build::task_output::{WaitHint, format_subagent_snapshot};
+use crate::implementations::grok_build::task_output::format_subagent_snapshot;
 use crate::types::TaskSnapshot;
 use crate::types::output::ToolOutput;
 use crate::types::resources::{SharedResources, State, Terminal};
@@ -504,7 +504,7 @@ fn format_subagent_task_output(c: &SubagentCompletionSummary, poll_tool: Option<
     if let SubagentSnapshotStatus::Completed { output, .. } = &mut snapshot.status {
         *output = inline_subagent_output(c, poll_tool);
     }
-    let output = format_subagent_snapshot(&snapshot, WaitHint::NotRequested);
+    let output = format_subagent_snapshot(&snapshot);
     ToolOutput::TaskOutput(output).to_prompt_format()
 }
 fn outcome_words(c: &SubagentCompletionSummary) -> (&'static str, &'static str) {
@@ -837,9 +837,6 @@ impl Reminder for TaskCompletionReminder {
                 tracing::debug!("SubagentEventSender: receiver dropped, skipping");
             } else if let Ok(completions) = rx.await {
                 let mut res = resources.lock().await;
-                let goal_loop_active = res
-                    .get::<crate::implementations::grok_build::task::types::GoalLoopActive>()
-                    .is_some_and(|g| g.0);
                 let renderer = res.get::<crate::types::template_renderer::TemplateRenderer>();
                 let task_output_name: Option<String> = renderer.and_then(|r| {
                     r.tool_for_kind(crate::types::tool::ToolKind::BackgroundTaskAction)
@@ -853,7 +850,7 @@ impl Reminder for TaskCompletionReminder {
                     .and_then(|names| names.0.get("scheduler_create").cloned());
                 let state = res.get_or_default::<State<ReportedTaskCompletions>>();
                 for c in &completions {
-                    if state.reported.insert(c.subagent_id().to_owned()) && !goal_loop_active {
+                    if state.reported.insert(c.subagent_id().to_owned()) {
                         reminders.push(format_subagent_completion(
                             c,
                             task_output_name.as_deref(),
@@ -963,13 +960,13 @@ mod tests {
     #[test]
     fn consumed_completion_ids_multi_result_mixed_statuses() {
         let output = ToolOutput::TaskOutput(TaskOutputOutput::MultiResult(MultiTaskOutputResult {
-            mode: "wait_all".into(),
+            mode: "poll".into(),
             results: vec![
                 task_result("ok", "completed", Some(0)),
                 task_result("bad", "failed", Some(1)),
                 task_result("slow", "running", None),
             ],
-            summary: "2/3 tasks completed (wait_all)".into(),
+            summary: "2/3 tasks completed (poll)".into(),
         }));
         assert_eq!(consumed_completion_ids(&output), vec!["ok", "bad"]);
     }
@@ -1937,7 +1934,7 @@ mod tests {
         );
     }
     #[tokio::test]
-    async fn subagent_completion_suppressed_by_wait_tasks_multi_result() {
+    async fn subagent_completion_suppressed_by_multi_result() {
         let shared = shared_with_subagent_completions(
             vec![],
             vec![
@@ -1947,7 +1944,7 @@ mod tests {
         );
         let reminder = TaskCompletionReminder;
         let output = ToolOutput::TaskOutput(TaskOutputOutput::MultiResult(MultiTaskOutputResult {
-            mode: "wait_all".into(),
+            mode: "poll".into(),
             results: vec![
                 TaskOutputResult {
                     task_id: "sub-1".into(),
@@ -1978,12 +1975,12 @@ mod tests {
                     raw_output_bytes: 0,
                 },
             ],
-            summary: "2/2 tasks completed (wait_all)".into(),
+            summary: "2/2 tasks completed (poll)".into(),
         }));
         let r = reminder.collect_reminders(shared, &output).await;
         assert!(
             r.is_empty(),
-            "wait_tasks MultiResult should suppress reminders for completed subagents"
+            "a MultiResult should suppress reminders for completed subagents"
         );
     }
     #[tokio::test]
@@ -2000,18 +1997,16 @@ mod tests {
             "same subagent completion should not repeat"
         );
     }
-    /// While a `/goal` loop is active the per-tool-call reminder must not surface bash or subagent
-    /// completions (they would derail a weak model mid-goal), but the IDs must still be marked
-    /// reported so they never resurface once the goal ends.
+    /// A buffered subagent completion is reported on the next tool round, next
+    /// to a bash completion, and each is reported once.
     #[tokio::test]
-    async fn bash_completions_surface_during_a_goal_loop_subagent_ones_do_not() {
+    async fn buffered_subagent_completion_is_reported_by_the_reminder() {
         let mut res = Resources::new();
         let backend: Arc<dyn TerminalBackend> = Arc::new(MockTerminal {
             tasks: vec![make_completed("bash-1")],
         });
         res.insert(Terminal(backend));
         res.register_state::<ReportedTaskCompletions>();
-        res.insert(crate::implementations::grok_build::task::types::GoalLoopActive(true));
         let (tx, mut rx) = tokio::sync::mpsc::unbounded_channel();
         res.insert(SubagentEventSender(tx));
         xai_spawn::spawn(async move {
@@ -2024,30 +2019,28 @@ mod tests {
         let shared = res.into_shared();
         let reminder = TaskCompletionReminder;
         let output = ToolOutput::Dynamic(serde_json::Value::Null.into());
-        // First post-completion tool round, goal loop STILL ACTIVE: the bash completion surfaces (it rides a tool result — it interrupts nothing), while the subagent completion stays suppressed.
         let first = reminder.collect_reminders(shared.clone(), &output).await;
         assert_eq!(
             first.len(),
-            1,
-            "bash completion must surface on the first post-completion tool round \
-             even mid-goal: {first:?}"
+            2,
+            "the bash and the subagent completion must both surface: {first:?}"
         );
-        assert!(first[0].contains("bash-1"), "{first:?}");
-        // After the goal ends: nothing re-surfaces — once-only delivery.
-        shared
-            .lock()
-            .await
-            .insert(crate::implementations::grok_build::task::types::GoalLoopActive(false));
+        assert!(first.iter().any(|r| r.contains("bash-1")), "{first:?}");
+        assert!(
+            first
+                .iter()
+                .any(|r| r.contains("Background subagent \"sub-1\"")),
+            "{first:?}"
+        );
         let second = reminder.collect_reminders(shared, &output).await;
         assert!(
             second.is_empty(),
-            "suppressed subagent completion stays reported, bash completion stays once-only, \
-             got: {second:?}"
+            "each completion is reported once, got: {second:?}"
         );
     }
 
     /// A completed background task's reminder must be available on the FIRST
-    /// post-completion tool round — even mid-goal-loop — and exactly once.
+    /// post-completion tool round, and exactly once.
     /// Drives the REAL `LocalTerminalBackend` end to end: a real command is
     /// spawned in the background. The session sees it complete, and the
     /// shipped reminder path surfaces it at the next tool-call boundary.
@@ -2102,11 +2095,9 @@ mod tests {
             "expected a completed task: {snapshot:?}"
         );
 
-        // Resources as a live goal-loop session would hold them: the loop is active while the task completes.
         let mut res = Resources::new();
         res.insert(Terminal(backend));
         res.register_state::<ReportedTaskCompletions>();
-        res.insert(crate::implementations::grok_build::task::types::GoalLoopActive(true));
         res.insert(OwnerSessionId("sess-1".to_string()));
         let shared = res.into_shared();
 
