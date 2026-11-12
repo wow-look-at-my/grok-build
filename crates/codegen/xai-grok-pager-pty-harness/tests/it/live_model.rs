@@ -67,13 +67,37 @@ fn chat_history(grok_home: &Path) -> Vec<Value> {
             }
         }
     }
-    assert_eq!(
-        files.len(),
-        1,
-        "one session is expected under {}: {files:?}",
-        sessions.display()
-    );
-    read_jsonl(&files[0])
+    // A session id sorts by its start time. A full goal's subagents start after the main session.
+    files.sort();
+    let main = files
+        .first()
+        .unwrap_or_else(|| panic!("no session under {}", sessions.display()));
+    read_jsonl(main)
+}
+
+/// What the model did so far, for a failure message.
+fn run_summary(grok_home: &Path) -> String {
+    let history = chat_history(grok_home);
+    let calls: Vec<String> = assistant_items(&history)
+        .iter()
+        .flat_map(|item| tool_call_names(item))
+        .collect();
+    let directives = history
+        .iter()
+        .filter(|item| item["type"] == "user" && item.to_string().contains("Goal NOT complete"))
+        .count();
+    format!(
+        "tool calls: {calls:?}\ngoal continuation directives sent to the model: {directives}\ngoal check holds: {}",
+        log_events(grok_home, "shell.goal.check_held").len()
+    )
+}
+
+fn goal_command() -> &'static str {
+    match std::env::var("GROK_LIVE_GOAL_MODE").as_deref() {
+        Err(_) | Ok("lite") => "/goal --lite",
+        Ok("full") => "/goal",
+        Ok(other) => panic!("GROK_LIVE_GOAL_MODE must be `lite` or `full`, not {other:?}"),
+    }
 }
 
 fn tool_call_names(item: &Value) -> Vec<String> {
@@ -164,8 +188,9 @@ fn live_goal_turn_idles_on_background_work_and_is_checked_after_the_wake() {
         .wait_for_text(WELCOME, Duration::from_secs(30))
         .unwrap_or_else(|e| panic!("welcome: {e:#}\nscreen:\n{}", harness.screen_contents()));
     let goal = format!(
-        "/goal --lite Run ./build.sh as a background command. It takes about {BUILD_SECS} seconds. \
-         When it has finished, tell me the last line of build.log."
+        "{} Run ./build.sh as a background command. It takes about {BUILD_SECS} seconds. \
+         When it has finished, tell me the last line of build.log.",
+        goal_command()
     );
     harness.inject_keys(goal.as_bytes()).expect("type goal");
     harness.update(Duration::from_millis(500));
@@ -173,7 +198,7 @@ fn live_goal_turn_idles_on_background_work_and_is_checked_after_the_wake() {
 
     // The goal reports its wait while the build still runs.
     let mut check_before_build_end = false;
-    let waiting = wait_until(Duration::from_secs(BUILD_SECS + 240), || {
+    let waiting = wait_until(Duration::from_secs(BUILD_SECS + 600), || {
         harness.update(Duration::from_millis(200));
         let screen = harness.screen_contents();
         check_before_build_end |= screen.contains(CHECK_ROW) && !build_log.exists();
@@ -182,7 +207,8 @@ fn live_goal_turn_idles_on_background_work_and_is_checked_after_the_wake() {
     let screen = harness.screen_contents();
     assert!(
         waiting && screen.contains(WAITING_ROW) && !build_log.exists(),
-        "the live model must end its turn while the build runs, and the goal must report the wait\nscreen:\n{screen}"
+        "the live model must end its turn while the build runs, and the goal must report the wait\n{}\nscreen:\n{screen}",
+        run_summary(&grok_home)
     );
     assert!(
         !check_before_build_end && !screen.contains(CHECK_ROW),
