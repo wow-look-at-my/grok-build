@@ -260,15 +260,22 @@ fn a_goal_turn_waits_on_background_work_with_no_goal_check_until_the_wake_turn_e
                 result.is_ok(),
                 "the wake turn must end normally: {result:?}"
             );
+            let paths: Vec<String> = server.requests().into_iter().map(|r| r.path).collect();
+            let pause = actor
+                .goal_tracker
+                .lock()
+                .snapshot()
+                .and_then(|goal| goal.pause_message.clone());
             assert_eq!(
                 server.request_count_for(MODEL_PATH),
                 3,
-                "the wake turn samples the model, and then the goal check runs once"
+                "the wake turn samples the model, and then the goal check runs once: \
+                 requests {paths:?}, goal pause {pause:?}"
             );
             assert_eq!(
                 actor.goal_tracker.lock().status(),
                 Some(GoalStatus::Complete),
-                "the goal check ran at the end of the wake turn"
+                "the goal check ran at the end of the wake turn: goal pause {pause:?}"
             );
         });
     });
