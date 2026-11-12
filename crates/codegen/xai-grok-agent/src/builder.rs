@@ -180,20 +180,6 @@ fn task_lifecycle_satisfier(
         || has(ToolNamespace::GrokBuildConcise, "run_terminal_cmd", true)
         || has(ToolNamespace::OpenCode, "bash", false)
 }
-/// `Cursor:Shell` can background, but it does not satisfy Grok Build output tools.
-fn cursor_shell_can_background(
-    tool_config: &xai_grok_tools::registry::types::ToolServerConfig,
-) -> bool {
-    tool_config.tools.iter().any(|tc| {
-        tc.id == "Cursor:Shell"
-            && tc
-                .params
-                .as_ref()
-                .and_then(|params| params.get("enabled_background"))
-                .and_then(|value| value.as_bool())
-                .unwrap_or(true)
-    })
-}
 const TASK_LIFECYCLE_TOOLS: &[&str] = &[
     "get_task_output",
     "kill_task",
@@ -201,12 +187,14 @@ const TASK_LIFECYCLE_TOOLS: &[&str] = &[
     "scheduler_delete",
     "scheduler_list",
 ];
-/// Names of the blocking wait tool. Nothing registers a tool under them. A model
+/// Names of the blocking wait tools. No toolset carries a tool under them. A model
 /// waits by ending its turn, and a completion message wakes it.
 const REMOVED_WAIT_TOOL_NAMES: &[&str] = &[
     "wait_tasks",
     "wait_commands_or_subagents",
     "wait_tasks_or_subagents",
+    "AwaitShell",
+    "Await",
 ];
 
 /// Whether a tool id or name refers to the blocking wait tool.
@@ -1196,12 +1184,8 @@ impl AgentBuilder {
             .iter()
             .any(|tc| short_tool_name(&tc.id).eq_ignore_ascii_case("task"));
         if !task_present && !task_lifecycle_satisfier(&tool_config) {
-            let keep_await_shell = cursor_shell_can_background(&tool_config);
             tool_config.tools.retain(|tc| {
                 let short = short_tool_name(&tc.id);
-                if keep_await_shell && short == "AwaitShell" {
-                    return true;
-                }
                 !TASK_LIFECYCLE_TOOLS.contains(&short)
                     && !matches!(
                         tc.kind,
@@ -2350,6 +2334,7 @@ mod tests {
         definition.tool_config.tools = vec![
             (&ReadFileTool).into(),
             ToolConfig::from_id("GrokBuild:wait_tasks").with_name("wait_commands_or_subagents"),
+            ToolConfig::from_id("Cursor:AwaitShell"),
         ];
         definition.tools = vec![
             "read_file".to_string(),
@@ -2365,6 +2350,7 @@ mod tests {
             "wait_tasks",
             "wait_commands_or_subagents",
             "wait_tasks_or_subagents",
+            "AwaitShell",
         ] {
             assert!(
                 !names.iter().any(|name| name == gone),

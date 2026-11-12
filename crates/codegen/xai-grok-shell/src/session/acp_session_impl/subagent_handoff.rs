@@ -46,7 +46,6 @@ impl SessionActor {
             BackgroundNoticeNames {
                 task_output_tool: canonical.task_output_tool.to_owned(),
                 task_ids_param: canonical.task_ids_param.to_owned(),
-                timeout_ms_param: canonical.timeout_ms_param.to_owned(),
                 notified_on_completion: false,
             }
         });
