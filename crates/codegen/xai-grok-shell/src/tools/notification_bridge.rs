@@ -72,9 +72,6 @@ pub(crate) struct NotificationBridgeConfig {
     /// Grok-build leaves this `false`: its exit-plan tool result already informs the model, and a deferred reminder would arrive stale. Shared with the session actor (the `gateway_enabled` pattern).
     /// Refreshed on zero-turn rebuilds so the bridge always agrees with the live session gate.
     pub queue_exit_reminder_on_approved_exit: std::sync::Arc<std::sync::atomic::AtomicBool>,
-    /// When `true`, suppress the bash auto-wake synthetic prompt.
-    /// Shared `Arc` written in one place; see `SessionActor::set_goal_loop_active_resource` for the rationale.
-    pub goal_loop_active: std::sync::Arc<std::sync::atomic::AtomicBool>,
     /// Coalesce live `EmitBackgroundTasksSnapshot` requests. Last-wins only
     /// needs the latest list; a burst of completions shares one emit.
     pub background_tasks_snapshot_pending: std::sync::Arc<AtomicBool>,
@@ -382,9 +379,6 @@ async fn handle_notification(
             let is_monitor =
                 task_snapshot.kind == xai_grok_tools::computer::types::TaskKind::Monitor;
             let task_id = task_snapshot.task_id.clone();
-            let goal_loop_active = config
-                .goal_loop_active
-                .load(std::sync::atomic::Ordering::Relaxed);
             let mut will_wake = false;
             if task_snapshot.is_auto_wake_suppressed() {
                 xai_grok_telemetry::unified_log::info(
@@ -396,12 +390,6 @@ async fn handle_notification(
                         "explicitly_killed": task_snapshot.explicitly_killed,
                         "kill_result_delivered": task_snapshot.kill_result_delivered,
                     })),
-                );
-            } else if goal_loop_active {
-                tracing::info!(
-                    task_id = %task_id,
-                    is_monitor,
-                    "auto-wake: suppressed completion (goal loop active)"
                 );
             } else if config.auto_wake_enabled {
                 config.task_completion_reservations.reserve(task_id.clone());
@@ -614,6 +602,10 @@ async fn handle_notification(
                     level: Some("info".into()),
                 });
             request_background_tasks_snapshot(config);
+            // After the wake, so an admitted wake is in the queue when the session reads this.
+            let _ = config
+                .session_cmd_tx
+                .send(SessionCommand::BackgroundWorkSettled);
         }
         ToolNotification::PlanModeEntered(entered) => {
             let activated = config.plan_mode.lock().activate_from_tool();

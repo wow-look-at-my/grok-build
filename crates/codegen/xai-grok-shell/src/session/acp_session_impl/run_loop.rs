@@ -786,6 +786,7 @@ pub(super) async fn run_session(
                         }
                         SessionCommand::Prompt { prompt_id, prompt_blocks, prompt_mode, artifact_upload_ctx, client_identifier, screen_mode, verbatim, traceparent, json_schema, send_now, admission, tool_overrides_update, respond_to, prompt_admitted, persist_ack, parsed_prompt_tx } => {
                             let origin = super::PromptOrigin::from_prompt_id(&prompt_id);
+                            let wake_prompt = origin.is_auto_wake();
                             let (actor_admitted, task_wake_fallback) = match admission {
                                 Some(admission) => {
                                     let fallback = session
@@ -876,6 +877,14 @@ pub(super) async fn run_session(
                             };
                             if settled {
                                 SessionActor::maybe_start_running_task(session.clone(), completion_tx.clone()).await;
+                                // A wake whose completion is already reported is dropped and starts no turn.
+                                if wake_prompt {
+                                    SessionActor::resume_goal_after_background_settled(
+                                        session.clone(),
+                                        completion_tx.clone(),
+                                    )
+                                    .await;
+                                }
                             }
                         }
                         SessionCommand::ParentAgentMessage {
@@ -1157,6 +1166,13 @@ pub(super) async fn run_session(
                                 }
                                 SessionActor::maybe_drain_notifications(session.clone(), completion_tx.clone()).await;
                             }
+                        }
+                        SessionCommand::BackgroundWorkSettled => {
+                            SessionActor::resume_goal_after_background_settled(
+                                session.clone(),
+                                completion_tx.clone(),
+                            )
+                            .await;
                         }
                         SessionCommand::RecordGoalTurnTaskIds { task_ids } => {
                             session.record_reparented_goal_turn_task_ids(task_ids);
@@ -2225,7 +2241,6 @@ pub(super) async fn run_session(
                         SessionCommand::WorkflowCompletionTurn { run_id, revision } => {
                             let state_suppressed = session.state.lock().await.notifications_suppressed;
                             let wake_suppressed = state_suppressed
-                                || session.goal_loop_active()
                                 || session
                                     .tool_context
                                     .task_wake_suppressed
@@ -2238,6 +2253,11 @@ pub(super) async fn run_session(
                                 tracker.lock().is_unreported_completion(&run_id, revision)
                             };
                             if !should_wake {
+                                SessionActor::resume_goal_after_background_settled(
+                                    session.clone(),
+                                    completion_tx.clone(),
+                                )
+                                .await;
                                 continue;
                             }
                             let prompt_id = format!("workflow-completed-{run_id}-{revision}");
@@ -2509,6 +2529,14 @@ pub(super) async fn run_session(
                     SessionActor::maybe_start_running_task(session.clone(), completion_tx.clone()).await;
                     // If no user prompt started, check for pending notifications
                     SessionActor::maybe_drain_notifications(session.clone(), completion_tx.clone()).await;
+                    // A queued wake can be dropped as stale above. An active goal then has nothing left to start its next turn.
+                    if turn_succeeded && !suppress_goal_continuation {
+                        SessionActor::resume_goal_after_background_settled(
+                            session.clone(),
+                            completion_tx.clone(),
+                        )
+                        .await;
+                    }
                     session.emit_session_idle_if_idle().await;
                     // LazinessDetector: spawn an idle-triggered classifier dispatch.
                     // The method is a no-op when the per-model `laziness_detector.enabled = false` (the v1 default for every model).

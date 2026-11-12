@@ -528,17 +528,14 @@ impl SessionActor {
             self.reconcile_live_orphaned_subagents().await;
         }
 
-        // Auto-wake notification turns are DROPPED both while the goal loop is active AND after the goal completes.
-        // While active, a task or monitor completion turn would pull a weak model off the goal continuation.
+        // An active goal takes its notifications: its model waits on background work by ending the turn, and the wake is what resumes it.
         // After the goal completes the autonomous run is over; late dev-server completions should leave the session idle, not spawn post-goal turns.
-        let suppress_all = self.goal_harness_enabled()
-            && matches!(
-                self.goal_tracker.lock().status(),
-                Some(
-                    crate::session::goal_tracker::GoalStatus::Active
-                        | crate::session::goal_tracker::GoalStatus::Complete
-                )
-            );
+        let goal_status = self
+            .goal_harness_enabled()
+            .then(|| self.goal_tracker.lock().status())
+            .flatten();
+        let suppress_all = goal_status == Some(crate::session::goal_tracker::GoalStatus::Complete);
+        let goal_active = goal_status == Some(crate::session::goal_tracker::GoalStatus::Active);
 
         let drained_task_ids: Vec<String>;
 
@@ -568,14 +565,21 @@ impl SessionActor {
                 .collect();
 
             let (to_surface, dropped) = {
+                // The goal model waits for the tasks it started, so their notifications surface while the goal is active.
+                let no_ids = std::collections::HashSet::new();
                 let goal_turn_task_ids = self.goal_turn_task_ids.lock();
-                Self::split_goal_suppressed(suppress_all, &goal_turn_task_ids, notifications)
+                let dropped_origin = if goal_active {
+                    &no_ids
+                } else {
+                    &*goal_turn_task_ids
+                };
+                Self::split_goal_suppressed(suppress_all, dropped_origin, notifications)
             };
             if dropped > 0 {
                 tracing::info!(
                     dropped,
                     suppress_all,
-                    "dropping suppressed pending notifications (goal active/complete or goal-turn origin)"
+                    "dropping suppressed pending notifications (goal complete or goal-turn origin)"
                 );
             }
 
@@ -658,8 +662,9 @@ impl SessionActor {
     }
 
     /// Partition drained notifications into `(to_surface, dropped_count)`.
-    /// `suppress_all` mirrors the goal Active/Complete blanket gate (drop everything).
-    /// Independently, notifications whose source task is in `goal_turn_task_ids` are always dropped.
+    /// `suppress_all` is the blanket gate of a completed goal (drop everything).
+    /// Independently, notifications whose source task is in `goal_turn_task_ids` are dropped.
+    /// The caller passes an empty set while the goal is active.
     pub(super) fn split_goal_suppressed(
         suppress_all: bool,
         goal_turn_task_ids: &std::collections::HashSet<String>,

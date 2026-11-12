@@ -219,6 +219,8 @@ use extensions::*;
 #[path = "acp_session_impl/memory_dream.rs"]
 mod memory_dream;
 use memory_dream::*;
+#[path = "acp_session_impl/goal_hold.rs"]
+mod goal_hold;
 #[path = "acp_session_impl/goal_support.rs"]
 mod goal_support;
 #[path = "acp_session_impl/memory_capture.rs"]
@@ -972,8 +974,10 @@ pub(crate) struct SessionActor {
     pub(crate) goal_tracker: Arc<parking_lot::Mutex<crate::session::goal_tracker::GoalTracker>>,
     /// `task_id`s of background tasks (and monitors) that originated during the goal turn.
     /// Either spawned by the goal model itself or reparented from a harness verifier/planner subagent on its exit.
-    /// Their late auto-wake completions are dropped by [`Self::maybe_drain_notifications`] regardless of the goal's current status.
+    /// [`Self::maybe_drain_notifications`] drops their late completions once the goal is not `Active`.
     pub(crate) goal_turn_task_ids: parking_lot::Mutex<std::collections::HashSet<String>>,
+    /// True while an active goal waits on background work and the user was told so.
+    pub(crate) goal_waiting_on_background: std::sync::atomic::AtomicBool,
     /// Consecutive non-completing (cancelled/errored) goal-mode turns while the goal is `Active`.
     /// Auto-pauses the goal with `GoalPauseReason::BackOff` once the counter reaches [`GOAL_CONTINUATION_BACKOFF_THRESHOLD`].
     /// In-memory only; session restart is itself a reset.

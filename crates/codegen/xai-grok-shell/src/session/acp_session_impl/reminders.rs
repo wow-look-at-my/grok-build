@@ -609,20 +609,14 @@ impl SessionActor {
         let mut res = resources.lock().await;
         f(res.get_or_default::<State<ReportedTaskCompletions>>());
     }
+    /// An active goal gets these reminders too: its model waits on background work by ending the turn.
     pub(super) async fn drain_between_turn_completions(&self, commit_ids: &[String]) {
-        let goal_loop_active = self.goal_loop_active();
-        self.drain_between_turn_bash_completions(commit_ids, goal_loop_active)
-            .await;
-        self.drain_between_turn_workflow_completions(goal_loop_active)
-            .await;
-        self.drain_between_turn_subagent_completions(commit_ids, goal_loop_active)
+        self.drain_between_turn_bash_completions(commit_ids).await;
+        self.drain_between_turn_workflow_completions().await;
+        self.drain_between_turn_subagent_completions(commit_ids)
             .await;
     }
-    async fn drain_between_turn_bash_completions(
-        &self,
-        commit_ids: &[String],
-        goal_loop_active: bool,
-    ) {
+    async fn drain_between_turn_bash_completions(&self, commit_ids: &[String]) {
         let bridge = self.agent.borrow().tool_bridge().clone();
         let mut suppress_ids = self
             .tool_context
@@ -639,41 +633,26 @@ impl SessionActor {
                 .iter()
                 .map(|t| t.task_id.as_str())
                 .collect();
-            if goal_loop_active {
-                tracing::info!(
-                    count = bash_completions.len(),
-                    task_ids = ?ids,
-                    "dropping between-turn bash task completions (goal loop active)"
-                );
-                self.mark_completions_reported(&ids).await;
-            } else {
-                tracing::info!(
-                    count = bash_completions.len(),
-                    task_ids = ?ids,
-                    "draining between-turn bash task completions"
-                );
-                let task_output_name =
-                    xai_grok_tools::reminders::task_completion::resolve_task_output_tool_name(
-                        &bridge,
-                    )
+            tracing::info!(
+                count = bash_completions.len(),
+                task_ids = ?ids,
+                "draining between-turn bash task completions"
+            );
+            let task_output_name =
+                xai_grok_tools::reminders::task_completion::resolve_task_output_tool_name(&bridge)
                     .await;
-                let read_tool_name =
-                    xai_grok_tools::reminders::task_completion::resolve_read_tool_name(&bridge)
-                        .await;
-                let reminder = xai_grok_tools::reminders::task_completion::format_between_turn_bash_completions(
+            let read_tool_name =
+                xai_grok_tools::reminders::task_completion::resolve_read_tool_name(&bridge).await;
+            let reminder =
+                xai_grok_tools::reminders::task_completion::format_between_turn_bash_completions(
                     &bash_completions,
                     task_output_name.as_deref(),
                     read_tool_name.as_deref(),
                 );
-                self.push_system_reminder(&reminder);
-            }
+            self.push_system_reminder(&reminder);
         }
     }
-    async fn drain_between_turn_subagent_completions(
-        &self,
-        commit_ids: &[String],
-        goal_loop_active: bool,
-    ) {
+    async fn drain_between_turn_subagent_completions(&self, commit_ids: &[String]) {
         let Some(tx) = &self.tool_context.subagent_event_tx else {
             return;
         };
@@ -705,14 +684,6 @@ impl SessionActor {
             return;
         }
         let ids: Vec<&str> = completions.iter().map(|c| c.subagent_id()).collect();
-        if goal_loop_active {
-            tracing::info!(
-                count = completions.len(),
-                subagent_ids = ?ids,
-                "dropping between-turn subagent completions (goal loop active)"
-            );
-            return;
-        }
         tracing::info!(
             count = completions.len(),
             subagent_ids = ?ids,
@@ -745,20 +716,6 @@ impl SessionActor {
             {
                 completions = rx.await.unwrap_or_default();
             }
-        }
-        if self.goal_loop_active() {
-            let ids: Vec<&str> = completions
-                .iter()
-                .map(|c| c.subagent_id())
-                .chain(std::iter::once(subagent_id))
-                .collect();
-            tracing::info!(
-                subagent_id,
-                subagent_ids = ?ids,
-                "dropping wake turn (goal loop active)"
-            );
-            self.mark_completions_reported(&ids).await;
-            return WakeTurnMessage::Silent;
         }
         let mut own_reported = false;
         self.with_reported_completions(|reported| {
@@ -798,10 +755,7 @@ impl SessionActor {
             ids,
         }
     }
-    pub(super) async fn drain_between_turn_workflow_completions(&self, goal_loop_active: bool) {
-        if goal_loop_active {
-            return;
-        }
+    pub(super) async fn drain_between_turn_workflow_completions(&self) {
         let (restored, fresh) = {
             let tracker = self.workflow_tracker().await;
             let mut tracker = tracker.lock();

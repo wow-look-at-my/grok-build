@@ -385,10 +385,6 @@ pub(crate) struct SubagentSpawnContext {
     /// Whether auto-wake is enabled.
     /// When `false`, subagent completions are not injected as synthetic prompts.
     pub auto_wake_enabled: bool,
-    /// Parent's live goal-loop gate (shared `Arc`).
-    /// When set, the subagent auto-wake synthetic prompt is suppressed so an async completion wake doesn't derail the parent mid-`/goal`.
-    /// Surfaces 2/3 still drain it.
-    pub goal_loop_active: Arc<std::sync::atomic::AtomicBool>,
     /// The process tree's shared subagent turn-sampling semaphore.
     /// See [`crate::config::SubagentsConfig::resolve_sampling_limit`].
     pub subagent_sampling_semaphore: Arc<tokio::sync::Semaphore>,
@@ -563,7 +559,6 @@ pub(crate) struct ShellCompletionData {
     scheduler_create_tool_name: Option<String>,
     synthetic_trace_tx:
         Option<mpsc::UnboundedSender<crate::upload::turn::SyntheticTurnTraceRequest>>,
-    goal_loop_active: Arc<std::sync::atomic::AtomicBool>,
     attempt_id: Option<xai_message_delivery_core::AttemptId>,
     turn_number: Option<u64>,
     state: Arc<parking_lot::Mutex<ShellCompletionState>>,
@@ -581,7 +576,6 @@ impl ShellCompletionData {
             scheduler_delete_tool_name: ctx.scheduler_delete_tool_name.clone(),
             scheduler_create_tool_name: ctx.scheduler_create_tool_name.clone(),
             synthetic_trace_tx: ctx.synthetic_trace_tx.clone(),
-            goal_loop_active: Arc::clone(&ctx.goal_loop_active),
             attempt_id: Some(attempt_id),
             turn_number,
             state: Default::default(),
