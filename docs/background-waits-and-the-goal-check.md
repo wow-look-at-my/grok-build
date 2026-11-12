@@ -7,3 +7,14 @@
 - `SessionCommand::BackgroundWorkSettled` covers a completion that sends no wake, such as a task the user killed or a wake dropped as already reported. The notification bridge sends it after each `TaskCompleted`. The subagent presenter sends it after each child. An idle session with an active goal and no hold then queues the continuation (`resume_goal_after_background_settled`).
 - A task that a harness subagent (planner, verifier) left running is not the model's. `GoalBackground::harness_task_ids` holds its id. It holds no goal check, its wake is refused (`admit_task_completion_wake`), and its notification is dropped.
 - A background task that never exits (a dev server, a monitor) holds the goal check while it runs. The goal discipline prompt tells the model to stop the tasks it does not need before it ends the turn.
+- `pty_e2e_queue::goal_waits_on_background_work` checks the wait in the real pager with a scripted model, and CI runs it. `live_model` (`tests/it/live_model.rs` of the PTY harness) runs the same flow against a live model. No CI family selects it, because it needs a provider key:
+
+```bash
+cargo build -p xai-grok-pager-bin --bin xai-grok-pager --locked
+PAGER_BINARY=$PWD/target/debug/xai-grok-pager \
+GROK_LIVE_BASE_URL=https://router.huggingface.co/v1 \
+GROK_LIVE_MODEL=moonshotai/Kimi-K3 \
+GROK_LIVE_KEY_ENV=HF_TOKEN \
+cargo test -p xai-grok-pager-pty-harness --test it --locked -- --ignored --exact \
+	live_model::live_goal_turn_idles_on_background_work_and_is_checked_after_the_wake --nocapture
+```
