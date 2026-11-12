@@ -1970,6 +1970,7 @@ mod tests {
     fn task_output_input_serializes_the_canonical_key_and_never_the_alias() {
         let json = serde_json::to_value(TaskOutputToolInput {
             task_ids: vec!["a".into()],
+            ..Default::default()
         })
         .unwrap();
         assert_eq!(json["task_ids"], serde_json::json!(["a"]));
@@ -2018,6 +2019,7 @@ mod tests {
     fn task_output_input_round_trips_under_the_canonical_key_only() {
         let json = serde_json::to_value(TaskOutputToolInput {
             task_ids: vec!["a".into()],
+            ..Default::default()
         })
         .unwrap();
         assert_eq!(json["task_ids"], serde_json::json!(["a"]));
