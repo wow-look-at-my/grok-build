@@ -660,7 +660,6 @@ impl ToolRegistryBuilder {
                 grok_build::GetTerminalCommandOutputTool,
                 grok_build::task_output::terminal_command::TerminalCommandOutputParams,
             >();
-        b.register::<grok_build::WaitTasksTool>();
         b.register_with_params::<grok_build::TaskTool, grok_build::task::TaskParams>();
         b.register::<grok_build::SendSubagentMessageTool>();
         b.register::<grok_build::SendFeedbackTool>();
