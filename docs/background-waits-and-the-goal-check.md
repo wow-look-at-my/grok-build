@@ -7,7 +7,7 @@
 - `SessionCommand::BackgroundWorkSettled` covers a completion that sends no wake, such as a task the user killed or a wake dropped as already reported. The notification bridge sends it after each `TaskCompleted`. The subagent presenter sends it after each child. An idle session with an active goal and no hold then queues the continuation (`resume_goal_after_background_settled`).
 - A task that a harness subagent (planner, verifier) left running is not the model's. `GoalBackground::harness_task_ids` holds its id. It holds no goal check, its wake is refused (`admit_task_completion_wake`), and its notification is dropped.
 - A background task that never exits (a dev server, a monitor) holds the goal check while it runs. The goal discipline prompt tells the model to stop the tasks it does not need before it ends the turn.
-- `pty_e2e_queue::goal_waits_on_background_work` checks the wait in the real pager with a scripted model, and CI runs it. `live_model` (`tests/it/live_model.rs` of the PTY harness) runs the same flow against a live model. No CI family selects it, because it needs a provider key:
+- `pty_e2e_queue::goal_waits_on_background_work` checks the wait in the real pager with a scripted model, and CI runs it. `live_model` (`tests/it/live_model.rs` of the PTY harness) runs the same flow against a live model. No CI family selects it, because it needs a provider key. `GROK_LIVE_BASE_URL` is an OpenAI-compatible base URL, `GROK_LIVE_MODEL` is a model id of that provider, and `GROK_LIVE_KEY_ENV` names the variable that holds the key. `GROK_LIVE_GOAL_MODE=full` runs the planner and verifier flow in place of a lite goal:
 
 ```bash
 cargo build -p xai-grok-pager-bin --bin xai-grok-pager --locked

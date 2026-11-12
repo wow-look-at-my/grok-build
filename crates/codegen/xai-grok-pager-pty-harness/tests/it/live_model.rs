@@ -32,7 +32,11 @@ fn required_env(name: &str) -> String {
     std::env::var(name)
         .ok()
         .filter(|value| !value.is_empty())
-        .unwrap_or_else(|| panic!("{name} must be set for a live-model run (see the file header)"))
+        .unwrap_or_else(|| {
+            panic!(
+                "{name} must be set for a live-model run (see docs/background-waits-and-the-goal-check.md)"
+            )
+        })
 }
 
 fn read_jsonl(path: &Path) -> Vec<Value> {
