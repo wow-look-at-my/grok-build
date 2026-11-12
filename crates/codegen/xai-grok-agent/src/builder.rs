@@ -1165,11 +1165,7 @@ impl AgentBuilder {
                 !TASK_LIFECYCLE_TOOLS.contains(&short)
                     && !matches!(
                         tc.kind,
-                        Some(
-                            ToolKind::BackgroundTaskAction
-                                | ToolKind::KillTaskAction
-                                | ToolKind::WaitTasksAction
-                        )
+                        Some(ToolKind::BackgroundTaskAction | ToolKind::KillTaskAction)
                     )
             });
         }
