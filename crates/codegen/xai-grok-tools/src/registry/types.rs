@@ -4216,6 +4216,16 @@ mod tests {
         );
     }
     #[test]
+    fn no_registered_tool_is_the_wait_tool() {
+        let ids = ToolRegistryBuilder::new().known_tool_ids();
+        assert!(!ids.is_empty(), "the registry must register tools");
+        let wait: Vec<&String> = ids
+            .iter()
+            .filter(|id| id.rsplit(':').next() == Some("wait_tasks"))
+            .collect();
+        assert!(wait.is_empty(), "a wait tool is registered: {wait:?}");
+    }
+    #[test]
     fn validate_config_rejects_auto_bg_without_background_enabled() {
         let builder = ToolRegistryBuilder::new();
         let config = ToolServerConfig {
