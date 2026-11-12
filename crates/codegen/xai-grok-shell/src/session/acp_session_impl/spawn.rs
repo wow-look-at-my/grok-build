@@ -872,6 +872,22 @@ pub(crate) async fn spawn_session_actor(
         .and_then(|ui| ui.get("stop_gate_ci_failing"))
         .and_then(toml::Value::as_bool)
         .unwrap_or(true);
+    // Split-and-tee writes stage files next to the session's own logs, so it
+    // needs a terminal on this machine. `effective_cfg` exists only for one.
+    let split_and_tee = effective_cfg
+        .as_ref()
+        .and_then(|cfg| cfg.get("ui"))
+        .and_then(|ui| ui.get("split_and_tee_commands"))
+        .and_then(toml::Value::as_bool)
+        .unwrap_or(xai_grok_shared::ui_config::UiConfig::SPLIT_AND_TEE_COMMANDS_DEFAULT);
+    reminder_policy.split_joined_commands = split_and_tee;
+    let mut tool_params_json = tool_params_json;
+    if let Some(bash) = tool_params_json.bash.as_mut() {
+        bash.insert(
+            "capture_pipeline_stages".to_string(),
+            serde_json::Value::Bool(split_and_tee),
+        );
+    }
     let (user_question_tx, user_question_rx) = tokio::sync::mpsc::unbounded_channel::<
         xai_grok_tools::implementations::grok_build::ask_user_question::types::UserQuestionRequest,
     >();

@@ -136,6 +136,7 @@ mod tests {
             test_ctx(resources.into_shared()),
             TaskOutputToolInput {
                 task_ids: vec!["tc-1".into()],
+                ..Default::default()
             },
         )
         .await
@@ -159,6 +160,7 @@ mod tests {
             test_ctx(resources.into_shared()),
             TaskOutputToolInput {
                 task_ids: vec!["tc-2".into()],
+                ..Default::default()
             },
         )
         .await
@@ -197,6 +199,7 @@ mod tests {
             test_ctx(with_poll_cap(snapshot).into_shared()),
             TaskOutputToolInput {
                 task_ids: vec!["tc-big".into()],
+                ..Default::default()
             },
         )
         .await
@@ -231,6 +234,7 @@ mod tests {
             test_ctx(with_poll_cap(snapshot).into_shared()),
             TaskOutputToolInput {
                 task_ids: vec!["tc-run".into()],
+                ..Default::default()
             },
         )
         .await
@@ -268,6 +272,7 @@ mod tests {
             test_ctx(with_poll_cap(snapshot).into_shared()),
             TaskOutputToolInput {
                 task_ids: vec!["tc-size".into()],
+                ..Default::default()
             },
         )
         .await
@@ -303,6 +308,7 @@ mod tests {
             test_ctx(with_poll_cap(snapshot).into_shared()),
             TaskOutputToolInput {
                 task_ids: vec!["tc-multi".into(), "tc-other".into()],
+                ..Default::default()
             },
         )
         .await
@@ -336,6 +342,7 @@ mod tests {
             test_ctx(resources.into_shared()),
             TaskOutputToolInput {
                 task_ids: vec!["tc-param".into()],
+                ..Default::default()
             },
         )
         .await
@@ -375,6 +382,7 @@ mod tests {
             test_ctx(resources.into_shared()),
             TaskOutputToolInput {
                 task_ids: vec!["tc-override".into()],
+                ..Default::default()
             },
         )
         .await
@@ -406,6 +414,7 @@ mod tests {
             test_ctx(resources.into_shared()),
             TaskOutputToolInput {
                 task_ids: vec!["tc-uncapped".into()],
+                ..Default::default()
             },
         )
         .await
@@ -430,6 +439,7 @@ mod tests {
             test_ctx(resources.into_shared()),
             TaskOutputToolInput {
                 task_ids: vec!["tc-short".into()],
+                ..Default::default()
             },
         )
         .await

@@ -286,6 +286,11 @@ Pointing `build-test` at `vars.CI_RUNNER` turns tests red, because they assert o
 
 Every one of those is the test doing its job. Making them pass there means weakening what they check, so the fix belongs to the runner image (an init/reaper, a real filesystem for `/tmp`). That image is the fleet's, not this repo's. Revisit the runner once it has one. Until then this job is `runs-on: ubuntu-22.04`, like every other Linux job in the workflow, which is what `master` builds green on.
 
+## Split-and-tee notes (experimental)
+
+- `[ui].split_and_tee_commands`, default off, read at session start and only for a local terminal. A `;`/`&&` bash chain runs as one ordered tool call per command. Every pipe stage is teed to `<call log>.stageN.log`, and a trailing `| tail` becomes a view over the kept output.
+- `get_task_output` reads any saved log with `stage`/`head`/`tail`/`grep`, including a finished foreground call by its call id. Depth, and what refuses a split: `docs/split-and-tee.md`.
+
 ## Todo-stop-gate notes
 
 [docs/todo-stop-gate-notes.md](docs/todo-stop-gate-notes.md) holds this section.
