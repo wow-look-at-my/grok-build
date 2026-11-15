@@ -209,3 +209,227 @@ fn a_reported_cost_wins_over_the_price_table() {
     assert_eq!(price_model_call("no-such-model", None, Some(5)), Some(5));
     assert_eq!(price_model_call("", None, None), None);
 }
+
+/// The crates that hold model-calling code. Only `xai-grok-sampler` sends to a model provider.
+const MODEL_CALLING_CRATES: [&str; 5] = [
+    "xai-grok-tools",
+    "xai-grok-memory",
+    "xai-grok-voice",
+    "xai-grok-shell",
+    "xai-grok-workspace",
+];
+
+/// Code that opens a connection without the sampler.
+const DIRECT_CONNECTIONS: [&str; 5] = [
+    "HttpClient::build(",
+    "reqwest::Client",
+    "connect_ws(",
+    "connect_ws_over(",
+    "connect_async(",
+];
+
+/// Model provider endpoint paths. A request to one of them belongs in `SamplingClient`.
+const PROVIDER_PATHS: [&str; 8] = [
+    "chat/completions",
+    "/responses\"",
+    "/messages\"",
+    "/embeddings",
+    "images/generations",
+    "images/edits",
+    "videos/generations",
+    "/tokenize-text",
+];
+
+/// The reviewed sites outside the sampler: (crate, path under `src`, pattern, hits, reason).
+/// The hit count is exact, so a new site in a listed file fails too.
+const REVIEWED_SITES: &[(&str, &str, &str, usize, &str)] = &[
+    (
+        "xai-grok-tools",
+        "implementations/web_search/client.rs",
+        "HttpClient::build(",
+        1,
+        "Kagi's search API, not a model provider",
+    ),
+    (
+        "xai-grok-tools",
+        "implementations/web_search/client.rs",
+        "/responses\"",
+        1,
+        "the URL only feeds the endpoint allowlist check; create_response sends",
+    ),
+    (
+        "xai-grok-tools",
+        "implementations/grok_build/web_fetch/http.rs",
+        "HttpClient::build(",
+        1,
+        "fetches the web pages the model asks for",
+    ),
+    (
+        "xai-grok-tools",
+        "implementations/grok_build/video_gen/mod.rs",
+        "HttpClient::build(",
+        1,
+        "downloads the finished video from its presigned storage URL",
+    ),
+    (
+        "xai-grok-tools",
+        "implementations/grok_build/video_gen/mod.rs",
+        "videos/generations",
+        1,
+        "the URL only feeds the endpoint allowlist check; generate_video sends",
+    ),
+    (
+        "xai-grok-tools",
+        "implementations/grok_build/image_gen/mod.rs",
+        "images/generations",
+        1,
+        "the URL only feeds the endpoint allowlist check; generate_images sends",
+    ),
+    (
+        "xai-grok-memory",
+        "embedding.rs",
+        "/embeddings",
+        1,
+        "the URL only feeds the endpoint allowlist check; create_embeddings sends",
+    ),
+    (
+        "xai-grok-shell",
+        "agent/model_pricing.rs",
+        "HttpClient::build(",
+        1,
+        "fetches the pricing catalog",
+    ),
+    (
+        "xai-grok-shell",
+        "agent/relay.rs",
+        "connect_ws(",
+        1,
+        "the relay socket to a remote agent session",
+    ),
+    (
+        "xai-grok-shell",
+        "agent/relay.rs",
+        "connect_ws_over(",
+        1,
+        "the relay socket to a remote agent session, through a proxy tunnel",
+    ),
+    (
+        "xai-grok-shell",
+        "remote/client.rs",
+        "HttpClient::build(",
+        1,
+        "the backend client for model listings and bundles",
+    ),
+    (
+        "xai-grok-shell",
+        "remote/client.rs",
+        "/messages\"",
+        1,
+        "reads a listing's supported_endpoints to pick a backend",
+    ),
+    (
+        "xai-grok-shell",
+        "remote/client.rs",
+        "/responses\"",
+        1,
+        "reads a listing's supported_endpoints to pick a backend",
+    ),
+    (
+        "xai-grok-shell",
+        "remote/client.rs",
+        "chat/completions",
+        1,
+        "reads a listing's supported_endpoints to pick a backend",
+    ),
+    (
+        "xai-grok-workspace",
+        "hub_auth/proactive.rs",
+        "HttpClient::build(",
+        1,
+        "the OIDC token endpoint",
+    ),
+];
+
+/// Every pattern hit in the non-test code of `crate_name`, as (path under `src`, pattern, line).
+fn provider_call_hits(crate_name: &str) -> Vec<(String, &'static str, usize)> {
+    let src = Path::new(env!("CARGO_MANIFEST_DIR"))
+        .join("..")
+        .join(crate_name)
+        .join("src");
+    let mut files = Vec::new();
+    rust_files(&src, &mut files);
+    let mut hits = Vec::new();
+    for path in &files {
+        let rel = path.strip_prefix(&src).expect("under src");
+        if is_test_file(rel) {
+            continue;
+        }
+        let source = std::fs::read_to_string(path).expect("read source");
+        for (number, line) in non_test_lines(&source) {
+            if line.trim_start().starts_with("//") {
+                continue;
+            }
+            let found = DIRECT_CONNECTIONS
+                .iter()
+                .chain(PROVIDER_PATHS.iter())
+                .filter(|pattern| line.contains(*pattern));
+            for pattern in found {
+                hits.push((rel.display().to_string(), *pattern, number));
+            }
+        }
+    }
+    hits
+}
+
+/// Outside the sampler, no model-calling crate opens a connection or names a provider endpoint,
+/// except at a reviewed site. A reintroduced bypass sends calls with no slot and no bill.
+#[test]
+fn no_crate_sends_to_a_model_provider_outside_the_sampler() {
+    let mut problems = Vec::new();
+    for crate_name in MODEL_CALLING_CRATES {
+        let hits = provider_call_hits(crate_name);
+        let mut counted: std::collections::BTreeMap<(String, &str), Vec<usize>> =
+            std::collections::BTreeMap::new();
+        for (file, pattern, line) in hits {
+            counted.entry((file, pattern)).or_default().push(line);
+        }
+        for ((file, pattern), lines) in &counted {
+            let reviewed = REVIEWED_SITES
+                .iter()
+                .find(|(c, f, p, _, _)| *c == crate_name && f == file && p == pattern);
+            match reviewed {
+                Some((_, _, _, count, _)) if *count == lines.len() => {}
+                Some((_, _, _, count, _)) => problems.push(format!(
+                    "{crate_name}/src/{file}: `{pattern}` at lines {lines:?}, reviewed for {count}"
+                )),
+                None => problems.push(format!(
+                    "{crate_name}/src/{file}: `{pattern}` at lines {lines:?}"
+                )),
+            }
+        }
+        for (c, file, pattern, _, _) in REVIEWED_SITES.iter().filter(|s| s.0 == crate_name) {
+            if !counted.contains_key(&(file.to_string(), *pattern)) {
+                problems.push(format!(
+                    "{c}/src/{file}: reviewed site for `{pattern}` no longer exists; delete it"
+                ));
+            }
+        }
+    }
+    assert!(
+        problems.is_empty(),
+        "send model requests through xai_grok_sampler::SamplingClient, which takes a request \
+         slot and bills the call. A site that is not a model provider goes in REVIEWED_SITES \
+         with its reason:\n{}",
+        problems.join("\n")
+    );
+}
+
+#[test]
+fn the_provider_scan_sees_a_direct_call() {
+    let line = r#"    let resp = client.post(format!("{base}/embeddings"), auth).send();"#;
+    assert!(PROVIDER_PATHS.iter().any(|p| line.contains(p)));
+    let line = "    let http = xai_grok_net::HttpClient::build(options)?;";
+    assert!(DIRECT_CONNECTIONS.iter().any(|p| line.contains(p)));
+    let line = r#"tracing::warn!("tokenize-text failed");"#;
+    assert!(!PROVIDER_PATHS.iter().any(|p| line.contains(p)));
+}

@@ -24,13 +24,14 @@ impl SessionActor {
         tracing::info!(model, "session_context_snapshot: tokenizing");
         let texts = self.snapshot_texts().await;
         let counts = texts.item_counts();
-        let tokens = tokenize_texts_parallel(
-            &tokenize_text_url(&xai_api_base_url()),
-            &api_key,
-            model,
-            texts.jobs(),
-        )
-        .await;
+        let client = match tokenizer_client(xai_api_base_url(), api_key, model, self.usage_sink()) {
+            Ok(client) => client,
+            Err(error) => {
+                tracing::warn!(%error, "session_context_snapshot: no tokenizer client");
+                return;
+            }
+        };
+        let tokens = tokenize_texts_parallel(&client, model, texts.jobs()).await;
         tracing::info!(
             model,
             skills_tokens = tokens.skills,
@@ -224,9 +225,21 @@ fn xai_api_base_url() -> String {
         .unwrap_or_else(|| crate::agent::config::EndpointsConfig::default().xai_api_base_url)
 }
 
-fn tokenize_text_url(base_url: &str) -> String {
-    let base = base_url.trim_end_matches('/');
-    format!("{base}/tokenize-text")
+/// The tokenizer goes through a billed sampling client, which takes a request slot per call.
+fn tokenizer_client(
+    base_url: String,
+    api_key: String,
+    model: &str,
+    usage_sink: xai_grok_sampler::SharedUsageSink,
+) -> Result<xai_grok_sampler::SamplingClient, xai_grok_sampling_types::SamplingError> {
+    crate::session::billed_client::billed_sampling_client(xai_grok_sampler::SamplerConfig {
+        api_key: Some(api_key),
+        base_url,
+        model: model.to_owned(),
+        client_version: Some(xai_grok_version::version().to_owned()),
+        usage_sink: Some(usage_sink),
+        ..Default::default()
+    })
 }
 
 fn parse_token_count(body: &serde_json::Value) -> Option<u64> {
@@ -247,21 +260,13 @@ fn tool_definitions_text(defs: &[ToolDefinition]) -> String {
 }
 
 async fn tokenize_texts_parallel(
-    url: &str,
-    api_key: &str,
+    client: &xai_grok_sampler::SamplingClient,
     model: &str,
     jobs: Vec<TokenizeJob>,
 ) -> TokenCounts {
-    let client = crate::http::shared_client();
-    let futs = jobs.into_iter().map(|job| {
-        let client = client.clone();
-        let url = url.to_string();
-        let api_key = api_key.to_string();
-        let model = model.to_string();
-        async move {
-            let tokens = tokenize_one(&client, &url, &api_key, &model, &job.text).await;
-            (job.field, tokens)
-        }
+    let futs = jobs.into_iter().map(|job| async move {
+        let tokens = tokenize_one(client, model, &job.text).await;
+        (job.field, tokens)
     });
     let mut counts = TokenCounts::default();
     for (field, tokens) in futures::future::join_all(futs).await {
@@ -273,36 +278,27 @@ async fn tokenize_texts_parallel(
 }
 
 async fn tokenize_one(
-    client: &xai_grok_net::HttpClient,
-    url: &str,
-    api_key: &str,
+    client: &xai_grok_sampler::SamplingClient,
     model: &str,
     text: &str,
 ) -> Option<u64> {
-    let auth = xai_grok_net::Auth::ApiKey {
-        key: api_key.to_owned(),
-        scheme: xai_grok_net::KeyScheme::Bearer,
-    };
+    let request = serde_json::json!({
+        "text": text,
+        "model": model,
+    });
     let resp = client
-        .post(url, auth)
-        .header("x-grok-client-version", xai_grok_version::version())
-        .json(&serde_json::json!({
-            "text": text,
-            "model": model,
-        }))
-        .send()
+        .tokenize(&request)
         .await
         .map_err(|e| {
             tracing::warn!(error = %e, "tokenize-text request failed");
             e
         })
         .ok()?;
-    let status = resp.status();
-    if !status.is_success() {
-        tracing::warn!(%status, "tokenize-text failed");
+    if !resp.status.is_success() {
+        tracing::warn!(status = %resp.status, "tokenize-text failed");
         return None;
     }
-    let body: serde_json::Value = resp.json().await.ok()?;
+    let body: serde_json::Value = serde_json::from_slice(&resp.body).ok()?;
     parse_token_count(&body)
 }
 
@@ -378,16 +374,58 @@ mod tests {
         assert_eq!(crate::models::default_model(), "grok-4.6");
     }
 
-    #[test]
-    fn tokenize_text_url_trims_trailing_slash() {
-        assert_eq!(
-            tokenize_text_url("https://api.example.invalid/v1/"),
-            "https://api.example.invalid/v1/tokenize-text"
+    #[derive(Debug, Default)]
+    struct Recorder {
+        calls: parking_lot::Mutex<Vec<xai_grok_sampler::BilledCall>>,
+    }
+
+    impl xai_grok_sampler::UsageSink for Recorder {
+        fn record_call(&self, call: xai_grok_sampler::BilledCall) {
+            self.calls.lock().push(call);
+        }
+    }
+
+    /// The tokenizer calls go through the billed client: `{base}/tokenize-text` with the bearer,
+    /// and a body that carries usage reaches the session sink.
+    #[tokio::test]
+    async fn tokenize_goes_through_the_billed_client() {
+        let app = axum::Router::new().route(
+            "/v1/tokenize-text",
+            axum::routing::post(|headers: axum::http::HeaderMap| async move {
+                assert_eq!(
+                    headers.get("authorization").and_then(|v| v.to_str().ok()),
+                    Some("Bearer key")
+                );
+                axum::Json(serde_json::json!({
+                    "token_ids": [1, 2, 3],
+                    "usage": { "prompt_tokens": 3, "total_tokens": 3 }
+                }))
+            }),
         );
-        assert_eq!(
-            tokenize_text_url("https://api.example.invalid/v1"),
-            "https://api.example.invalid/v1/tokenize-text"
-        );
+        let listener = tokio::net::TcpListener::bind("127.0.0.1:0").await.unwrap();
+        let addr = listener.local_addr().unwrap();
+        let server = xai_spawn::spawn(async move {
+            let _ = axum::serve(listener, app).await;
+        });
+        let recorder = std::sync::Arc::new(Recorder::default());
+        let client = tokenizer_client(
+            format!("http://{addr}/v1/"),
+            "key".into(),
+            "grok-4.6",
+            recorder.clone(),
+        )
+        .expect("client");
+
+        let jobs = TokenizeJob::new(TokenizeField::System, "hello")
+            .into_iter()
+            .collect();
+        let counts = tokenize_texts_parallel(&client, "grok-4.6", jobs).await;
+
+        assert_eq!(counts.system, 3);
+        let calls = recorder.calls.lock().clone();
+        assert_eq!(calls.len(), 1, "{calls:?}");
+        assert_eq!(calls.first().map(|c| c.model.as_str()), Some("grok-4.6"));
+        server.abort();
     }
 
     #[test]

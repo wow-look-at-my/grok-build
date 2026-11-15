@@ -65,11 +65,12 @@ runs:
             # Only a loader that boots this tool is worth installing.
             if [ -s "${stage}/apeld" ]; then
               chmod 755 "${stage}/apeld"
-              if APE_LOADER="${stage}/apeld" sh "/usr/local/lib/${tool}/${tool}" --version > /dev/null 2>&1; then
+              if APE_LOADER="${stage}/apeld" sh "/usr/local/lib/${tool}/${tool}" --help > /dev/null 2>&1; then
                 sudo install -m 755 "${stage}/apeld" "$loader"
               fi
             fi
             rm -rf "$stage"
           fi
-          "$tool" --version
+          # Every org tool takes --help. Not every tool takes --version: ai-proxy has none.
+          "$tool" --help > /dev/null
         done
