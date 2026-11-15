@@ -2413,9 +2413,11 @@ impl SessionActor {
     /// Without it `state.total_tokens` would stay frozen at the `estimate_conversation_tokens` seed from `ChatState::new`.
     /// Resetting `estimated_tokens_since_model = 0` here also keeps the preflight-overflow guard accurate against the next turn's tool-result deltas.
     ///
-    /// Returns the cost (USD ticks) this call was folded into the ledgers
-    /// with, so the caller can put it on the wire per response. The per-turn
-    /// bill is a sum and cannot be split back apart across a tool loop.
+    /// The client's usage sink already billed this call's tokens and cost.
+    /// This counts the main-loop round and returns the cost of this call,
+    /// priced as the sink priced it. The caller can put it on the wire per
+    /// response. The per-turn bill is a sum and cannot be split back apart
+    /// across a tool loop.
     pub(crate) fn record_response_token_usage(
         &self,
         response: &ConversationResponse,
