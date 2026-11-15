@@ -68,6 +68,8 @@ mod send_then_ctrlc_rewinds_to_composer_no_history_dup;
 mod shift_tab_plan_nudge_from_always_approve_enters_plan;
 #[path = "pty_e2e/steer_folds_follow_up_into_running_turn.rs"]
 mod steer_folds_follow_up_into_running_turn;
+#[path = "pty_e2e/turn_idles_on_background_work_over_messages.rs"]
+mod turn_idles_on_background_work_over_messages;
 #[path = "pty_e2e/up_focuses_queue_bottom_row.rs"]
 mod up_focuses_queue_bottom_row;
 #[path = "pty_e2e/verify_bashq_claim2_force_interject.rs"]
