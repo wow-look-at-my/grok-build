@@ -548,8 +548,13 @@ fn parse_remote_model_value_bad_context_windows_fall_back_to_context_window() {
         assert_eq!(result.context_window.get(), 300_000, "{bad}");
         assert!(result.context_windows.is_empty(), "{bad}");
     }
+    // A zero window is no window: the model keeps the default one.
     let value = serde_json::json!({ "model": "grok-4", "context_window": 0 });
-    assert!(parse_remote_model_value(&value, "https://default.url").is_none());
+    let result = parse_remote_model_value(&value, "https://default.url").expect("model parses");
+    assert_eq!(
+        result.context_window.get(),
+        crate::remote::DEFAULT_CONTEXT_WINDOW
+    );
 }
 #[test]
 fn parse_remote_model_value_no_laziness_detector_block_yields_default() {

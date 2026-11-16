@@ -723,7 +723,7 @@ mod tests {
     impl TurnEndHarness {
         async fn start() -> TurnEndHarness {
             let (base_url, registry) = serve_registry_rows().await;
-            let (agent, gateway_rx) =
+            let (mut agent, gateway_rx) =
                 crate::agent::mvp_agent::tests::build_agent_with_auth_and_proxy(
                     xai_grok_login::GrokAuth {
                         oidc_issuer: Some(xai_grok_login::XAI_OAUTH2_ISSUER.to_owned()),
@@ -732,10 +732,8 @@ mod tests {
                     base_url,
                     crate::agent::config::AgentMode::Generic,
                 );
-            agent.cfg.borrow_mut().remote_settings = Some(crate::util::config::RemoteSettings {
-                session_registry_enabled: Some(true),
-                ..crate::util::config::RemoteSettings::default()
-            });
+            // The registry is a local opt-in; remote settings never turn it on.
+            agent.session_registry_local = Some(true);
             let cwd = tempfile::tempdir().unwrap();
             let mut handle = crate::agent::mvp_agent::tests::make_test_handle("grok", false, None);
             handle.info = crate::session::info::Info {

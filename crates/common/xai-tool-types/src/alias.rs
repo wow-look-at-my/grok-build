@@ -634,7 +634,7 @@ pub const ENUM_VARIANTS: &[EnumVariantAlias] = &[
         why: "a tool filter is one string key; see ToolNamespace",
     },
     EnumVariantAlias {
-        file: "crates/codegen/xai-grok-workspace/src/permission/types.rs",
+        file: "crates/codegen/xai-grok-permission-rules/src/types.rs",
         ty: "ToolFilter",
         aliases: &["agentmessage"],
         why: "a tool filter is one string key; see ToolNamespace",

@@ -2534,7 +2534,7 @@ fn set_plan_mode_idempotency_uses_pending_over_active() {
 }
 
 /// The ring's stop order is the documented one, and the fix neither reorders
-/// nor drops a stop. Normal -> Plan -> Auto -> Always-Approve -> Orchestrator
+/// nor drops a stop. Normal -> Plan -> Auto-review -> Always-Approve -> Orchestrator
 /// -> Explore -> Plan, one step per press.
 #[test]
 fn the_ring_keeps_its_stop_order_across_a_full_cycle() {
@@ -2556,7 +2556,7 @@ fn the_ring_keeps_its_stop_order_across_a_full_cycle() {
         labels,
         vec![
             "Switched to mode: Plan",
-            "Switched to mode: Auto",
+            "Switched to mode: Auto-review",
             "Switched to mode: Always-Approve",
             "Switched to mode: Orchestrator",
             "Switched to mode: Explore",

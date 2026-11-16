@@ -187,8 +187,9 @@ impl SessionActor {
         }
         let model = config.model.clone();
         let reasoning_effort = config.reasoning_effort;
-        let client =
-            xai_grok_sampler::SamplingClient::new(config).map_err(|e| self.to_acp_error(e))?;
+        let client = self
+            .sampling_client(config)
+            .map_err(|e| self.to_acp_error(e))?;
         Ok((client, model, reasoning_effort))
     }
 }

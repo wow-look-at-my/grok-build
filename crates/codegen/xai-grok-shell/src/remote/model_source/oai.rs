@@ -300,6 +300,7 @@ mod tests {
         use xai_grok_test_support::EnvGuard;
         let _no_key = EnvGuard::unset("XAI_API_KEY");
         let _no_legacy = EnvGuard::unset("GROK_CODE_XAI_API_KEY");
+        let _allowed = EnvGuard::set("GROK_ALLOWED_ENDPOINTS", "https://models.acme.com");
         let cfg = EndpointsConfig::from_config_value(
             &toml::from_str(
                 r#"[endpoints]

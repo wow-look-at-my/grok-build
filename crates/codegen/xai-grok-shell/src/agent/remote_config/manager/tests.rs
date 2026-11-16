@@ -3174,10 +3174,8 @@ fn sampling_config_never_falls_back_to_a_bundled_model_under_external_auth() {
     let external = manager(external_auth_config(""), "corp-build-model");
     let standard = manager(config::Config::default(), "");
     assert_eq!("corp-build-model", external.sampling_config().model);
-    assert_eq!(
-        crate::models::default_model(),
-        standard.sampling_config().model
-    );
+    // Standard auth never swaps in the bundled default either.
+    assert_eq!("", standard.sampling_config().model);
 }
 #[tokio::test]
 async fn prompt_gate_waits_for_the_first_fetch_under_external_auth() {

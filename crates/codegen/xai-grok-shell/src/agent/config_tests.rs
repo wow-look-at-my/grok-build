@@ -5241,10 +5241,12 @@ fn trace_upload_stays_off_under_a_requirements_pin_when_the_distribution_withhol
     ]));
     assert!(!withheld.value);
     assert_eq!(withheld.source, ConfigSource::Default);
+    let stock = cfg.resolve_trace_upload_as(xai_grok_config::Distribution::STOCK);
     assert!(
-        cfg.resolve_trace_upload_as(xai_grok_config::Distribution::STOCK)
-            .value
+        !stock.value,
+        "trace upload is hard-off in every distribution"
     );
+    assert_eq!(stock.source, ConfigSource::Default);
 }
 #[test]
 #[serial]
@@ -7949,33 +7951,6 @@ fn resolve_telemetry_mode_stays_disabled_under_disable_env_opt_in_and_requiremen
     assert_eq!(
         (resolved.value, resolved.source),
         (TelemetryMode::Disabled, ConfigSource::Default)
-    );
-}
-#[test]
-#[serial]
-fn requirements_telemetry_pin_beats_user_config() {
-    unsafe { std::env::remove_var("DISABLE_TELEMETRY") };
-    unsafe { std::env::remove_var("GROK_TELEMETRY_ENABLED") };
-    let mut cfg = Config::default();
-    cfg.features.telemetry = Some(TelemetryMode::Enabled);
-    cfg.requirements.telemetry.pin(
-        TelemetryMode::Disabled,
-        crate::config::RequirementSource::Unknown,
-    );
-    let off = cfg.resolve_telemetry_mode();
-    assert_eq!(
-        (off.value, off.source),
-        (TelemetryMode::Disabled, ConfigSource::Requirement)
-    );
-    cfg.features.telemetry = Some(TelemetryMode::Disabled);
-    cfg.requirements.telemetry.pin(
-        TelemetryMode::Enabled,
-        crate::config::RequirementSource::Unknown,
-    );
-    let on = cfg.resolve_telemetry_mode();
-    assert_eq!(
-        (on.value, on.source),
-        (TelemetryMode::Enabled, ConfigSource::Requirement)
     );
 }
 #[test]

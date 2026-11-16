@@ -383,8 +383,8 @@ async fn suppression_gates_and_reset_is_reason_scoped() {
         .await;
 }
 #[tokio::test(flavor = "current_thread")]
-async fn schema_rejection_suppresses_auto_compaction_on_later_turns() {
-    use crate::session::compaction_config::{SUPPRESS_NONE, SUPPRESS_STICKY, SUPPRESS_TURN};
+async fn schema_rejection_suppresses_auto_compaction_for_one_turn() {
+    use crate::session::compaction_config::{SUPPRESS_NONE, SUPPRESS_TURN};
     let local = tokio::task::LocalSet::new();
     local
         .run_until(async {
@@ -412,7 +412,7 @@ async fn schema_rejection_suppresses_auto_compaction_on_later_turns() {
                 .await;
             assert_eq!(
                 actor.compaction.auto_compact_suppressed.load(Relaxed),
-                SUPPRESS_STICKY
+                SUPPRESS_TURN
             );
             assert!(actor.check_auto_compact_needed().await.is_none());
             let _ = actor
@@ -420,8 +420,8 @@ async fn schema_rejection_suppresses_auto_compaction_on_later_turns() {
                 .auto_compact_suppressed
                 .compare_exchange(SUPPRESS_TURN, SUPPRESS_NONE, Relaxed, Relaxed);
             assert!(
-                actor.check_auto_compact_needed().await.is_none(),
-                "a schema rejection must keep auto-compaction off after the turn resets"
+                actor.check_auto_compact_needed().await.is_some(),
+                "the next turn sends a different request, so it may compact again"
             );
             actor.compaction.auto_compact_suppressed.store(SUPPRESS_NONE, Relaxed);
             actor
