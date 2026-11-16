@@ -2444,15 +2444,7 @@ pub(super) fn make_mcp_initialized_notif(session_id: &str) -> acp::ExtNotificati
             "mcpToolCount": 12_u64,
             "elapsedMs": 250_u64,
         });
-<<<<<<< fork
-    let raw = serde_json::value::to_raw_value(&payload).unwrap();
-    acp::ExtNotification::new("example.invalid/mcp_initialized", std::sync::Arc::from(raw))
-||||||| base
-    let raw = serde_json::value::to_raw_value(&payload).unwrap();
-    acp::ExtNotification::new("x.ai/mcp_initialized", std::sync::Arc::from(raw))
-=======
-    acp_fixtures::ext_notification("x.ai/mcp_initialized", &payload)
->>>>>>> upstream
+    acp_fixtures::ext_notification("example.invalid/mcp_initialized", &payload)
 }
 /// Helper: `init_progress` notification carrying an explicit sessionId.
 pub(super) fn make_mcp_init_progress_notif_for(

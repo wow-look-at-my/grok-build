@@ -1801,30 +1801,32 @@ fn set_json_member(
 mod tests {
     use super::*;
 
-    /// The `/settings` toggle on a dotfile-managed `~/.grok/pager.toml` must reach the dotfile, not replace the link.
+    /// The `/settings` toggle on a dotfile-managed `~/.grok/pager.json` must reach the dotfile, not replace the link.
     #[cfg(unix)]
     #[test]
-    #[serial_test::serial]
     fn persist_respect_manual_folds_writes_through_symlink() {
         let dir = tempfile::tempdir().unwrap();
-        let _home = xai_grok_env::EnvVarGuard::set("GROK_HOME", dir.path().to_str().unwrap());
-        let target = dir.path().join("dotfiles").join("pager.toml");
+        let target = dir.path().join("dotfiles").join("pager.json");
         std::fs::create_dir_all(target.parent().unwrap()).unwrap();
-        std::fs::write(&target, "[scrollback.scroll]\nanchor_on_fold = false\n").unwrap();
-        let link = dir.path().join("pager.toml");
+        std::fs::write(
+            &target,
+            r#"{"scrollback": {"scroll": {"anchor_on_fold": false}}}"#,
+        )
+        .unwrap();
+        let link = dir.path().join("pager.json");
         std::os::unix::fs::symlink(&target, &link).unwrap();
 
-        persist_respect_manual_folds_to(&link, true).unwrap();
+        persist_respect_manual_folds_in(dir.path(), true).unwrap();
 
         assert!(
             std::fs::symlink_metadata(&link)
                 .unwrap()
                 .file_type()
                 .is_symlink(),
-            "pager.toml must stay a symlink"
+            "pager.json must stay a symlink"
         );
-        let raw: RawAppearanceConfig =
-            toml::from_str(&std::fs::read_to_string(&target).unwrap()).unwrap();
+        let raw =
+            parse_appearance_config(&target, &std::fs::read_to_string(&target).unwrap()).unwrap();
         let cfg: AppearanceConfig = raw.into();
         assert!(cfg.scrollback.scroll.respect_manual_folds);
         assert!(!cfg.scrollback.scroll.anchor_on_fold, "siblings preserved");

@@ -50,50 +50,6 @@ pub struct MemorySettings {
     pub dream: Option<MemoryDreamSettings>,
 }
 
-<<<<<<< fork
-/// Raw top-level `[memory_v2]` enablement, rollout, kill-switch, and retention
-/// settings.
-#[derive(Debug, Clone, Default, PartialEq, Serialize, Deserialize, schemars::JsonSchema)]
-#[serde(default)]
-pub struct MemoryV2Settings {
-    /// Selects the memory-v2 implementation. Absent means on. False falls
-    /// through to legacy memory enablement.
-    pub enabled: Option<bool>,
-    /// Emit capture lifecycle notifications to the user interface. Intended
-    /// only for debugging; telemetry and tracing are always recorded.
-    pub capture_status_enabled: Option<bool>,
-    pub rollout: Option<MemoryV2Rollout>,
-    pub capture_enabled: Option<bool>,
-    pub automatic_dream_enabled: Option<bool>,
-    pub manual_dream_enabled: Option<bool>,
-    pub file_writes_enabled: Option<bool>,
-    pub archived_retention_days: Option<u64>,
-    pub job_retention_days: Option<u64>,
-}
-
-||||||| base
-/// Raw top-level `[memory_v2]` enablement, rollout, kill-switch, and retention
-/// settings.
-#[derive(Debug, Clone, Default, PartialEq, Serialize, Deserialize)]
-#[serde(default)]
-pub struct MemoryV2Settings {
-    /// Primary opt-in for the memory-v2 implementation. Absent or false falls
-    /// through to legacy memory enablement.
-    pub enabled: Option<bool>,
-    /// Emit capture lifecycle notifications to the user interface. Intended
-    /// only for debugging; telemetry and tracing are always recorded.
-    pub capture_status_enabled: Option<bool>,
-    pub rollout: Option<MemoryV2Rollout>,
-    pub capture_enabled: Option<bool>,
-    pub automatic_dream_enabled: Option<bool>,
-    pub manual_dream_enabled: Option<bool>,
-    pub file_writes_enabled: Option<bool>,
-    pub archived_retention_days: Option<u64>,
-    pub job_retention_days: Option<u64>,
-}
-
-=======
->>>>>>> upstream
 /// Concrete memory-v2 controls pinned when a session is spawned.
 #[derive(Debug, Clone, Copy, PartialEq, Eq, Deserialize)]
 #[serde(default)]

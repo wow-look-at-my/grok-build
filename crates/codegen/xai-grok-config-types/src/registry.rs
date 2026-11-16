@@ -65,16 +65,10 @@ pub struct FeatureSpec {
     pub default_enabled: bool,
     /// `None` where the key has no remote tier, so adding one is a deliberate edit.
     pub remote: Option<fn(&RemoteSettings) -> Option<bool>>,
-<<<<<<< fork
-    // No managed tier: `config` is the loader's merge, where a user's config.json already beats managed_config.toml
-||||||| base
-    // No managed tier: `config` is the loader's merge, where a user's config.toml already beats managed_config.toml
-=======
     /// The distribution capability the feature needs, where it reaches a service of its own. Every
     /// row names one or `None`, so a new service is a deliberate choice.
     pub capability: Option<Capability>,
-    // No managed tier: `config` is the loader's merge, where a user's config.toml already beats managed_config.toml
->>>>>>> upstream
+    // No managed tier: `config` is the loader's merge, where a user's config.json already beats managed_config.toml
 }
 
 /// What each tier had to say about one feature.

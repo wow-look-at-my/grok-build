@@ -137,4 +137,58 @@ impl SessionActor {
             },
         );
     }
+
+    /// Client for the turn-summary call. A pinned `turn_summary` harness slot wins.
+    /// Otherwise the configured model on its own endpoint and credentials, else the session config.
+    async fn turn_summary_sampling_client(
+        &self,
+        settings: &crate::util::config::TurnSummarySettings,
+    ) -> Result<
+        (
+            xai_grok_sampler::SamplingClient,
+            String,
+            Option<xai_grok_sampling_types::ReasoningEffort>,
+        ),
+        acp::Error,
+    > {
+        if let Some((client, cfg)) = self.resolve_slot_sampler("turn_summary").await {
+            return Ok((client, cfg.model.clone(), cfg.reasoning_effort));
+        }
+        self.refresh_token_if_expired().await;
+        let session_config = self.reconstruct_full_config().await;
+        // Resolve the helper's own endpoint and credentials; the session endpoint may not serve it.
+        let aux_config = if self.models_manager.model_in_catalog(&settings.model) {
+            self.resolve_aux_sampler_config(&settings.model).await
+        } else {
+            None
+        };
+        let mut config = match aux_config {
+            Some(mut cfg) => {
+                crate::agent::config::stamp_session_local_sampler_fields(
+                    &mut cfg,
+                    &session_config,
+                    self.client_identifier.clone(),
+                    session_config.max_retries,
+                );
+                cfg
+            }
+            None => session_config,
+        };
+        if self
+            .models_manager
+            .model_supports_reasoning_effort_value(&config.model, settings.reasoning_effort)
+        {
+            self.models_manager.apply_supported_effort(
+                &mut config,
+                Some(settings.reasoning_effort),
+                &self.session_info.id,
+                crate::sampling::EffortTarget::SummaryClient,
+            );
+        }
+        let model = config.model.clone();
+        let reasoning_effort = config.reasoning_effort;
+        let client =
+            xai_grok_sampler::SamplingClient::new(config).map_err(|e| self.to_acp_error(e))?;
+        Ok((client, model, reasoning_effort))
+    }
 }
