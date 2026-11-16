@@ -7,10 +7,10 @@ use super::*;
 #[derive(Debug, Clone, Copy, Default, PartialEq, Eq, PartialOrd, Ord, Serialize, Deserialize)]
 #[serde(rename_all = "snake_case")]
 pub enum ThinkingReplay {
-    /// Blobs ride as typed thinking where the table above allows it.
+    /// Blobs ride as typed thinking where the plan allows it.
     #[default]
     Native,
-    /// Every block rides as plain assistant text. No blob reaches the wire.
+    /// No blob the target did not mint reaches the wire. Words ride as plain assistant text.
     TextOnly,
     /// No thinking reaches the model at all.
     Scrubbed,
@@ -126,6 +126,7 @@ pub struct ThinkingReplayPlan {
     target: Option<String>,
     target_signs: bool,
     level: ThinkingReplay,
+    blob_family: Option<fn(&str) -> bool>,
 }
 
 impl ThinkingReplayPlan {
@@ -142,6 +143,34 @@ impl ThinkingReplayPlan {
             target,
             target_signs,
             level: req.thinking_replay,
+            blob_family: None,
+        }
+    }
+
+    /// Name the blob family of the target.
+    pub fn with_blob_family(mut self, in_family: fn(&str) -> bool) -> Self {
+        self.blob_family = Some(in_family);
+        self
+    }
+
+    /// Whether the family rule covers thinking from `origin`. An origin nobody
+    /// recorded counts as the family's own.
+    fn from_family(&self, origin: Option<&str>) -> bool {
+        self.blob_family
+            .is_some_and(|in_family| origin.is_none_or(in_family))
+    }
+
+    /// The disposition of an item that cannot go out as a typed block.
+    pub fn without_block(
+        &self,
+        items: &[ConversationItem],
+        idx: usize,
+        r: &rs::ReasoningItem,
+    ) -> ThinkingDisposition {
+        if has_text(r) && !self.from_family(reasoning_origin_model(items, idx)) {
+            ThinkingDisposition::Text
+        } else {
+            ThinkingDisposition::Drop
         }
     }
 
@@ -156,29 +185,27 @@ impl ThinkingReplayPlan {
         idx: usize,
         r: &rs::ReasoningItem,
     ) -> ThinkingDisposition {
-        let words = has_text(r);
-        let text_or_drop = || {
-            if words {
-                ThinkingDisposition::Text
-            } else {
-                ThinkingDisposition::Drop
-            }
-        };
+        let origin = reasoning_origin_model(items, idx);
+        let from_family = self.from_family(origin);
+        let own = matches!(
+            (origin, self.target.as_deref()),
+            (Some(origin), Some(target)) if same_model(origin, target)
+        );
         match self.level {
             ThinkingReplay::Scrubbed => return ThinkingDisposition::Drop,
-            ThinkingReplay::TextOnly => return text_or_drop(),
+            ThinkingReplay::TextOnly if from_family && own => return ThinkingDisposition::Native,
+            ThinkingReplay::TextOnly => return self.without_block(items, idx, r),
             ThinkingReplay::Native => {}
         }
-        let (Some(target), Some(origin)) =
-            (self.target.as_deref(), reasoning_origin_model(items, idx))
-        else {
-            return ThinkingDisposition::Native;
-        };
-        if same_model(origin, target) {
+        if own || origin.is_none() || self.target.is_none() {
             return ThinkingDisposition::Native;
         }
         if is_signed(r) {
-            return text_or_drop();
+            return if from_family {
+                ThinkingDisposition::Native
+            } else {
+                self.without_block(items, idx, r)
+            };
         }
         if self.target_signs {
             ThinkingDisposition::Drop
@@ -453,6 +480,108 @@ mod tests {
                 blob_only,
                 "{level:?} blob only"
             );
+        }
+    }
+
+    fn is_claude(model: &str) -> bool {
+        model.contains("claude")
+    }
+
+    /// The family rule, one row per case: (origin, item, level, want).
+    #[test]
+    fn a_blob_family_keeps_typed_blocks_and_never_sends_its_thinking_as_text() {
+        use ThinkingDisposition as D;
+        use ThinkingReplay::{Native, Scrubbed, TextOnly};
+        let opus = Some("claude-opus-5-5");
+        let fable = Some("claude-fable-5-2");
+        let cases = [
+            (
+                "another family model",
+                opus,
+                signed_with_words(),
+                Native,
+                D::Native,
+            ),
+            (
+                "another family model, blob only",
+                opus,
+                signed_only(),
+                Native,
+                D::Native,
+            ),
+            (
+                "the target itself",
+                fable,
+                signed_with_words(),
+                Native,
+                D::Native,
+            ),
+            (
+                "no recorded origin",
+                None,
+                signed_with_words(),
+                Native,
+                D::Native,
+            ),
+            (
+                "family words with no blob",
+                opus,
+                words_only(),
+                Native,
+                D::Drop,
+            ),
+            (
+                "outside the family",
+                Some("grok-4"),
+                signed_with_words(),
+                Native,
+                D::Text,
+            ),
+            (
+                "another family model, stepped down",
+                opus,
+                signed_with_words(),
+                TextOnly,
+                D::Drop,
+            ),
+            (
+                "the target itself, stepped down",
+                fable,
+                signed_with_words(),
+                TextOnly,
+                D::Native,
+            ),
+            (
+                "no recorded origin, stepped down",
+                None,
+                signed_with_words(),
+                TextOnly,
+                D::Drop,
+            ),
+            (
+                "outside the family, stepped down",
+                Some("grok-4"),
+                signed_with_words(),
+                TextOnly,
+                D::Text,
+            ),
+            (
+                "the target itself, scrubbed",
+                fable,
+                signed_with_words(),
+                Scrubbed,
+                D::Drop,
+            ),
+        ];
+        for (name, origin, item, level, want) in cases {
+            let mut req = ConversationRequest::from_items(turn(origin, item));
+            req.model = fable.map(str::to_owned);
+            req.thinking_replay = level;
+            let plan = ThinkingReplayPlan::new(&req, true).with_blob_family(is_claude);
+            let ConversationItem::Reasoning(r) = &req.items[1] else {
+                unreachable!()
+            };
+            assert_eq!(plan.disposition(&req.items, 1, r), want, "{name}");
         }
     }
 

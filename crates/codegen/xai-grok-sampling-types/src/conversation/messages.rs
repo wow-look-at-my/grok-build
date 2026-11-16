@@ -74,14 +74,21 @@ fn apply_cache_breakpoints(
     }
 }
 
+fn is_claude(model: &str) -> bool {
+    claude_version(model).is_some()
+}
+
 /// The replay plan for this request. A Claude id signs its thinking whatever
-/// the conversation shows, so that knowledge goes in beside the evidence.
+/// the conversation shows. A Claude also takes the typed block of any Claude:
+/// the API leaves a block the model cannot read out of that call, unbilled.
 fn replay_plan(req: &ConversationRequest) -> ThinkingReplayPlan {
-    let target_is_claude = req
-        .model
-        .as_deref()
-        .is_some_and(|m| claude_version(m).is_some());
-    ThinkingReplayPlan::new(req, target_is_claude)
+    let target_is_claude = req.model.as_deref().is_some_and(is_claude);
+    let plan = ThinkingReplayPlan::new(req, target_is_claude);
+    if target_is_claude {
+        plan.with_blob_family(is_claude)
+    } else {
+        plan
+    }
 }
 
 /// Whether the conversation ends mid-tool-loop on a turn whose thinking block
@@ -369,13 +376,8 @@ pub fn build_messages_request(req: &ConversationRequest) -> crate::messages::Mes
                     .unwrap_or_default();
                 let mut disposition = plan.disposition(&req.items, idx, r);
                 // Thinking off for this request means no typed block at all.
-                // The words still ride, as an ordinary assistant message.
                 if thinking_off && disposition == ThinkingDisposition::Native {
-                    disposition = if thinking.is_empty() {
-                        ThinkingDisposition::Drop
-                    } else {
-                        ThinkingDisposition::Text
-                    };
+                    disposition = plan.without_block(&req.items, idx, r);
                 }
                 match disposition {
                     ThinkingDisposition::Drop => {
@@ -417,7 +419,7 @@ pub fn build_messages_request(req: &ConversationRequest) -> crate::messages::Mes
             model = req.model.as_deref().unwrap_or_default(),
             thinking_off,
             level = plan.level().as_str(),
-            "thinking block(s) this model cannot take: the ones carrying text went as plain assistant messages, the rest went"
+            "thinking block(s) this request cannot carry typed: `converted` went as plain assistant text, `dropped` stayed out of this request"
         );
     }
 

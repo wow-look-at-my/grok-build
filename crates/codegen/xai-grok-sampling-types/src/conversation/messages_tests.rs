@@ -693,16 +693,137 @@ fn thinking_survives_a_snapshot_date_and_a_gateway_prefix() {
     }
 }
 
-/// A near-miss must not read as the same lineage: the shared prefix is not a
-/// snapshot date, so the signature is another model's.
+/// A switch between Claude models keeps the typed block, signature and all.
+/// The API reads it or leaves it out of the call. Reasoning written into an
+/// assistant text block is what a provider refuses as a content violation.
 #[test]
-fn thinking_from_a_sibling_model_is_left_off_the_wire() {
-    let req = ConversationRequest::from_items(switched_model_conversation(Some("claude-opus-5")))
-        .with_model("claude-opus-5-mini");
-    assert!(
-        thinking_blocks(&req).is_empty(),
-        "claude-opus-5-mini is not claude-opus-5",
+fn a_switch_between_claude_models_keeps_the_typed_block() {
+    for (origin, target) in [
+        ("claude-opus-5-5", "claude-fable-5-2"),
+        ("claude-fable-5-2", "claude-opus-5-5"),
+        ("anthropic/claude-opus-5-5", "claude-fable-5-2"),
+        ("claude-opus-5", "claude-opus-5-mini"),
+    ] {
+        let req = ConversationRequest::from_items(switched_model_conversation(Some(origin)))
+            .with_model(target);
+        assert_eq!(
+            thinking_blocks(&req),
+            vec![(
+                "weighing the options".to_string(),
+                "sig-from-the-first-model".to_string()
+            )],
+            "{origin} -> {target} must replay the block as it was minted",
+        );
+        let text = request_text(&req);
+        assert!(
+            !text.contains("<thinking>") && !text.contains("weighing the options"),
+            "{origin} -> {target} must not show the reasoning as text: {text}",
+        );
+    }
+}
+
+/// A round trip, opus to fable and back: each request carries every block of
+/// both models, in place and unchanged.
+#[test]
+fn a_round_trip_between_claude_models_replays_every_block() {
+    let turn = |q: &str, thought: &str, sig: &str, model: &str| {
+        vec![
+            ConversationItem::user(q),
+            reasoning_sibling("", thought, Some(sig)),
+            ConversationItem::assistant_with_model("ok", model),
+        ]
+    };
+    let mut items = turn("q1", "opus first", "sig-opus-1", "claude-opus-5-5");
+    items.extend(turn("q2", "fable middle", "sig-fable", "claude-fable-5-2"));
+    items.extend(turn("q3", "opus last", "sig-opus-2", "claude-opus-5-5"));
+    items.push(ConversationItem::user("q4"));
+
+    let want: Vec<(String, String)> = [
+        ("opus first", "sig-opus-1"),
+        ("fable middle", "sig-fable"),
+        ("opus last", "sig-opus-2"),
+    ]
+    .iter()
+    .map(|(t, s)| (t.to_string(), s.to_string()))
+    .collect();
+    for target in ["claude-opus-5-5", "claude-fable-5-2"] {
+        let req = ConversationRequest::from_items(items.clone()).with_model(target);
+        assert_eq!(thinking_blocks(&req), want, "target {target}");
+        assert!(
+            !request_text(&req).contains("<thinking>"),
+            "target {target}"
+        );
+    }
+}
+
+/// A Claude switched in mid-tool-loop keeps thinking on. The block of the
+/// turn it continues is still in the request.
+#[test]
+fn a_tool_loop_switched_between_claude_models_keeps_thinking_on() {
+    let mut req = ConversationRequest::from_items(vec![
+        ConversationItem::user("q1"),
+        reasoning_sibling("r1", "planning the call", Some("sig-from-opus")),
+        ConversationItem::Assistant(AssistantItem {
+            content: String::new().into(),
+            tool_calls: vec![ToolCall {
+                id: "call_1".into(),
+                name: "read_file".to_string(),
+                arguments: r#"{"path":"src/main.rs"}"#.into(),
+                vendor: Default::default(),
+            }],
+            model_id: Some("claude-opus-5-5".into()),
+            model_fingerprint: None,
+            reasoning_effort: None,
+        }),
+        ConversationItem::tool_result("call_1", "fn main() {}"),
+    ])
+    .with_model("claude-fable-5-2");
+    req.reasoning_effort = Some(crate::ReasoningEffort::High);
+
+    assert!(build_messages_request(&req).thinking.is_some());
+    assert_eq!(
+        thinking_blocks(&req),
+        vec![("planning the call".to_string(), "sig-from-opus".to_string())]
     );
+}
+
+/// The sampler's recovery after a signature rejection, on a conversation of
+/// Claude models. No step writes a Claude's reasoning as text. The first
+/// step keeps the target's own blocks. The last step sends none.
+#[test]
+fn a_rejected_signature_never_turns_claude_thinking_into_text() {
+    let mut req = ConversationRequest::from_items(vec![
+        ConversationItem::user("q1"),
+        reasoning_sibling("", "opus thought", Some("sig-opus")),
+        ConversationItem::assistant_with_model("a1", "claude-opus-5-5"),
+        ConversationItem::user("q2"),
+        reasoning_sibling("", "fable thought", Some("sig-fable")),
+        ConversationItem::assistant_with_model("a2", "claude-fable-5-2"),
+        ConversationItem::user("q3"),
+    ])
+    .with_model("claude-fable-5-2");
+    assert_eq!(thinking_blocks(&req).len(), 2);
+
+    assert!(req.degrade_thinking_replay());
+    assert_eq!(
+        thinking_blocks(&req),
+        vec![("fable thought".to_string(), "sig-fable".to_string())],
+        "the target keeps its own blocks"
+    );
+    let text = request_text(&req);
+    assert!(
+        !text.contains("<thinking>") && !text.contains("opus thought"),
+        "{text}"
+    );
+
+    assert!(req.degrade_thinking_replay());
+    assert!(thinking_blocks(&req).is_empty());
+    let text = request_text(&req);
+    assert!(
+        !text.contains("<thinking>") && !text.contains("thought"),
+        "{text}"
+    );
+    assert!(!req.degrade_thinking_replay(), "the ladder ends");
 }
 
 /// History that never recorded which model produced a turn (`model_id`
@@ -720,9 +841,10 @@ fn thinking_without_a_recorded_origin_is_replayed() {
 /// more step and nothing of it reaches the wire.
 #[test]
 fn a_rejected_signature_steps_the_replay_level_down() {
-    let mut req =
-        ConversationRequest::from_items(switched_model_conversation(Some("claude-opus-5")))
-            .with_model("claude-opus-5");
+    let mut req = ConversationRequest::from_items(switched_model_conversation(Some(
+        "messages-compatible-model",
+    )))
+    .with_model("messages-compatible-model");
     assert_eq!(
         thinking_blocks(&req).len(),
         1,
