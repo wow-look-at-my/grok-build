@@ -50,18 +50,10 @@ fn utc_ms_to_local(ms: i64) -> DateTime<Local> {
 pub enum WaitingReason {
     /// Waiting for the model to (re)start streaming.
     Model,
-<<<<<<< fork
     /// The model request waits for a slot under the agent's request cap.
     Queued(RequestQueued),
-    /// Blocked on a running foreground subagent (`task` / `spawn_subagent`). The view fills it in; the tracker always
-    /// leaves it `None`.
-||||||| base
-    /// Blocked on a running foreground subagent (`task` / `spawn_subagent`). The view fills it in; the tracker always
-    /// leaves it `None`.
-=======
     /// Blocked on a running foreground subagent (`task` / `spawn_subagent`).
     /// Only the view sets `display`, to `Waiting for subagent` or `Waiting for N subagents`.
->>>>>>> upstream
     Subagent { display: Option<String> },
     /// Blocked polling/awaiting a background task's output (`get_command_or_subagent_output` / `get_task_output`). The
     /// tracker itself always leaves it `None`.

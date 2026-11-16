@@ -61,7 +61,7 @@ pub use global_hook_sources::{
     unique_ancestors_rootward,
 };
 
-pub use claude_import::{ClaudeImport, is_claude_import_marked, user_config_file};
+pub use claude_import::{ClaudeImport, is_claude_import_marked};
 pub use config_layers::{
     CampaignsState, ConfigLayers, campaigns_application_disabled, campaigns_state_path,
     load_dismissed_ids, load_dismissed_ids_from_home, load_effective_config_disk_only,
