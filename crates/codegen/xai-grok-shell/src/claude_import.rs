@@ -59,6 +59,7 @@ pub fn mark_claude_imported() -> anyhow::Result<()> {
     refresh_marker_cache(true);
     Ok(())
 }
+
 pub fn scan_importable_settings(cwd: &Path) -> ImportPlan {
     let paths = find_claude_settings_paths(cwd);
     let mcp_json_files = crate::util::config::find_mcp_json_files(cwd);

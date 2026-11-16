@@ -78,26 +78,6 @@ pub struct PrivacyConfig {
     pub privacy_banner_acked: Option<String>,
 }
 
-<<<<<<< fork
-pub(crate) fn get_mcp_server_config(name: &str) -> Option<McpServerConfig> {
-    let root: TomlValue = crate::config::load_effective_config().ok()?;
-    let configs = parse_mcp_servers_from_toml(&root);
-    configs.get(name).cloned()
-}
-
-/// Get MCP server config by name, checking project-scoped configs first. Walks from cwd up to the git repo root checking `.grok/config.json` at each level.
-/// Project-scoped `.grok/config.json` entries override global `~/.grok/config.json` entries entirely (no deep merge of individual fields). Closer directories (cwd) take priority over further ones (repo root).
-||||||| base
-pub(crate) fn get_mcp_server_config(name: &str) -> Option<McpServerConfig> {
-    let root: TomlValue = crate::config::load_effective_config().ok()?;
-    let configs = parse_mcp_servers_from_toml(&root);
-    configs.get(name).cloned()
-}
-
-/// Get MCP server config by name, checking project-scoped configs first. Walks from cwd up to the git repo root checking `.grok/config.toml` at each level.
-/// Project-scoped `.grok/config.toml` entries override global `~/.grok/config.toml` entries entirely (no deep merge of individual fields). Closer directories (cwd) take priority over further ones (repo root).
-=======
->>>>>>> upstream
 pub(crate) fn get_mcp_server_config_with_project(
     name: &str,
     cwd: &std::path::Path,
