@@ -280,7 +280,7 @@ async fn try_load_daemon_owned_state(
     path: &std::path::Path,
 ) -> Option<PermissionState> {
     let (home, file) = (grok_home.to_path_buf(), path.to_path_buf());
-    let read = tokio::task::spawn_blocking(move || {
+    let read = xai_spawn::spawn_blocking(move || {
         let text = hold_daemon_dir(&home, &file, false)?.read(
             file.file_name().unwrap_or_default(),
             MAX_DAEMON_STATE_FILE_BYTES,

@@ -2407,9 +2407,8 @@ impl AgentView {
         } else {
             self.published_mode_label()
         };
-<<<<<<< fork
         let mut flags: Vec<PromptFlag> =
-            mode_flags(plan_label, self.session.permission_label(), &theme);
+            mode_flags(mode_label, self.session.permission_label(), &theme);
         // Shift+Tab agent-identity ring stop (Orchestrator/Explore): the
         // mode-switch banner only shows for a few seconds. The flag row is
         // what persists to remind the user they're off the base agent.
@@ -2428,13 +2427,6 @@ impl AgentView {
                 });
             }
         }
-||||||| base
-        let flags: Vec<PromptFlag> =
-            mode_flags(plan_label, self.session.permission_label(), &theme);
-=======
-        let flags: Vec<PromptFlag> =
-            mode_flags(mode_label, self.session.permission_label(), &theme);
->>>>>>> upstream
         let multiline = self.multiline_mode;
         let warning = self.credit_balance.as_ref().and_then(|bal| {
             crate::views::credit_bar::usage_warning_for_session(

@@ -3,14 +3,9 @@
 # Regenerate TypeScript announcement ACP types from their ts-rs derives.
 #
 # The Rust structs (RemoteAnnouncement, AnnouncementCta, AnnouncementsRefreshed)
-<<<<<<< fork
 # are the single source of truth for the `example.invalid/announcements/update` payload.
-||||||| base
-# are the single source of truth for the `x.ai/announcements/update` payload.
-=======
-# are the single source of truth for the `x.ai/announcements/update` payload.
 # The first two live in xai-grok-config; this crate re-exports and exports them.
->>>>>>> upstream
+
 # Pipeline:
 #   1. cargo test --features ts → ts-rs writes every binding to a temp dir
 #      (TS_RS_EXPORT_DIR; the `ts` feature stays off for normal/Bazel builds)

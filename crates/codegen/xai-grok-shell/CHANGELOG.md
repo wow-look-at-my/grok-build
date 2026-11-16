@@ -1,6 +1,5 @@
 # Changelog
 
-<<<<<<< fork
 # Unreleased
 
 ## Features
