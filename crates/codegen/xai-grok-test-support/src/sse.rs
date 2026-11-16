@@ -75,7 +75,6 @@ pub fn messages_api_events(text: &str, model: &str, stop_reason: &str) -> Vec<Ev
     scripted_to_axum(messages_api_script(text, model, stop_reason))
 }
 
-<<<<<<< fork
 /// Like [`messages_api_events`] but the terminal `message_delta` also prices
 /// the call, the way a gateway speaking this protocol does (Anthropic itself
 /// sends no price).
@@ -93,14 +92,8 @@ pub fn messages_api_events_with_cost(
     ))
 }
 
-/// [`messages_api_events`] as [`SseEvent`]s for a [`crate::ScriptedResponse`].
-||||||| base
-/// [`messages_api_events`] as [`SseEvent`]s for a [`crate::ScriptedResponse`].
-=======
->>>>>>> upstream
 pub fn messages_api_script(text: &str, model: &str, stop_reason: &str) -> Vec<SseEvent> {
-<<<<<<< fork
-    messages_api_script_with_cost(text, model, stop_reason, None)
+    messages_api_script_chunks(&[text], model, stop_reason, None)
 }
 
 /// [`messages_api_events_with_cost`] as [`SseEvent`]s.
@@ -110,15 +103,7 @@ pub fn messages_api_script_with_cost(
     stop_reason: &str,
     cost_usd_ticks: Option<i64>,
 ) -> Vec<SseEvent> {
-    let mut delta_usage = json!({"output_tokens":5,"input_tokens":10});
-    if let (Some(ticks), Some(usage)) = (cost_usd_ticks, delta_usage.as_object_mut()) {
-        usage.insert("cost_in_usd_ticks".to_string(), json!(ticks));
-    }
-    vec![
-||||||| base
-    vec![
-=======
-    messages_api_script_chunks(&[text], model, stop_reason, None)
+    messages_api_script_chunks_with_cost(&[text], model, stop_reason, None, cost_usd_ticks)
 }
 
 pub fn messages_api_script_chunks<S: AsRef<str>>(
@@ -127,8 +112,21 @@ pub fn messages_api_script_chunks<S: AsRef<str>>(
     stop_reason: &str,
     usage: Option<&UsageReport>,
 ) -> Vec<SseEvent> {
+    messages_api_script_chunks_with_cost(chunks, model, stop_reason, usage, None)
+}
+
+fn messages_api_script_chunks_with_cost<S: AsRef<str>>(
+    chunks: &[S],
+    model: &str,
+    stop_reason: &str,
+    usage: Option<&UsageReport>,
+    cost_usd_ticks: Option<i64>,
+) -> Vec<SseEvent> {
+    let mut delta_usage = messages_delta_usage(usage);
+    if let (Some(ticks), Some(fields)) = (cost_usd_ticks, delta_usage.as_object_mut()) {
+        fields.insert("cost_in_usd_ticks".to_string(), json!(ticks));
+    }
     let mut events = vec![
->>>>>>> upstream
         SseEvent::data(
             json!({
                 "type": "message_start",
@@ -144,29 +142,11 @@ pub fn messages_api_script_chunks<S: AsRef<str>>(
             json!({"type":"content_block_start","index":0,"content_block":{"type":"text","text":""}})
                 .to_string(),
         ),
-<<<<<<< fork
-        SseEvent::data(
-            json!({"type":"content_block_delta","index":0,"delta":{"type":"text_delta","text":text}})
-                .to_string(),
-        ),
-        SseEvent::data(json!({"type":"content_block_stop","index":0}).to_string()),
-        SseEvent::data(
-            json!({"type":"message_delta","delta":{"stop_reason":stop_reason},"usage":delta_usage})
-||||||| base
-        SseEvent::data(
-            json!({"type":"content_block_delta","index":0,"delta":{"type":"text_delta","text":text}})
-                .to_string(),
-        ),
-        SseEvent::data(json!({"type":"content_block_stop","index":0}).to_string()),
-        SseEvent::data(
-            json!({"type":"message_delta","delta":{"stop_reason":stop_reason},"usage":{"output_tokens":5,"input_tokens":10}})
-=======
     ];
 
     for chunk in chunks {
         events.push(SseEvent::data(
             json!({"type":"content_block_delta","index":0,"delta":{"type":"text_delta","text":chunk.as_ref()}})
->>>>>>> upstream
                 .to_string(),
         ));
     }
@@ -175,7 +155,7 @@ pub fn messages_api_script_chunks<S: AsRef<str>>(
         json!({"type":"content_block_stop","index":0}).to_string(),
     ));
     events.push(SseEvent::data(
-        json!({"type":"message_delta","delta":{"stop_reason":stop_reason},"usage": messages_delta_usage(usage)})
+        json!({"type":"message_delta","delta":{"stop_reason":stop_reason},"usage": delta_usage})
             .to_string(),
     ));
     events.push(SseEvent::data(json!({"type":"message_stop"}).to_string()));

@@ -1739,7 +1739,6 @@ async fn load_effort_precedence_prefers_meta_hint_over_persisted() {
         Some(ReasoningEffort::Low),
     );
 }
-<<<<<<< fork
 /// The real restore path never lands an effort-capable session on no effort.
 /// Only an explicit `none` turns reasoning off.
 #[tokio::test]

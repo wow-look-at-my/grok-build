@@ -2206,15 +2206,7 @@ pub(super) fn make_models_update_notif(
         acp_fixtures::model_id(current_model_id),
         models,
     );
-<<<<<<< fork
-    let raw = serde_json::value::to_raw_value(&state).unwrap();
-    acp::ExtNotification::new("example.invalid/models/update", std::sync::Arc::from(raw))
-||||||| base
-    let raw = serde_json::value::to_raw_value(&state).unwrap();
-    acp::ExtNotification::new("x.ai/models/update", std::sync::Arc::from(raw))
-=======
-    acp_fixtures::ext_notification("x.ai/models/update", &state)
->>>>>>> upstream
+    acp_fixtures::ext_notification("example.invalid/models/update", &state)
 }
 /// `example.invalid/models/update` carrying a single reasoning-capable model whose catalog-default effort is `default_effort`.
 /// The broadcast reports that catalog default for every client, never the per-session selection.
@@ -2234,14 +2226,7 @@ pub(super) fn make_reasoning_models_update_notif(
         acp_fixtures::model_id(current_model_id),
         vec![info],
     );
-<<<<<<< fork
-    let raw = serde_json::value::to_raw_value(&state).unwrap();
-    acp::ExtNotification::new("example.invalid/models/update", std::sync::Arc::from(raw))
-||||||| base
-    let raw = serde_json::value::to_raw_value(&state).unwrap();
-    acp::ExtNotification::new("x.ai/models/update", std::sync::Arc::from(raw))
-=======
-    acp_fixtures::ext_notification("x.ai/models/update", &state)
+    acp_fixtures::ext_notification("example.invalid/models/update", &state)
 }
 /// Adds model `id` with `default` as `totalContextTokens` and `windows` as `contextWindows`.
 pub(super) fn seed_windowed_model(
@@ -2259,7 +2244,6 @@ pub(super) fn seed_windowed_model(
             }),
     );
     agent.session.models.available.insert(acp_fixtures::model_id(id), info);
->>>>>>> upstream
 }
 /// Seed a session's model catalog with the given ids and mark `current_model_id` as the active one (must be in the list).
 /// Used by the `ModelChanged` broadcast tests to set up a starting state that the simulated remote/local switch then transitions away from.
@@ -2328,33 +2312,13 @@ pub(super) fn make_mcp_init_progress_notif(
     total: u32,
     connected: u32,
 ) -> acp::ExtNotification {
-<<<<<<< fork
-    let raw = serde_json::value::to_raw_value(
-            &serde_json::json!({
-            "total": total,
-            "connected": connected,
-        }),
-        )
-        .unwrap();
-    acp::ExtNotification::new("example.invalid/mcp/init_progress", std::sync::Arc::from(raw))
-||||||| base
-    let raw = serde_json::value::to_raw_value(
-            &serde_json::json!({
-            "total": total,
-            "connected": connected,
-        }),
-        )
-        .unwrap();
-    acp::ExtNotification::new("x.ai/mcp/init_progress", std::sync::Arc::from(raw))
-=======
     acp_fixtures::ext_notification(
-        "x.ai/mcp/init_progress",
+        "example.invalid/mcp/init_progress",
         &serde_json::json!({
                 "total": total,
                 "connected": connected,
             }),
     )
->>>>>>> upstream
 }
 pub(super) fn make_mcps_modal_with_servers(
     servers: Vec<crate::views::mcps_modal::McpServerInfo>,
@@ -2452,69 +2416,25 @@ pub(super) fn make_mcp_init_progress_notif_for(
     connected: u32,
     session_id: &str,
 ) -> acp::ExtNotification {
-<<<<<<< fork
-    let raw = serde_json::value::to_raw_value(
-            &serde_json::json!({
-            "total": total,
-            "connected": connected,
-            "sessionId": session_id,
-        }),
-        )
-        .unwrap();
-    acp::ExtNotification::new("example.invalid/mcp/init_progress", std::sync::Arc::from(raw))
-||||||| base
-    let raw = serde_json::value::to_raw_value(
-            &serde_json::json!({
-            "total": total,
-            "connected": connected,
-            "sessionId": session_id,
-        }),
-        )
-        .unwrap();
-    acp::ExtNotification::new("x.ai/mcp/init_progress", std::sync::Arc::from(raw))
-=======
     acp_fixtures::ext_notification(
-        "x.ai/mcp/init_progress",
+        "example.invalid/mcp/init_progress",
         &serde_json::json!({
                 "total": total,
                 "connected": connected,
                 "sessionId": session_id,
             }),
     )
->>>>>>> upstream
 }
 /// Helper: `mcp_initialized` notification for a specific sessionId.
 pub(super) fn make_mcp_initialized_notif_for(session_id: &str) -> acp::ExtNotification {
-<<<<<<< fork
-    let raw = serde_json::value::to_raw_value(
-            &serde_json::json!({
-            "sessionId": session_id,
-            "mcpToolCount": 0,
-            "elapsedMs": 0,
-        }),
-        )
-        .unwrap();
-    acp::ExtNotification::new("example.invalid/mcp_initialized", std::sync::Arc::from(raw))
-||||||| base
-    let raw = serde_json::value::to_raw_value(
-            &serde_json::json!({
-            "sessionId": session_id,
-            "mcpToolCount": 0,
-            "elapsedMs": 0,
-        }),
-        )
-        .unwrap();
-    acp::ExtNotification::new("x.ai/mcp_initialized", std::sync::Arc::from(raw))
-=======
     acp_fixtures::ext_notification(
-        "x.ai/mcp_initialized",
+        "example.invalid/mcp_initialized",
         &serde_json::json!({
                 "sessionId": session_id,
                 "mcpToolCount": 0,
                 "elapsedMs": 0,
             }),
     )
->>>>>>> upstream
 }
 mod permissions;
 mod session_events;

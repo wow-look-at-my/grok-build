@@ -13,15 +13,9 @@ strum = { workspace = true }
 toml = { workspace = true }
 tracing = { workspace = true }
 xai-grok-config = { workspace = true }
-<<<<<<< fork
-xai-grok-mcp = { workspace = true }
+xai-grok-sandbox = { path = "../xai-grok-sandbox", default-features = false }
 # Wire-alias folding (`Aliases`) for config types a peer's bytes feed.
 xai-tool-types = { workspace = true }
-||||||| base
-xai-grok-mcp = { workspace = true }
-=======
-xai-grok-sandbox = { path = "../xai-grok-sandbox", default-features = false }
->>>>>>> upstream
 
 [features]
 default-bazel = []
