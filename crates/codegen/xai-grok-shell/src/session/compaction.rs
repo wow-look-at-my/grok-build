@@ -786,7 +786,7 @@ impl SessionActor {
             reason: "Requested with /compact".to_string(),
         })
         .await;
-        let result = self.run_compact().await;
+        let result = self.run_compact(pending.instructions).await;
         if let Err(e) = &result {
             // The client is mid-turn, so it is not in the command state that renders this request's own reply.
             tracing::error!(error = %e, "mid-turn /compact failed");
@@ -1083,6 +1083,7 @@ impl SessionActor {
     )]
     async fn run_compact_inner(
         &self,
+        user_context: Option<String>,
         auto_continue: Option<crate::extensions::notification::AutoContinueInfo>,
         trigger: xai_grok_telemetry::events::CompactionTrigger,
         lossy_input: bool,
