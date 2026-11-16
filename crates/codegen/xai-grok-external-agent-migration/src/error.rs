@@ -37,13 +37,6 @@ pub enum MigrationError {
     },
 
     #[error("failed to serialize {path}: {source}")]
-    TomlSerialize {
-        path: PathBuf,
-        #[source]
-        source: toml::ser::Error,
-    },
-
-    #[error("failed to serialize {path}: {source}")]
     JsonSerialize {
         path: PathBuf,
         #[source]

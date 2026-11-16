@@ -14,12 +14,12 @@ impl ImportPlan {
 
         let mut out = String::from("Found Claude settings to import:\n");
         if !self.global_items.is_empty() {
-            out.push_str("\nGlobal (~/.grok/config.toml):\n");
+            out.push_str("\nGlobal (~/.grok/config.json):\n");
             out.push_str(&format_item_summary(&self.global_items));
         }
         if !self.project_items.is_empty() {
             out.push_str(&format!(
-                "\nProject ({}/.grok/config.toml):\n",
+                "\nProject ({}/.grok/config.json):\n",
                 find_project_root(cwd).display()
             ));
             out.push_str(&format_item_summary(&self.project_items));

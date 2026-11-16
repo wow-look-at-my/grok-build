@@ -51,8 +51,12 @@ fn fetch_settings_blocking_with_attempts(
         if attempt > 0 {
             std::thread::sleep(xai_grok_http::SETTINGS_RETRY_BACKOFF_STEP * attempt);
         }
-        let request =
-            add_cli_chat_proxy_headers_blocking(client.get(&url), auth, alpha_test_key, &url);
+        let request = add_cli_chat_proxy_headers_blocking(
+            client.get(&url, auth.wire_auth()),
+            auth,
+            alpha_test_key,
+            &url,
+        );
         if let ControlFlow::Break(outcome) = classify_settings_response(request.send(), attempt) {
             return outcome;
         }
@@ -61,13 +65,12 @@ fn fetch_settings_blocking_with_attempts(
     SettingsFetch::Retry
 }
 fn add_cli_chat_proxy_headers_blocking(
-    builder: request::blocking::RequestBuilder,
+    builder: xai_grok_net::BlockingRequest,
     auth: &GrokAuth,
     alpha_test_key: Option<&str>,
     url: &str,
-) -> request::blocking::RequestBuilder {
+) -> xai_grok_net::BlockingRequest {
     let mut builder = builder
-        .header("Authorization", format!("Bearer {}", &auth.key))
         .header("X-XAI-Token-Auth", GrokComConfig::default().token_header)
         .header("x-userid", &auth.user_id)
         .header("x-grok-client-version", xai_grok_version::version());
@@ -87,7 +90,7 @@ fn add_cli_chat_proxy_headers_blocking(
 }
 /// Returns the final outcome of one `/settings` attempt, or `Continue` when another attempt may succeed.
 fn classify_settings_response(
-    response: request::Result<request::blocking::Response>,
+    response: Result<xai_grok_net::blocking_types::Response, xai_grok_net::Error>,
     attempt: u32,
 ) -> ControlFlow<SettingsFetch> {
     match response {
@@ -109,7 +112,7 @@ fn classify_settings_response(
             );
             ControlFlow::Continue(())
         }
-        Ok(resp) if resp.status() == request::StatusCode::UNAUTHORIZED => {
+        Ok(resp) if resp.status() == xai_grok_net::StatusCode::UNAUTHORIZED => {
             tracing::warn!(
                 status = resp.status().as_u16(),
                 "Settings fetch rejected (401)"

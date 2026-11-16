@@ -51,30 +51,34 @@ pub mod version_overrides;
 // Only the campaign items other crates need are re-exported at the root
 // The rest stays reachable via the `pub mod` paths, keeping the root API narrow
 pub use campaigns::{
-    filter_active_campaigns, ids_touching_paths, CampaignEntry, CampaignOverrides,
+    CampaignEntry, CampaignOverrides, filter_active_campaigns, ids_touching_paths,
 };
 pub use global_hook_sources::{
-    ensure_grok_hook_slots, existing_ancestor_chain, is_direct_hook_json_name,
-    list_direct_hook_json_files, missing_configured_sources, path_has_symlink_component,
-    resolve_global_hook_sources, resolve_trust_boundary_sources, unique_ancestors_rootward,
     GlobalHookSource, GlobalHookSourceError, GlobalHookSourceKind, ResolvedGlobalHookSources,
-    TRUST_BOUNDARY_FILENAMES,
+    TRUST_BOUNDARY_FILENAMES, ensure_grok_hook_slots, existing_ancestor_chain,
+    is_direct_hook_json_name, list_direct_hook_json_files, missing_configured_sources,
+    path_has_symlink_component, resolve_global_hook_sources, resolve_trust_boundary_sources,
+    unique_ancestors_rootward,
 };
 
-pub use claude_import::{is_claude_import_marked, user_config_file, ClaudeImport};
+pub use claude_import::{ClaudeImport, is_claude_import_marked, user_config_file};
 pub use config_layers::{
-    campaigns_application_disabled, campaigns_state_path, load_dismissed_ids,
-    load_dismissed_ids_from_home, load_effective_config_disk_only, CampaignsState, ConfigLayers,
+    CampaignsState, ConfigLayers, campaigns_application_disabled, campaigns_state_path,
+    load_dismissed_ids, load_dismissed_ids_from_home, load_effective_config_disk_only,
 };
 pub use display_refresh::DisplayRefreshSettings;
 pub use distribution::{Capability, Distribution};
-pub use endpoints::{EndpointsConfig, CLI_CHAT_PROXY_BASE_URL_DEFAULT};
+pub use endpoints::{
+    CLI_CHAT_PROXY_BASE_URL_DEFAULT, EndpointsConfig, EndpointsConfigError,
+    REMOVED_DIRECT_UPLOAD_ENV_VARS, REMOVED_DIRECT_UPLOAD_KEYS, removed_direct_upload_env_error,
+    removed_direct_upload_message,
+};
 pub use env_overlay::{
-    resolved_env_overlay, OverlaySource, ResolvedOverlay, GROK_CONFIG_ENV, GROK_CONFIG_PATH_ENV,
+    GROK_CONFIG_ENV, GROK_CONFIG_PATH_ENV, OverlaySource, ResolvedOverlay, resolved_env_overlay,
 };
 pub use format::{
-    edit_config_tree, ensure_schema_file, parse_config_for_edit, read_config_tree, render_config,
-    tree_to_config_json_string, CONFIG_SCHEMA_JSON, SCHEMA_FILENAME,
+    CONFIG_SCHEMA_JSON, SCHEMA_FILENAME, edit_config_tree, ensure_schema_file,
+    parse_config_for_edit, read_config_tree, render_config, tree_to_config_json_string,
 };
 
 #[cfg(unix)]
@@ -87,32 +91,32 @@ pub use config_requirements::{
     UploadTelemetryPins,
 };
 pub use loader::{
+    CONFIG_STEM, HookConfigLayer, HookProvenance, LEGACY_CONFIG_FILENAMES, MANAGED_CONFIG_FILENAME,
+    ManagedConfigLayer, PAGER_CONFIG_FILENAME, REQUIREMENTS_FILENAME, SANDBOX_CONFIG_FILENAME,
+    SYSTEM_MANAGED_CONFIG_STEM, SYSTEM_REQUIREMENTS_STEM, TRUSTED_FOLDERS_FILENAME,
+    TRUSTED_HOOK_PROJECTS_FILENAME, TRUSTED_PLUGINS_FILENAME, USER_CONFIG_FILENAME,
     apply_version_overrides_with_registered, deep_merge_toml, expand_env_vars_in_string,
     expand_env_vars_in_toml, hook_config_layers, hook_config_layers_at, load_config_file,
     load_from_disk, load_managed_config, load_system_managed_config, load_toml_file,
     managed_config_layers, managed_config_layers_at, prepare_user_config_dir, project_config_file,
     project_config_file_for_write, system_config_file, toml_error_detail, user_config_file,
-    HookConfigLayer, HookProvenance, ManagedConfigLayer, CONFIG_STEM, LEGACY_CONFIG_FILENAMES,
-    MANAGED_CONFIG_FILENAME, PAGER_CONFIG_FILENAME, REQUIREMENTS_FILENAME, SANDBOX_CONFIG_FILENAME,
-    SYSTEM_MANAGED_CONFIG_STEM, SYSTEM_REQUIREMENTS_STEM, TRUSTED_FOLDERS_FILENAME,
-    TRUSTED_HOOK_PROJECTS_FILENAME, TRUSTED_PLUGINS_FILENAME, USER_CONFIG_FILENAME,
 };
 pub use macos_managed::MDM_REQUIREMENTS_SOURCE;
 pub use managed_cache::{
+    MANAGED_CONFIG_CACHE_FILE, ManagedPolicyCompromise, ServingIdentity, SyncMarker,
     bump_rollback_floor, bump_rollback_floor_with_now, confirmed_team_switch,
     confirmed_team_switch_at, fail_closed_policy_armed_at, is_managed_config_hard_stale_for,
     is_managed_config_stale_for, managed_config_identity_changed_at, managed_config_synced_at,
     managed_policy_compromised_for, mark_managed_config_synced, mark_managed_config_synced_at,
-    normalize_identity, ManagedPolicyCompromise, ServingIdentity, SyncMarker,
-    MANAGED_CONFIG_CACHE_FILE,
+    normalize_identity,
 };
 pub use managed_policy_trust::ManagedPolicyTrust;
 pub use mcp_bearer_token_file::{BearerTokenPath, BearerTokenPathError};
 pub use mcp_server_config::{
-    McpConfig, McpJsonOAuthBlock, McpOAuthConfig, McpOAuthConfigMap, McpPreferenceSource,
-    McpPreferencesFile, McpServerConfig, McpServerConfigProblem, McpServerPreferences,
-    McpServerProblemSeverity, McpServerTransportConfig, McpSetupConfig, McpSetupDerivedValue,
-    McpSetupField, McpSetupFieldType, McpSetupOption, McpSetupResolution, KNOWN_MCP_SERVER_FIELDS,
+    KNOWN_MCP_SERVER_FIELDS, McpConfig, McpJsonOAuthBlock, McpOAuthConfig, McpOAuthConfigMap,
+    McpPreferenceSource, McpPreferencesFile, McpServerConfig, McpServerConfigProblem,
+    McpServerPreferences, McpServerProblemSeverity, McpServerTransportConfig, McpSetupConfig,
+    McpSetupDerivedValue, McpSetupField, McpSetupFieldType, McpSetupOption, McpSetupResolution,
 };
 pub use memory_v2::{MemoryV2Rollout, MemoryV2Settings};
 pub use paths::{
@@ -124,15 +128,15 @@ pub use paths::{
 pub use remote_announcement::{AnnouncementCta, RemoteAnnouncement};
 pub use remote_fetch::{remote_fetch_enabled_from_layers, resolve_remote_fetch_enabled};
 pub use remote_settings::{
-    deserialize_tolerant, CampaignOverride, ConsentGate, ContextualHintsRemote,
-    DoomLoopRecoverySettings, GoalRoleModel, LongReasoningReminderSettings, RemoteRequestEncoding,
-    RemoteSettings, WorktreeAutoGcSettings, WorktreeKindMaxAge,
+    CampaignOverride, ConsentGate, ContextualHintsRemote, DoomLoopRecoverySettings, GoalRoleModel,
+    LongReasoningReminderSettings, RemoteRequestEncoding, RemoteSettings, WorktreeAutoGcSettings,
+    WorktreeKindMaxAge, deserialize_tolerant,
 };
-pub use resolved::{resolve_string_flag, BoolFlag, ConfigSource, Resolved};
+pub use resolved::{BoolFlag, ConfigSource, Resolved, resolve_string_flag};
 pub use validation::{
-    load_merged_requirements, requirements_layers, validate_requirements, RequirementsError,
-    RequirementsLayer, RequirementsSource,
+    RequirementsError, RequirementsLayer, RequirementsSource, load_merged_requirements,
+    requirements_layers, validate_requirements,
 };
-pub use version_overrides::{apply_version_overrides, VersionOverrideError};
+pub use version_overrides::{VersionOverrideError, apply_version_overrides};
 
 pub use xai_grok_env::env_bool;

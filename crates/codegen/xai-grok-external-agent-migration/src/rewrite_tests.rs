@@ -8,7 +8,7 @@ use crate::{
 };
 use toml::Value as TomlValue;
 use toml::map::Map as TomlMap;
-use xai_grok_config::{is_claude_import_marked, user_config_file};
+use xai_grok_config::{USER_CONFIG_FILENAME, is_claude_import_marked};
 
 #[test]
 fn merge_permissions_dedup() {
@@ -105,17 +105,17 @@ fn write_import_marker_creates_new_file() {
 #[test]
 fn write_import_marker_preserves_existing_content() {
     let dir = tempfile::tempdir().unwrap();
-    let path = user_config_file(dir.path());
+    let path = dir.path().join(USER_CONFIG_FILENAME);
     std::fs::write(
         &path,
-        "[other]\nkey = \"value\"\n\n[mcp_servers.foo]\ncommand = \"x\"\n",
+        r#"{"other": {"key": "value"}, "mcp": {"servers": {"foo": {"command": "x"}}}}"#,
     )
     .unwrap();
 
     write_import_marker(dir.path()).unwrap();
 
     let content = std::fs::read_to_string(&path).unwrap();
-    let parsed: TomlValue = toml::from_str(&content).unwrap();
+    let parsed: serde_json::Value = serde_json::from_str(&content).unwrap();
     assert_eq!(
         parsed
             .get("other")
@@ -125,7 +125,8 @@ fn write_import_marker_preserves_existing_content() {
     );
     assert_eq!(
         parsed
-            .get("mcp_servers")
+            .get("mcp")
+            .and_then(|m| m.get("servers"))
             .and_then(|m| m.get("foo"))
             .and_then(|f| f.get("command"))
             .and_then(|v| v.as_str()),
@@ -194,7 +195,7 @@ fn merge_paths_dedup_existing() {
 #[test]
 fn apply_items_to_config_writes_path_entries() {
     let dir = tempfile::tempdir().unwrap();
-    let path = dir.path().join("config.toml");
+    let path = dir.path().join(USER_CONFIG_FILENAME);
     let items = vec![
         ImportableItem::PathEntry {
             kind: PathKind::Skill,
@@ -210,7 +211,8 @@ fn apply_items_to_config_writes_path_entries() {
     assert_eq!(count, 2);
 
     let content = std::fs::read_to_string(&path).unwrap();
-    let parsed: TomlValue = toml::from_str(&content).unwrap();
+    let parsed: serde_json::Value = serde_json::from_str(&content).unwrap();
+    let parsed = parsed.get("extensions").unwrap();
     assert_eq!(
         parsed
             .get("paths")
@@ -229,14 +231,78 @@ fn apply_items_to_config_writes_path_entries() {
     );
 }
 
+#[test]
+fn apply_items_to_config_refuses_invalid_json() {
+    let dir = tempfile::tempdir().unwrap();
+    let path = dir.path().join(USER_CONFIG_FILENAME);
+    let original = "{\"ui\": {\"theme\": \"dark\"},}";
+    std::fs::write(&path, original).unwrap();
+    let items = vec![ImportableItem::EnvVar {
+        key: "FOO".into(),
+        value: "bar".into(),
+    }];
+
+    let error = apply_items_to_config(&path, &items, ImportScope::Global).unwrap_err();
+    assert!(
+        matches!(error, crate::MigrationError::InvalidConfig { .. }),
+        "{error}"
+    );
+    assert_eq!(original, std::fs::read_to_string(&path).unwrap());
+}
+
+#[test]
+fn project_import_converts_legacy_toml_config() {
+    let tmp = tempfile::tempdir().unwrap();
+    xai_test_utils::git::init_git_repo(tmp.path());
+    let grok_dir = tmp.path().join(".grok");
+    std::fs::create_dir_all(&grok_dir).unwrap();
+    std::fs::write(
+        grok_dir.join("config.toml"),
+        "[paths]\nextra_rule_dirs = [\"/keep\"]\n",
+    )
+    .unwrap();
+
+    let plan = ImportPlan {
+        project_items: vec![ImportableItem::PathEntry {
+            kind: PathKind::Skill,
+            path: "/foo/skills".into(),
+        }],
+        ..ImportPlan::default()
+    };
+    let result = apply_import(&plan, tmp.path()).unwrap();
+    assert_eq!(result.project_count, 1);
+
+    let content = std::fs::read_to_string(grok_dir.join("config.json")).unwrap();
+    let parsed: serde_json::Value = serde_json::from_str(&content).unwrap();
+    let paths = parsed
+        .get("extensions")
+        .and_then(|e| e.get("paths"))
+        .unwrap();
+    assert_eq!(
+        paths
+            .get("extra_rule_dirs")
+            .and_then(|a| a.get(0))
+            .and_then(|v| v.as_str()),
+        Some("/keep")
+    );
+    assert_eq!(
+        paths
+            .get("extra_skill_dirs")
+            .and_then(|a| a.get(0))
+            .and_then(|v| v.as_str()),
+        Some("/foo/skills")
+    );
+}
+
 #[cfg(unix)]
 #[test]
 fn project_import_replaces_config_symlink_not_referent() {
     let tmp = tempfile::tempdir().unwrap();
     xai_test_utils::git::init_git_repo(tmp.path());
-    let outside = tmp.path().join("outside.toml");
-    std::fs::write(&outside, "[paths]\nextra_rule_dirs = [\"/keep\"]\n").unwrap();
-    let project_cfg = tmp.path().join(".grok").join("config.toml");
+    let outside = tmp.path().join("outside.json");
+    let outside_body = r#"{"extensions": {"paths": {"extra_rule_dirs": ["/keep"]}}}"#;
+    std::fs::write(&outside, outside_body).unwrap();
+    let project_cfg = tmp.path().join(".grok").join("config.json");
     std::fs::create_dir_all(project_cfg.parent().unwrap()).unwrap();
     std::os::unix::fs::symlink(&outside, &project_cfg).unwrap();
 
@@ -262,7 +328,7 @@ fn project_import_replaces_config_symlink_not_referent() {
     assert!(body.contains("/foo/skills"), "{body}");
     assert!(body.contains("/keep"), "{body}");
     assert_eq!(
-        "[paths]\nextra_rule_dirs = [\"/keep\"]\n",
+        outside_body,
         std::fs::read_to_string(&outside).unwrap(),
         "external referent must stay untouched"
     );
@@ -272,10 +338,10 @@ fn project_import_replaces_config_symlink_not_referent() {
 #[test]
 fn global_import_writes_through_user_config_symlink() {
     let home = tempfile::tempdir().unwrap();
-    let outside = home.path().join("dotfiles").join("config.toml");
+    let outside = home.path().join("dotfiles").join(USER_CONFIG_FILENAME);
     std::fs::create_dir_all(outside.parent().unwrap()).unwrap();
     std::fs::write(&outside, "").unwrap();
-    let slot = home.path().join("config.toml");
+    let slot = home.path().join(USER_CONFIG_FILENAME);
     std::os::unix::fs::symlink(&outside, &slot).unwrap();
 
     let items = vec![ImportableItem::PathEntry {

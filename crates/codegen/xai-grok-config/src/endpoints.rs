@@ -75,10 +75,156 @@ pub struct EndpointsConfig {
     /// Declaring the field stops `serde_ignored` from reporting the key as unrecognized.
     #[serde(default, skip_serializing_if = "Option::is_none")]
     pub management_api_key: Option<String>,
-    /// `load_gcs_service_account_key_sync()` reads this key.
-    /// Declaring the field stops `serde_ignored` from reporting the key as unrecognized.
-    #[serde(default, skip_serializing_if = "Option::is_none")]
-    pub gcs_service_account_key: Option<String>,
+}
+
+/// `[endpoints]` keys of the removed direct S3 and direct GCS upload modes.
+/// A config that names one fails to load. Trace uploads go through the proxy only.
+pub const REMOVED_DIRECT_UPLOAD_KEYS: &[&str] = &[
+    "trace_upload_bucket",
+    "trace_upload_region",
+    "trace_upload_credentials_file",
+    "trace_upload_credentials",
+    "trace_upload_endpoint_url",
+    "gcs_service_account_key",
+];
+
+/// Env vars of the removed direct S3 and direct GCS upload modes.
+pub const REMOVED_DIRECT_UPLOAD_ENV_VARS: &[&str] = &[
+    "GROK_TRACE_UPLOAD_BUCKET",
+    "GROK_TRACE_UPLOAD_REGION",
+    "GROK_TRACE_UPLOAD_CREDENTIALS_FILE",
+    "GROK_TRACE_UPLOAD_ENDPOINT_URL",
+    "GROK_TELEMETRY_GCS_BUCKET",
+];
+
+/// The message for a setting of a removed upload mode.
+pub fn removed_direct_upload_message(setting: &str) -> String {
+    format!(
+        "`{setting}` selects a direct S3 or direct GCS trace upload, and those upload modes \
+         were removed. Trace uploads go through the proxy only. Remove `{setting}`."
+    )
+}
+
+/// The first removed direct-upload env var that is set, as an error message.
+pub fn removed_direct_upload_env_error() -> Option<String> {
+    REMOVED_DIRECT_UPLOAD_ENV_VARS
+        .iter()
+        .find(|name| std::env::var_os(name).is_some())
+        .map(|name| removed_direct_upload_message(name))
+}
+
+/// Why an `[endpoints]` table did not load.
+#[derive(Debug, thiserror::Error)]
+pub enum EndpointsConfigError {
+    #[error(transparent)]
+    Alias(#[from] xai_tool_types::AliasConflict),
+    #[error("{}", removed_direct_upload_message(&format!("endpoints.{}", .0)))]
+    RemovedUploadMode(&'static str),
+}
+impl EndpointsConfig {
+    /// The keys [`models_list_url`](Self::models_list_url) is read under.
+    pub const MODELS_LIST_URL_KEYS: xai_tool_types::Aliases =
+        xai_tool_types::Aliases::new("models_list_url", &["models_endpoint"]);
+}
+
+/// `EndpointsConfig` with each list-URL key spelling as its own field.
+/// A table that names both keys folds under [`EndpointsConfig::MODELS_LIST_URL_KEYS`] and does not fail as a duplicate field.
+/// An absent key is unset, never an error.
+/// `external_otel_master_switch` is not here: construction fills it.
+#[derive(Debug, Default, Deserialize)]
+#[serde(default)]
+struct EndpointsConfigWire {
+    cli_chat_proxy_base_url: Option<String>,
+    xai_api_base_url: String,
+    allowed_endpoints: Vec<String>,
+    alpha_test_key: Option<String>,
+    models_base_url: Option<String>,
+    models_list_url: Option<String>,
+    models_endpoint: Option<String>,
+    feedback_base_url: Option<String>,
+    trace_upload_url: Option<String>,
+    // Removed direct-upload keys: read only to refuse them.
+    trace_upload_bucket: Option<serde::de::IgnoredAny>,
+    trace_upload_region: Option<serde::de::IgnoredAny>,
+    trace_upload_credentials_file: Option<serde::de::IgnoredAny>,
+    trace_upload_credentials: Option<serde::de::IgnoredAny>,
+    trace_upload_endpoint_url: Option<serde::de::IgnoredAny>,
+    gcs_service_account_key: Option<serde::de::IgnoredAny>,
+    managed_config_url: Option<String>,
+    otel_exporter_otlp_endpoint: Option<String>,
+    otel_exporter_otlp_traces_endpoint: Option<String>,
+    otel_exporter_otlp_headers: Option<String>,
+    grok_internal_otlp_traces_endpoint: Option<String>,
+    grok_internal_otlp_headers: Option<String>,
+    otel_traces_exporter: Option<String>,
+    otel_traces_export_interval: Option<u64>,
+    otel_exporter_otlp_timeout: Option<u64>,
+    management_api_key: Option<String>,
+}
+
+impl TryFrom<EndpointsConfigWire> for EndpointsConfig {
+    type Error = EndpointsConfigError;
+
+    fn try_from(wire: EndpointsConfigWire) -> Result<Self, Self::Error> {
+        let removed = [
+            wire.trace_upload_bucket.is_some(),
+            wire.trace_upload_region.is_some(),
+            wire.trace_upload_credentials_file.is_some(),
+            wire.trace_upload_credentials.is_some(),
+            wire.trace_upload_endpoint_url.is_some(),
+            wire.gcs_service_account_key.is_some(),
+        ];
+        if let Some((key, _)) = REMOVED_DIRECT_UPLOAD_KEYS
+            .iter()
+            .zip(removed)
+            .find(|(_, set)| *set)
+        {
+            return Err(EndpointsConfigError::RemovedUploadMode(key));
+        }
+        Ok(Self {
+            cli_chat_proxy_base_url: wire.cli_chat_proxy_base_url,
+            xai_api_base_url: wire.xai_api_base_url,
+            allowed_endpoints: wire.allowed_endpoints,
+            alpha_test_key: wire.alpha_test_key,
+            models_base_url: wire.models_base_url,
+            models_list_url: EndpointsConfig::MODELS_LIST_URL_KEYS
+                .fold(vec![wire.models_list_url, wire.models_endpoint])?,
+            feedback_base_url: wire.feedback_base_url,
+            trace_upload_url: wire.trace_upload_url,
+            managed_config_url: wire.managed_config_url,
+            otel_exporter_otlp_endpoint: wire.otel_exporter_otlp_endpoint,
+            otel_exporter_otlp_traces_endpoint: wire.otel_exporter_otlp_traces_endpoint,
+            otel_exporter_otlp_headers: wire.otel_exporter_otlp_headers,
+            grok_internal_otlp_traces_endpoint: wire.grok_internal_otlp_traces_endpoint,
+            grok_internal_otlp_headers: wire.grok_internal_otlp_headers,
+            external_otel_master_switch: false,
+            otel_traces_exporter: wire.otel_traces_exporter,
+            otel_traces_export_interval: wire.otel_traces_export_interval,
+            otel_exporter_otlp_timeout: wire.otel_exporter_otlp_timeout,
+            management_api_key: wire.management_api_key,
+        })
+    }
+}
+
+/// Forwards through [`EndpointsConfigWire`] and the fold.
+impl<'de> Deserialize<'de> for EndpointsConfig {
+    fn deserialize<D>(deserializer: D) -> Result<Self, D::Error>
+    where
+        D: serde::Deserializer<'de>,
+    {
+        <EndpointsConfigWire as serde::Deserialize<'de>>::deserialize(deserializer)?
+            .try_into()
+            .map_err(serde::de::Error::custom)
+    }
+}
+
+/// `{base}/models`, or `base` itself when it already ends in `/models`.
+fn models_list_url_for_base(base: &str) -> String {
+    if base.ends_with("/models") {
+        base.to_owned()
+    } else {
+        format!("{base}/models")
+    }
 }
 /// A blank or whitespace-only override counts as unset.
 fn blank_as_unset(opt: &Option<String>) -> Option<String> {
@@ -112,12 +258,22 @@ impl EndpointsConfig {
         }
         let mut resolved: Self = base.try_into().unwrap_or_default();
         resolved.external_otel_master_switch = external_otel_master_switch;
+        xai_grok_extra_ca::endpoint_allowlist::set_configured(resolved.allowed_endpoints.clone());
         resolved
     }
     /// The cli-chat-proxy base URL for the auxiliary services and for inference with OAuth or session auth.
+    ///
     pub fn proxy_url(&self) -> String {
-        blank_as_unset(&self.cli_chat_proxy_base_url)
-            .unwrap_or_else(|| CLI_CHAT_PROXY_BASE_URL_DEFAULT.to_owned())
+        blank_as_unset(&self.cli_chat_proxy_base_url).unwrap_or_default()
+    }
+    /// `proxy_url` plus `suffix`, or blank when the proxy is unset.
+    /// A bare suffix such as `/traces` is not a URL anyone can reach.
+    fn proxy_join(&self, suffix: &str) -> String {
+        let proxy = self.proxy_url();
+        if proxy.is_empty() {
+            return proxy;
+        }
+        format!("{}{suffix}", proxy.trim_end_matches('/'))
     }
     pub fn resolve_inference_base_url(&self) -> String {
         self.models_base_url
@@ -133,12 +289,8 @@ impl EndpointsConfig {
     /// The managed deployment config URL for `grok setup`.
     /// The deployment key sent here must reach the proxy, never the inference host.
     pub fn resolve_managed_config_url(&self) -> String {
-        blank_as_unset(&self.managed_config_url).unwrap_or_else(|| {
-            format!(
-                "{}/deployment/config",
-                self.proxy_url().trim_end_matches('/')
-            )
-        })
+        blank_as_unset(&self.managed_config_url)
+            .unwrap_or_else(|| self.proxy_join("/deployment/config"))
     }
     /// The traces endpoint for the internal pipeline, whose exports carry xAI auth.
     /// The default stays on `proxy_url` even when inference goes to another host.
@@ -157,7 +309,7 @@ impl EndpointsConfig {
             );
             return legacy;
         }
-        format!("{}/traces", self.proxy_url().trim_end_matches('/'))
+        self.proxy_join("/traces")
     }
     /// The internal traces endpoint from the standard `OTEL_*` vars, if any.
     /// Callers must check `external_otel_master_switch` themselves.
@@ -211,25 +363,7 @@ impl EndpointsConfig {
         self.otel_exporter_otlp_timeout
             .map(std::time::Duration::from_millis)
     }
-    /// `None` means the upload falls back to the default cloud credentials.
-    pub fn resolve_trace_credentials(&self) -> Option<String> {
-        if let Some(inline) = blank_as_unset(&self.trace_upload_credentials) {
-            return Some(inline.trim().to_owned());
-        }
-        self.trace_upload_credentials_file
-            .as_deref()
-            .and_then(|path| {
-                std::fs::read_to_string(path)
-                    .inspect_err(|e| {
-                        tracing::warn!(
-                            path = %path,
-                            error = %e,
-                            "Failed to read trace upload credentials file"
-                        );
-                    })
-                    .ok()
-            })
-    }
+    /// `models_list_url`, else `{models_base_url}/models`, else `{proxy_url}/models`, else blank.
     pub fn resolve_models_list_url(&self) -> String {
         if let Some(ref url) = self.models_list_url {
             return url.clone();
@@ -238,7 +372,10 @@ impl EndpointsConfig {
             .models_base_url
             .clone()
             .unwrap_or_else(|| self.proxy_url());
-        format!("{}/models", base)
+        if base.trim().is_empty() {
+            return String::new();
+        }
+        models_list_url_for_base(&base)
     }
 }
 /// Parses a `k=v,k2=v2` header list, the format of `OTEL_EXPORTER_OTLP_HEADERS` and `GROK_INTERNAL_OTLP_HEADERS`.
@@ -251,24 +388,17 @@ fn parse_otlp_header_list(raw: &str) -> Vec<(String, String)> {
         })
         .collect()
 }
-const XAI_API_BASE_URL_DEFAULT: &str = "https://api.example.invalid/v1";
 impl Default for EndpointsConfig {
     fn default() -> Self {
         Self {
             cli_chat_proxy_base_url: std::env::var("GROK_CLI_CHAT_PROXY_BASE_URL").ok(),
-            xai_api_base_url: std::env::var("GROK_XAI_API_BASE_URL")
-                .unwrap_or_else(|_| XAI_API_BASE_URL_DEFAULT.to_owned()),
+            xai_api_base_url: std::env::var("GROK_XAI_API_BASE_URL").unwrap_or_default(),
+            allowed_endpoints: Vec::new(),
             alpha_test_key: None,
             models_base_url: env_string("GROK_MODELS_BASE_URL"),
             models_list_url: env_string("GROK_MODELS_LIST_URL"),
             feedback_base_url: env_string("GROK_FEEDBACK_BASE_URL"),
             trace_upload_url: env_string("GROK_TRACE_UPLOAD_URL"),
-            trace_upload_bucket: env_string("GROK_TRACE_UPLOAD_BUCKET"),
-            trace_upload_region: env_string("GROK_TRACE_UPLOAD_REGION"),
-            trace_upload_credentials_file: env_string("GROK_TRACE_UPLOAD_CREDENTIALS_FILE"),
-            trace_upload_credentials: None,
-            trace_upload_endpoint_url: env_string("GROK_TRACE_UPLOAD_ENDPOINT_URL"),
-            deployment_key: env_string("GROK_DEPLOYMENT_KEY"),
             managed_config_url: env_string("GROK_MANAGED_CONFIG_URL"),
             otel_exporter_otlp_endpoint: env_string("OTEL_EXPORTER_OTLP_ENDPOINT"),
             otel_exporter_otlp_traces_endpoint: env_string("OTEL_EXPORTER_OTLP_TRACES_ENDPOINT"),
@@ -283,7 +413,6 @@ impl Default for EndpointsConfig {
             otel_exporter_otlp_timeout: env_string("OTEL_EXPORTER_OTLP_TIMEOUT")
                 .and_then(|s| s.parse().ok()),
             management_api_key: None,
-            gcs_service_account_key: None,
         }
     }
 }

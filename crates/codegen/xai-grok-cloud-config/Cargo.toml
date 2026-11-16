@@ -11,14 +11,12 @@ test-support = []
 default-bazel = ["test-support"]
 
 [dependencies]
-blake3 = { workspace = true }
 chrono = { workspace = true, features = ["serde"] }
 globset = { workspace = true }
 indexmap = { workspace = true }
 fs2 = { workspace = true }
 hmac = { workspace = true }
 prod-mc-cli-chat-proxy-types = { path = "../../../prod/mc/cli-chat-proxy-types" }
-request = { workspace = true, features = ["blocking", "json"] }
 serde = { workspace = true }
 serde_json = { workspace = true }
 sha2 = { workspace = true }
@@ -33,8 +31,10 @@ xai-grok-env = { workspace = true }
 xai-grok-extra-ca = { workspace = true }
 xai-grok-http = { workspace = true }
 xai-grok-login = { workspace = true }
+xai-grok-net = { workspace = true }
 xai-grok-telemetry = { workspace = true }
 xai-grok-version = { workspace = true }
+xai-spawn = { workspace = true }
 
 [dev-dependencies]
 axum = { workspace = true }
@@ -44,6 +44,7 @@ tempfile = { workspace = true }
 tokio = { workspace = true, features = ["net"] }
 toml = { workspace = true }
 xai-grok-login = { workspace = true, features = ["test-support"] }
+xai-grok-net = { workspace = true, features = ["test-loopback-session"] }
 
 [lints]
 workspace = true
