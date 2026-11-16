@@ -69,7 +69,6 @@
 - Plugin hooks now run on a fresh session without requiring an explicit reload.
 - **Fixed plugin auto-update detection** when marketplace URLs differ only by .git suffix or host case.
 
->>>>>>> upstream
 
 # 1.0.41 — 2026-09-22
 

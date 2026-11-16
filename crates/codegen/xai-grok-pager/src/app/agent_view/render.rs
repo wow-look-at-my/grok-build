@@ -683,25 +683,6 @@ impl AgentView {
         let appearance = self.scrollback.appearance().clone();
         let layout_cfg = &appearance.scrollback.layout;
         let scrollbar_cfg = &appearance.scrollback.scrollbar;
-<<<<<<< fork
-        let model_id = self
-            .session
-            .models
-            .current_model_name()
-            .unwrap_or_else(|| "unknown".to_string());
-        // The provider id tells apart catalog entries that share a display
-        // name and differ only in where they route.
-        let model_id = match self.session.models.current_model_provider() {
-            Some(provider) => format!("{model_id} [{provider}]"),
-            None => model_id,
-        };
-||||||| base
-        let model_id = self
-            .session
-            .models
-            .current_model_name()
-            .unwrap_or_else(|| "unknown".to_string());
-=======
         let model_label = self.session.models.footer_label().unwrap_or_else(|| {
             if self.session_starting_since.is_some() {
                 String::new()
@@ -709,7 +690,12 @@ impl AgentView {
                 "unknown".to_owned()
             }
         });
->>>>>>> upstream
+        // The provider id tells apart catalog entries that share a display
+        // name and differ only in where they route.
+        let model_label = match self.session.models.current_model_provider() {
+            Some(provider) if !model_label.is_empty() => format!("{model_label} [{provider}]"),
+            _ => model_label,
+        };
         let effective_plan = self.plan_mode_pending.unwrap_or(self.plan_mode_active);
         let casual_commenting = self.is_casual_commenting();
         let mode_accent = if effective_plan || casual_commenting {
@@ -2170,30 +2156,8 @@ impl AgentView {
                         .tracker
                         .running_execute_tool_call_id()
                         .is_some();
-<<<<<<< fork
-                let is_pending_user_input = matches!(
-                    self.blocking_card(),
-                    Some(
-                        BlockingCard::Permission
-                            | BlockingCard::Question
-                            | BlockingCard::McpElicitation
-                    )
-                );
-                let goal_harness = self
-||||||| base
-                let is_pending_user_input = matches!(
-                    self.blocking_card(),
-                    Some(
-                        BlockingCard::Permission
-                            | BlockingCard::Question
-                            | BlockingCard::McpElicitation
-                    )
-                );
-                let goal_verifying = self
-=======
                 let is_pending_user_input = self.is_awaiting_user_answer();
-                let goal_verifying = self
->>>>>>> upstream
+                let goal_harness = self
                     .goal_state
                     .as_ref()
                     .and_then(turn_status::GoalHarnessActivity::from_goal);

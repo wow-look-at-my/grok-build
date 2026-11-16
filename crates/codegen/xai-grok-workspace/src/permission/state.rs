@@ -176,16 +176,8 @@ async fn resolve_store_dirs_in(
     ensure: bool,
 ) -> StoreDirs {
     let cwd = cwd.clone();
-<<<<<<< fork
-    let fallback_dir = xai_grok_config::sessions_cwd_dir(cwd.as_str());
-    xai_spawn::spawn_blocking(move || {
-||||||| base
-    let fallback_dir = xai_grok_config::sessions_cwd_dir(cwd.as_str());
-    tokio::task::spawn_blocking(move || {
-=======
     let fallback_dir = xai_grok_config::sessions_cwd_dir_in(&grok_home, cwd.as_str());
-    tokio::task::spawn_blocking(move || {
->>>>>>> upstream
+    xai_spawn::spawn_blocking(move || {
         // Resolve the scope root ONCE: discovery walks the filesystem
         // The store dir, its ensure fallback, and the legacy compare all derive from this single resolution
         let root = permission_scope_root(&cwd).to_string_lossy().into_owned();
