@@ -32,6 +32,7 @@ xai-computer-hub-sdk = { workspace = true, features = ["metrics"] }
 xai-grok-diag-server = { workspace = true }
 xai-grok-extra-ca = { workspace = true }
 xai-grok-pdf = { workspace = true }
+xai-grok-lifecycle = { workspace = true }
 xai-grok-sandbox = { path = "../xai-grok-sandbox", default-features = false }
 xai-grok-workspace = { path = "../xai-grok-workspace" }
 xai-grok-workspace-daemon = { path = "../xai-grok-workspace-daemon" }

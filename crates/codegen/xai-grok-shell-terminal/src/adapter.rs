@@ -304,7 +304,7 @@ impl AcpTerminalAdapter {
         if let Err(e) = recorder.append(&partial.output).await {
             tracing::warn!(task_id, error = %e, "output recorder failed to write pre-background output");
         }
-        tokio::spawn(watch_for_exit(
+        xai_spawn::spawn(watch_for_exit_releasing_task(
             self.gateway.clone(),
             self.session_id.clone(),
             task_id,

@@ -43,8 +43,6 @@ xai-grok-sampler = { workspace = true }
 xai-grok-tools-api = { path = "../xai-grok-tools-api" }
 # `DiagHandle`, held by the hub config and threaded through `connect_hub`.
 xai-grok-diag-server = { workspace = true }
-# Pre-stop lifecycle broker served on the diagnostics socket by `bin/workspace_server.rs`.
-xai-grok-lifecycle = { workspace = true }
 xai-grok-workspace-client = { path = "../xai-grok-workspace-client" }
 xai-grok-workspace-types = { path = "../xai-grok-workspace-types" }
 xai-grok-config = { workspace = true }
