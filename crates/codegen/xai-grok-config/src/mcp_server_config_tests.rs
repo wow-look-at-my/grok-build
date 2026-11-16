@@ -344,3 +344,100 @@ fn setup_templates_render_bearer_token_file() {
     };
     assert_eq!(Some("/run/us1/token".to_owned()), bearer_token_file);
 }
+
+/// `.mcp.json` written for VS Code names the address `urlTemplate`, Claude names it `url`, and a file kept for both names both.
+/// A bare `#[serde(alias)]` makes the second key a `duplicate field` error, which drops the server.
+#[test]
+fn an_http_server_reads_its_url_under_any_one_spelling() {
+    for json in [
+        r#"{"command":"serve","args":[]}"#,
+        r#"{"url":"https://mcp.example/v1"}"#,
+        r#"{"urlTemplate":"https://mcp.example/v1"}"#,
+        r#"{"url_template":"https://mcp.example/v1"}"#,
+    ] {
+        let transport: McpServerTransportConfig =
+            serde_json::from_str(json).unwrap_or_else(|e| panic!("{json} must parse: {e}"));
+        match transport {
+            McpServerTransportConfig::Stdio { command, .. } => assert_eq!(command, "serve"),
+            McpServerTransportConfig::StreamableHttp { url, .. } => {
+                assert_eq!(url, "https://mcp.example/v1", "{json}");
+            }
+        }
+    }
+}
+
+#[test]
+fn an_http_server_naming_every_url_key_under_one_value_parses_once() {
+    let transport: McpServerTransportConfig = serde_json::from_str(
+        r#"{"url":"https://mcp.example/v1","urlTemplate":"https://mcp.example/v1","url_template":"https://mcp.example/v1"}"#,
+    )
+    .expect("one address named three ways is one address");
+    assert!(
+        matches!(&transport, McpServerTransportConfig::StreamableHttp { url, .. }
+            if url == "https://mcp.example/v1"),
+        "{transport:?}"
+    );
+}
+
+/// The addresses in one entry decide where the server's traffic goes.
+#[test]
+fn an_http_server_whose_url_spellings_disagree_is_an_error_naming_the_field() {
+    let err = serde_json::from_str::<McpServerTransportConfig>(
+        r#"{"url":"https://a.example/v1","urlTemplate":"https://b.example/v1"}"#,
+    )
+    .expect_err("conflicting addresses must not resolve silently");
+    let message = err.to_string();
+    assert!(message.contains("url"), "{message}");
+    assert!(message.contains("urlTemplate"), "{message}");
+}
+
+#[test]
+fn an_http_server_with_no_url_key_at_all_is_still_an_error() {
+    let err = serde_json::from_str::<McpServerTransportConfig>(r#"{"headers":{}}"#)
+        .expect_err("a url-less http entry must not deserialize");
+    assert!(err.to_string().contains("url"), "{err}");
+}
+
+#[test]
+fn an_http_server_writes_the_canonical_url_and_never_an_alias() {
+    let json = serde_json::to_value(&McpServerTransportConfig::StreamableHttp {
+        url: "https://mcp.example/v1".into(),
+        transport_type: None,
+        bearer_token_env_var: None,
+        bearer_token_file: None,
+        headers: None,
+        oauth_client_id: None,
+        oauth_client_secret_env_var: None,
+        oauth_scopes: None,
+    })
+    .unwrap();
+    assert_eq!(json["url"], "https://mcp.example/v1");
+    assert!(json.get("urlTemplate").is_none(), "{json}");
+    assert!(json.get("url_template").is_none(), "{json}");
+}
+
+#[test]
+fn a_setup_block_reads_its_answers_under_either_key_and_folds_them() {
+    let answers = r#"{"site":{"from":"input","map":{"us":"us1"}}}"#;
+    let canonical: McpSetupConfig =
+        serde_json::from_str(&format!(r#"{{"variables":{answers}}}"#)).unwrap();
+    let alias: McpSetupConfig =
+        serde_json::from_str(&format!(r#"{{"values":{answers}}}"#)).unwrap();
+    assert_eq!(canonical, alias);
+    assert_eq!(canonical.variables.len(), 1);
+
+    let both: McpSetupConfig =
+        serde_json::from_str(&format!(r#"{{"variables":{answers},"values":{answers}}}"#))
+            .expect("one answer map named twice is one map");
+    assert_eq!(both.variables.len(), 1);
+
+    let err = serde_json::from_str::<McpSetupConfig>(
+        r#"{"variables":{"site":{"from":"a","map":{}}},"values":{"site":{"from":"b","map":{}}}}"#,
+    )
+    .expect_err("two answer maps must not resolve silently");
+    assert!(err.to_string().contains("variables"), "{err}");
+
+    let json = serde_json::to_value(&both).unwrap();
+    assert_eq!(json["variables"]["site"]["from"], "input");
+    assert!(json.get("values").is_none(), "{json}");
+}

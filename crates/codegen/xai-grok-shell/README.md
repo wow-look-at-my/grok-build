@@ -508,7 +508,7 @@ Type `/` in the input to access commands:
 | `/new`                             |           | Start a new session (clears context)                     |
 | `/load [workspace] [session]`      | `/resume` | Load a previous session                                  |
 | `/rewind <prompt>`                 |           | Rewind to a previous prompt (restores files)             |
-| `/compact`                         |           | Compact conversation history                             |
+| `/compact [context]`               |           | Compact conversation history                             |
 | `/always-approve [on\|off]`        | `/yolo`   | Toggle auto-approve mode                                 |
 | `/multiline`                       | `/ml`     | Toggle multiline input mode                              |
 | `/memory [workspace\|global] <text>` |         | Append text to a memory file (requires memory enabled) |

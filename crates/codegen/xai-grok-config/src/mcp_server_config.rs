@@ -25,7 +25,7 @@ impl McpOAuthConfig {
 pub type McpOAuthConfigMap = HashMap<String, McpOAuthConfig>;
 
 #[derive(Debug, Clone, Serialize, Deserialize, PartialEq)]
-#[serde(untagged)]
+#[serde(untagged, try_from = "McpServerTransportConfigWire")]
 pub enum McpServerTransportConfig {
     Stdio {
         command: String,
@@ -38,8 +38,7 @@ pub enum McpServerTransportConfig {
         cwd: Option<String>,
     },
     StreamableHttp {
-        // An entry without a url must fail to deserialize
-        #[serde(alias = "urlTemplate", alias = "url_template")]
+        /// The server's URL.
         url: String,
         #[serde(default, rename = "type", skip_serializing_if = "Option::is_none")]
         transport_type: Option<String>,
@@ -57,6 +56,162 @@ pub enum McpServerTransportConfig {
         #[serde(default, skip_serializing_if = "Option::is_none")]
         oauth_scopes: Option<Vec<String>>,
     },
+}
+
+// Written by hand: the derived schema of the wire type marks every HTTP key optional, so it would accept any object
+impl schemars::JsonSchema for McpServerTransportConfig {
+    fn schema_name() -> std::borrow::Cow<'static, str> {
+        "McpServerTransportConfig".into()
+    }
+    fn json_schema(_: &mut schemars::SchemaGenerator) -> schemars::Schema {
+        let strings = serde_json::json!({ "type": "array", "items": { "type": "string" } });
+        let string_map =
+            serde_json::json!({ "type": "object", "additionalProperties": { "type": "string" } });
+        // No member is required: one layer can set only `enabled` on a server that another layer defines
+        schemars::json_schema!({
+            "description": "A stdio server sets `command`; a streamable HTTP server sets `url` (`urlTemplate` and `url_template` are other spellings).",
+            "type": "object",
+            "properties": {
+                "command": { "type": "string" },
+                "args": strings,
+                "env": string_map,
+                "cwd": { "type": "string" },
+                "url": { "type": "string" },
+                "urlTemplate": { "type": "string" },
+                "url_template": { "type": "string" },
+                "type": { "type": "string" },
+                "bearer_token_env_var": {
+                    "description": "Name of the environment variable to read and set for `Authorization: Bearer <token>`.",
+                    "type": "string"
+                },
+                "bearer_token_file": {
+                    "description": "Path of a file that holds the bearer token. It is read again on every request.",
+                    "type": "string"
+                },
+                "headers": string_map,
+                "oauth_client_id": { "type": "string" },
+                "oauth_client_secret_env_var": { "type": "string" },
+                "oauth_scopes": strings
+            }
+        })
+    }
+}
+
+impl McpServerTransportConfig {
+    /// The keys the streamable-HTTP transport reads its URL under.
+    pub const URL_KEYS: xai_tool_types::Aliases =
+        xai_tool_types::Aliases::new("url", &["urlTemplate", "url_template"]);
+}
+
+/// `McpServerTransportConfig` with each URL spelling as its own field.
+/// It stays `untagged`, and the fold happens in the outer `TryFrom`, not inside a variant.
+/// An untagged variant that fails reports only "data did not match any variant", so the conflict text would be lost.
+#[derive(Debug, Deserialize)]
+#[serde(untagged)]
+enum McpServerTransportConfigWire {
+    Stdio {
+        command: String,
+        #[serde(default)]
+        args: Vec<String>,
+        #[serde(default)]
+        env: Option<HashMap<String, String>>,
+        #[serde(default)]
+        cwd: Option<String>,
+    },
+    StreamableHttp {
+        #[serde(default)]
+        url: Option<String>,
+        #[serde(default, rename = "urlTemplate")]
+        url_template_camel: Option<String>,
+        #[serde(default, rename = "url_template")]
+        url_template_snake: Option<String>,
+        #[serde(default, rename = "type")]
+        transport_type: Option<String>,
+        #[serde(default)]
+        bearer_token_env_var: Option<String>,
+        #[serde(default)]
+        bearer_token_file: Option<String>,
+        #[serde(default)]
+        headers: Option<HashMap<String, String>>,
+        #[serde(default)]
+        oauth_client_id: Option<String>,
+        #[serde(default)]
+        oauth_client_secret_env_var: Option<String>,
+        #[serde(default)]
+        oauth_scopes: Option<Vec<String>>,
+    },
+}
+
+/// Why a transport block could not become a [`McpServerTransportConfig`].
+#[derive(Debug)]
+pub enum McpTransportConfigError {
+    Alias(xai_tool_types::AliasConflict),
+    /// `url` is required: an HTTP server with no address is not a server.
+    MissingUrl,
+    /// `command` is required for the stdio arm.
+    MissingCommand,
+}
+
+impl std::fmt::Display for McpTransportConfigError {
+    fn fmt(&self, f: &mut std::fmt::Formatter<'_>) -> std::fmt::Result {
+        match self {
+            Self::Alias(conflict) => conflict.fmt(f),
+            Self::MissingUrl => f.write_str("missing field `url`"),
+            Self::MissingCommand => f.write_str("missing field `command`"),
+        }
+    }
+}
+
+impl std::error::Error for McpTransportConfigError {}
+
+impl From<xai_tool_types::AliasConflict> for McpTransportConfigError {
+    fn from(value: xai_tool_types::AliasConflict) -> Self {
+        Self::Alias(value)
+    }
+}
+
+impl TryFrom<McpServerTransportConfigWire> for McpServerTransportConfig {
+    type Error = McpTransportConfigError;
+
+    fn try_from(wire: McpServerTransportConfigWire) -> Result<Self, Self::Error> {
+        Ok(match wire {
+            McpServerTransportConfigWire::Stdio {
+                command,
+                args,
+                env,
+                cwd,
+            } => Self::Stdio {
+                command,
+                args,
+                env,
+                cwd,
+            },
+            McpServerTransportConfigWire::StreamableHttp {
+                url,
+                url_template_camel,
+                url_template_snake,
+                transport_type,
+                bearer_token_env_var,
+                bearer_token_file,
+                headers,
+                oauth_client_id,
+                oauth_client_secret_env_var,
+                oauth_scopes,
+            } => Self::StreamableHttp {
+                // An HTTP entry that names none of the keys has no address, so it is an error, not a default.
+                url: McpServerTransportConfig::URL_KEYS
+                    .fold(vec![url, url_template_camel, url_template_snake])?
+                    .ok_or(McpTransportConfigError::MissingUrl)?,
+                transport_type,
+                bearer_token_env_var,
+                bearer_token_file,
+                headers,
+                oauth_client_id,
+                oauth_client_secret_env_var,
+                oauth_scopes,
+            },
+        })
+    }
 }
 
 #[derive(Debug, Clone, Copy, Serialize, PartialEq, Eq)]
@@ -101,7 +256,7 @@ pub const KNOWN_MCP_SERVER_FIELDS: &[&str] = &[
     "url_template",
 ];
 
-#[derive(Debug, Clone, Default, Serialize, Deserialize, PartialEq)]
+#[derive(Debug, Clone, Default, Serialize, Deserialize, PartialEq, schemars::JsonSchema)]
 #[serde(rename_all = "camelCase")]
 pub struct McpJsonOAuthBlock {
     #[serde(default, skip_serializing_if = "Option::is_none")]
@@ -114,15 +269,48 @@ pub struct McpJsonOAuthBlock {
     pub callback_port: Option<u16>,
 }
 
-#[derive(Debug, Clone, Serialize, Deserialize, PartialEq, Eq)]
+/// A server's setup prompt: the fields it asks for, and the answers already recorded under them.
+#[derive(Debug, Clone, Serialize, Deserialize, PartialEq, Eq, schemars::JsonSchema)]
+#[serde(try_from = "McpSetupConfigWire")]
 pub struct McpSetupConfig {
     #[serde(default)]
     pub fields: Vec<McpSetupField>,
-    #[serde(default, alias = "values")]
+    /// The recorded answers.
+    #[serde(default)]
     pub variables: HashMap<String, McpSetupDerivedValue>,
 }
 
-#[derive(Debug, Clone, Serialize, Deserialize, PartialEq, Eq)]
+impl McpSetupConfig {
+    /// The keys [`variables`](Self::variables) is read under.
+    pub const VARIABLES_KEYS: xai_tool_types::Aliases =
+        xai_tool_types::Aliases::new("variables", &["values"]);
+}
+
+/// `McpSetupConfig` with each answers-key spelling as its own field.
+#[derive(Debug, Default, Deserialize, schemars::JsonSchema)]
+struct McpSetupConfigWire {
+    #[serde(default)]
+    fields: Vec<McpSetupField>,
+    #[serde(default)]
+    variables: Option<HashMap<String, McpSetupDerivedValue>>,
+    #[serde(default, rename = "values")]
+    values: Option<HashMap<String, McpSetupDerivedValue>>,
+}
+
+impl TryFrom<McpSetupConfigWire> for McpSetupConfig {
+    type Error = xai_tool_types::AliasConflict;
+
+    fn try_from(wire: McpSetupConfigWire) -> Result<Self, Self::Error> {
+        Ok(Self {
+            fields: wire.fields,
+            variables: McpSetupConfig::VARIABLES_KEYS
+                .fold(vec![wire.variables, wire.values])?
+                .unwrap_or_default(),
+        })
+    }
+}
+
+#[derive(Debug, Clone, Serialize, Deserialize, PartialEq, Eq, schemars::JsonSchema)]
 pub struct McpSetupField {
     pub id: String,
     pub label: String,
@@ -136,19 +324,19 @@ pub struct McpSetupField {
     pub options: Vec<McpSetupOption>,
 }
 
-#[derive(Debug, Clone, Serialize, Deserialize, PartialEq, Eq)]
+#[derive(Debug, Clone, Serialize, Deserialize, PartialEq, Eq, schemars::JsonSchema)]
 #[serde(rename_all = "lowercase")]
 pub enum McpSetupFieldType {
     Select,
 }
 
-#[derive(Debug, Clone, Serialize, Deserialize, PartialEq, Eq)]
+#[derive(Debug, Clone, Serialize, Deserialize, PartialEq, Eq, schemars::JsonSchema)]
 pub struct McpSetupOption {
     pub label: String,
     pub value: String,
 }
 
-#[derive(Debug, Clone, Serialize, Deserialize, PartialEq, Eq)]
+#[derive(Debug, Clone, Serialize, Deserialize, PartialEq, Eq, schemars::JsonSchema)]
 pub struct McpSetupDerivedValue {
     pub from: String,
     pub map: HashMap<String, String>,
@@ -198,7 +386,7 @@ pub enum McpSetupResolution {
     Invalid(String),
 }
 
-#[derive(Debug, Clone, Serialize, Deserialize)]
+#[derive(Debug, Clone, Serialize, Deserialize, schemars::JsonSchema)]
 pub struct McpServerConfig {
     #[serde(flatten)]
     pub transport: McpServerTransportConfig,

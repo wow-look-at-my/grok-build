@@ -1773,13 +1773,17 @@
         pw.textarea.insert_str("/comp");
         pw.refresh_slash(&models);
 
-        // Accepting makes the text "/compact" (no trailing space: the command takes no arguments)
+        // Accepting makes the text "/compact " (trailing space since takes_args)
         pw.accept_slash_completion(&models);
         let text = pw.textarea.text().to_string();
-        assert_eq!(text, "/compact");
+        assert_eq!(text, "/compact ");
 
+        // Even without filling args, try_send should succeed (args are optional).
         let sent = pw.try_send();
-        assert!(sent.is_some(), "/compact should be sendable");
+        assert!(
+            sent.is_some(),
+            "/compact with no args should be sendable (optional args)"
+        );
     }
 
     #[test]

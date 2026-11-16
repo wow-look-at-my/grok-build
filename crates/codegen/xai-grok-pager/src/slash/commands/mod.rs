@@ -331,16 +331,16 @@ mod tests {
         }
     }
     #[test]
-    fn compact_with_args_is_refused() {
+    fn compact_with_context_returns_queue_command_with_args() {
         let models = ModelState::default();
         let mut ctx = make_ctx(&models);
         let cmd = compact::CompactCommand;
         let result = cmd.run(&mut ctx, "focus on auth");
         match result {
-            CommandResult::Error(text) => {
-                assert_eq!(text, "/compact takes no arguments.")
+            CommandResult::QueueCommand(text) => {
+                assert_eq!(text, "/compact focus on auth")
             }
-            other => panic!("expected Error, got {other:?}"),
+            other => panic!("expected QueueCommand, got {other:?}"),
         }
     }
     #[test]

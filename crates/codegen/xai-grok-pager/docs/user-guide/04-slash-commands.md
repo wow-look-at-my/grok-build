@@ -24,9 +24,14 @@ Open the [Agent Dashboard](23-dashboard.md): live roster of top-level sessions i
 
 Not `/config-agents` (alias `/agents`), which manages agent *definitions* and personas. Disable with `GROK_AGENT_DASHBOARD=0` or `ui.dashboard.enabled` set to `false`.
 
-### `/compact`
+### `/compact [context]`
 
-Compress conversation history to reclaim context-window space.
+Compress conversation history to reclaim context-window space. Pass a note to tell Grok what to keep:
+
+```
+/compact
+/compact keep the auth implementation details
+```
 
 Grok also auto-compacts once the context window hits 85% (tune it with `session.auto_compact_threshold_percent`).
 

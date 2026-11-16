@@ -207,61 +207,17 @@ pub(crate) fn context_window_choices(
 /// Trace upload methods on [`EndpointsConfig`].
 /// They are a trait because they need the upload types in this crate.
 pub trait TraceUploadEndpoints {
-    /// Builds an upload method that writes straight to `trace_upload_bucket`.
-    /// Returns `None` when no bucket is set or its scheme is not `gs://` or `s3://`.
-    fn resolve_direct_upload_method(&self) -> Option<crate::session::repo_changes::UploadMethod>;
-    fn has_noninteractive_upload_auth(&self) -> bool;
-    /// Tries `trace_upload_bucket`, then the proxy, then `gcs_service_account_key` from config.
-    /// The proxy needs an `auth_token` or a `deployment_key`.
+    /// The proxy upload method for `auth_token`. Without a token there is no upload method.
     fn resolve_upload_method(
         &self,
         auth_token: Option<String>,
     ) -> Option<crate::session::repo_changes::UploadMethod>;
-    /// Returns the trace bucket URL from `GROK_TELEMETRY_GCS_BUCKET`, else config, else the compiled-in default.
-    /// `None` disables direct GCS trace uploads.
-    fn resolve_trace_bucket_url(&self) -> Option<Resolved<String>>;
     /// Whether `auth`'s privacy flags block trace uploads.
-    /// The coding-data opt-out governs sharing with xAI, so it does not apply when traces go to the deployment's own `trace_upload_bucket`. ZDR blocks every destination.
+    /// Every upload goes through the proxy, so the coding-data opt-out always applies.
     fn is_trace_upload_blocked_for(&self, auth: &xai_grok_login::GrokAuth) -> bool;
 }
 impl TraceUploadEndpoints for EndpointsConfig {
-    fn resolve_direct_upload_method(&self) -> Option<crate::session::repo_changes::UploadMethod> {
-        let bucket_url = self.trace_upload_bucket.as_deref()?.trim();
-        if bucket_url.is_empty() {
-            return None;
-        }
-        if let Some(bucket_name) = bucket_url
-            .strip_prefix("s3://")
-            .map(|s| s.trim_end_matches('/'))
-        {
-            let region = self
-                .trace_upload_region
-                .clone()
-                .unwrap_or_else(|| "us-east-1".to_owned());
-            return Some(crate::session::repo_changes::UploadMethod::S3 {
-                bucket: bucket_name.to_owned(),
-                region,
-                credentials_file: None,
-                credentials_content: self.resolve_trace_credentials(),
-                endpoint_url: self.trace_upload_endpoint_url.clone(),
-            });
-        }
-        if bucket_url.starts_with("gs://") {
-            return Some(crate::session::repo_changes::UploadMethod::Direct {
-                service_account_key: self.resolve_trace_credentials(),
-            });
-        }
-        tracing::warn!(
-            bucket = %bucket_url,
-            "trace_upload_bucket has unrecognized scheme (expected gs:// or s3://), ignoring"
-        );
-        None
-    }
-    fn has_noninteractive_upload_auth(&self) -> bool {
-        self.deployment_key.is_some() || self.resolve_direct_upload_method().is_some()
-    }
     fn resolve_upload_method(
->>>>>>> upstream
         &self,
         auth_token: Option<String>,
     ) -> Option<crate::session::repo_changes::UploadMethod> {
@@ -270,141 +226,11 @@ impl TraceUploadEndpoints for EndpointsConfig {
                 proxy_base_url: self.resolve_trace_upload_url(),
                 user_token,
                 alpha_test_key: self.alpha_test_key.clone(),
-<<<<<<< fork
             },
-||||||| base
-            });
-        }
-        let service_account_key = crate::util::config::load_gcs_service_account_key_sync();
-        if service_account_key.is_some() {
-            return Some(crate::session::repo_changes::UploadMethod::Direct {
-                service_account_key,
-            });
-        }
-        None
-    }
-    /// Resolve trace bucket URL: env > config > compiled-in default.
-    /// `None` disables direct GCS trace uploads.
-    pub fn resolve_trace_bucket_url(&self) -> Option<Resolved<String>> {
-        resolve_string_flag(
-            None,
-            "GROK_TELEMETRY_GCS_BUCKET",
-            self.trace_upload_bucket.as_deref(),
-            None,
-=======
-            });
-        }
-        let service_account_key = crate::util::config::load_gcs_service_account_key_sync();
-        if service_account_key.is_some() {
-            return Some(crate::session::repo_changes::UploadMethod::Direct {
-                service_account_key,
-            });
-        }
-        None
-    }
-    fn resolve_trace_bucket_url(&self) -> Option<Resolved<String>> {
-        resolve_string_flag(
-            None,
-            "GROK_TELEMETRY_GCS_BUCKET",
-            self.trace_upload_bucket.as_deref(),
-            None,
->>>>>>> upstream
         )
     }
-<<<<<<< fork
-    /// `models_list_url` > `{models_base_url}/models` > `{proxy_base_url}/models`.
-    pub(crate) fn resolve_models_list_url(&self) -> String {
-        if let Some(ref url) = self.models_list_url {
-            return url.clone();
-        }
-        let base = self
-            .models_base_url
-            .clone()
-            .unwrap_or_else(|| self.proxy_url());
-        if base.trim().is_empty() {
-            return String::new();
-        }
-        crate::remote::models_list_url_for_base(&base)
-    }
-}
-impl Default for EndpointsConfig {
-    fn default() -> Self {
-        Self {
-            cli_chat_proxy_base_url: std::env::var("GROK_CLI_CHAT_PROXY_BASE_URL").ok(),
-            xai_api_base_url: std::env::var("GROK_XAI_API_BASE_URL").unwrap_or_default(),
-            allowed_endpoints: Vec::new(),
-            alpha_test_key: None,
-            models_base_url: env_string("GROK_MODELS_BASE_URL"),
-            models_list_url: env_string("GROK_MODELS_LIST_URL"),
-            feedback_base_url: env_string("GROK_FEEDBACK_BASE_URL"),
-            trace_upload_url: env_string("GROK_TRACE_UPLOAD_URL"),
-            managed_config_url: env_string("GROK_MANAGED_CONFIG_URL"),
-            otel_exporter_otlp_endpoint: env_string("OTEL_EXPORTER_OTLP_ENDPOINT"),
-            otel_exporter_otlp_traces_endpoint: env_string("OTEL_EXPORTER_OTLP_TRACES_ENDPOINT"),
-            otel_exporter_otlp_headers: env_string("OTEL_EXPORTER_OTLP_HEADERS"),
-            grok_internal_otlp_traces_endpoint: env_string("GROK_INTERNAL_OTLP_TRACES_ENDPOINT"),
-            grok_internal_otlp_headers: env_string("GROK_INTERNAL_OTLP_HEADERS"),
-            external_otel_master_switch: external_otel_master_switch_resolved(),
-            otel_traces_exporter: env_string("OTEL_TRACES_EXPORTER"),
-            otel_traces_export_interval: env_string("OTEL_BSP_SCHEDULE_DELAY")
-                .or_else(|| env_string("OTEL_TRACES_EXPORT_INTERVAL"))
-                .and_then(|s| s.parse().ok()),
-            otel_exporter_otlp_timeout: env_string("OTEL_EXPORTER_OTLP_TIMEOUT")
-                .and_then(|s| s.parse().ok()),
-            management_api_key: None,
-||||||| base
-    /// `models_list_url` > `{models_base_url}/models` > `{proxy_base_url}/models`.
-    pub(crate) fn resolve_models_list_url(&self) -> String {
-        if let Some(ref url) = self.models_list_url {
-            return url.clone();
-        }
-        let base = self
-            .models_base_url
-            .clone()
-            .unwrap_or_else(|| self.proxy_url());
-        format!("{}/models", base)
-    }
-}
-impl Default for EndpointsConfig {
-    fn default() -> Self {
-        Self {
-            cli_chat_proxy_base_url: std::env::var("GROK_CLI_CHAT_PROXY_BASE_URL").ok(),
-            xai_api_base_url: std::env::var("GROK_XAI_API_BASE_URL")
-                .unwrap_or_else(|_| XAI_API_BASE_URL_DEFAULT.to_owned()),
-            alpha_test_key: None,
-            models_base_url: env_string("GROK_MODELS_BASE_URL"),
-            models_list_url: env_string("GROK_MODELS_LIST_URL"),
-            feedback_base_url: env_string("GROK_FEEDBACK_BASE_URL"),
-            trace_upload_url: env_string("GROK_TRACE_UPLOAD_URL"),
-            trace_upload_bucket: env_string("GROK_TRACE_UPLOAD_BUCKET"),
-            trace_upload_region: env_string("GROK_TRACE_UPLOAD_REGION"),
-            trace_upload_credentials_file: env_string("GROK_TRACE_UPLOAD_CREDENTIALS_FILE"),
-            trace_upload_credentials: None,
-            trace_upload_endpoint_url: env_string("GROK_TRACE_UPLOAD_ENDPOINT_URL"),
-            deployment_key: env_string("GROK_DEPLOYMENT_KEY"),
-            managed_config_url: env_string("GROK_MANAGED_CONFIG_URL"),
-            otel_exporter_otlp_endpoint: env_string("OTEL_EXPORTER_OTLP_ENDPOINT"),
-            otel_exporter_otlp_traces_endpoint: env_string("OTEL_EXPORTER_OTLP_TRACES_ENDPOINT"),
-            otel_exporter_otlp_headers: env_string("OTEL_EXPORTER_OTLP_HEADERS"),
-            grok_internal_otlp_traces_endpoint: env_string("GROK_INTERNAL_OTLP_TRACES_ENDPOINT"),
-            grok_internal_otlp_headers: env_string("GROK_INTERNAL_OTLP_HEADERS"),
-            external_otel_master_switch: external_otel_master_switch_resolved(),
-            otel_traces_exporter: env_string("OTEL_TRACES_EXPORTER"),
-            otel_traces_export_interval: env_string("OTEL_BSP_SCHEDULE_DELAY")
-                .or_else(|| env_string("OTEL_TRACES_EXPORT_INTERVAL"))
-                .and_then(|s| s.parse().ok()),
-            otel_exporter_otlp_timeout: env_string("OTEL_EXPORTER_OTLP_TIMEOUT")
-                .and_then(|s| s.parse().ok()),
-            management_api_key: None,
-            gcs_service_account_key: None,
-=======
     fn is_trace_upload_blocked_for(&self, auth: &xai_grok_login::GrokAuth) -> bool {
-        if self.resolve_direct_upload_method().is_some() {
-            auth.is_zdr_team()
-        } else {
-            auth.is_data_collection_disabled()
->>>>>>> upstream
-        }
+        auth.is_data_collection_disabled()
     }
 }
 pub use xai_grok_config::AllowlistPin;
