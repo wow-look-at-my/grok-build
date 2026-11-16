@@ -364,7 +364,6 @@ pub(crate) fn chat_completion_tool_calls_events(
     ]
 }
 
-<<<<<<< fork
 /// Chat Completions: the text one word per chunk, then the tool-call chunks of one response.
 pub(crate) fn chat_completion_narrated_tool_call_events(
     turn: ToolCallTurn<'_>,
@@ -393,13 +392,6 @@ pub(crate) fn chat_completion_narrated_tool_call_events(
         .collect()
 }
 
-/// Responses API: the `function_call` item is added before its arguments delta, its arguments are
-/// whole in `function_call_arguments.done`, and the item closes before `response.completed`.
-||||||| base
-/// Responses API: the `function_call` item is added before its arguments delta, its arguments are
-/// whole in `function_call_arguments.done`, and the item closes before `response.completed`.
-=======
->>>>>>> upstream
 pub(crate) fn responses_api_tool_call_events(turn: ToolCallTurn<'_>) -> Vec<SseEvent> {
     responses_api_tool_calls_events(&[TurnCall::from(turn)], turn.model)
 }
@@ -502,10 +494,9 @@ pub(crate) fn responses_api_tool_calls_events(
         .collect()
 }
 
-<<<<<<< fork
-/// Messages API: one `tool_use` block, its input in one `input_json_delta`; stops with `tool_use`.
-pub(crate) fn messages_api_tool_use_events(turn: ToolCallTurn<'_>) -> Vec<SseEvent> {
-    messages_api_tool_use_events_after(turn, None, None)
+/// Messages API: one `tool_use` block per call, each input in one `input_json_delta`; stops with `tool_use`.
+pub(crate) fn messages_api_tool_uses_events(calls: &[TurnCall<'_>], model: &str) -> Vec<SseEvent> {
+    messages_api_tool_uses_events_after(calls, model, None, None)
 }
 
 /// Messages API: an optional thinking block, a text block, then the `tool_use` block, in one response.
@@ -514,20 +505,20 @@ pub(crate) fn messages_api_narrated_tool_use_events(
     narration: &str,
     reasoning: Option<&str>,
 ) -> Vec<SseEvent> {
-    messages_api_tool_use_events_after(turn, Some(narration), reasoning)
+    messages_api_tool_uses_events_after(
+        &[TurnCall::from(turn)],
+        turn.model,
+        Some(narration),
+        reasoning,
+    )
 }
 
-fn messages_api_tool_use_events_after(
-    turn: ToolCallTurn<'_>,
+fn messages_api_tool_uses_events_after(
+    calls: &[TurnCall<'_>],
+    model: &str,
     narration: Option<&str>,
     reasoning: Option<&str>,
 ) -> Vec<SseEvent> {
-    let ToolCallTurn {
-        call_id,
-        name,
-        arguments,
-        model,
-    } = turn;
     let mut events = vec![messages_api_message_start(model)];
     let mut tool_index = 0;
     if let Some(thinking) = reasoning {

@@ -64,13 +64,28 @@ impl SessionActor {
             return;
         };
 
-<<<<<<< fork
-        let setup = match self.prepare_side_call("turn_summary").await {
-            Ok(s) => s,
-||||||| base
-        let setup = match self.prepare_side_call().await {
-            Ok(s) => s,
-=======
+        let (client, model, reasoning_effort) = match self.turn_summary_sampling_client(&settings).await {
+            Ok(c) => c,
+            Err(e) => {
+                tracing::warn!(error = %e, "turn summary: failed to prepare sampling client");
+                return;
+            }
+        };
+        let request = ConversationRequest {
+            items: vec![
+                ConversationItem::system(turn_summary::TURN_SUMMARY_SYSTEM),
+                ConversationItem::user(turn_summary::turn_summary_user_message(&user_text, &reply)),
+            ],
+            model: Some(model),
+            reasoning_effort,
+            x_grok_conv_id: Some(format!("turn-summary-{}", uuid::Uuid::new_v4())),
+            x_grok_req_id: Some(format!("xai-turn-summary-{}", uuid::Uuid::new_v4())),
+            x_grok_session_id: Some(self.session_info.id.to_string()),
+            x_grok_agent_id: Some(xai_grok_telemetry::id::agent_id()),
+            length_policy: xai_grok_sampling_types::LengthPolicy::Fail,
+            ..Default::default()
+        };
+        SPLIT_MARKER_TURN_SUMMARY
         self.refresh_token_if_expired().await;
         let session_config = self.reconstruct_full_config().await;
         // Resolve the helper's own endpoint and credentials; the session endpoint may not serve it.

@@ -1114,18 +1114,8 @@ pub(crate) async fn run(
         remote_settings.as_ref(),
     );
     app.foreign_session_compat = xai_grok_foreign_sessions::EnabledForeignSessionSources {
-<<<<<<< fork
-        claude: compat.claude.sessions,
-        cursor: compat.cursor.sessions,
-||||||| base
-        claude: compat.claude.sessions,
-        codex: compat.codex.sessions,
-        cursor: compat.cursor.sessions,
-=======
         claude: compat.claude,
-        codex: compat.codex,
         cursor: compat.cursor,
->>>>>>> upstream
     };
     if let Some(raw) = effective_config {
         app.notification_service = crate::notifications::NotificationService::new(

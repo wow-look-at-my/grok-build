@@ -59,162 +59,6 @@ pub fn mark_claude_imported() -> anyhow::Result<()> {
     refresh_marker_cache(true);
     Ok(())
 }
-@@CUT4@@
-/// Result of applying an import.
-#[derive(Debug, Default)]
-pub struct ImportResult {
-    /// Number of items written to global config.
-    pub global_count: usize,
-    /// Number of items written to project config.
-    pub project_count: usize,
-    /// Paths of config files that were modified.
-    pub modified_files: Vec<String>,
-}
-
-impl ImportResult {
-    pub fn total(&self) -> usize {
-        self.global_count + self.project_count
-    }
-}
-
-/// Apply items to a single config.toml file using atomic write.
-fn apply_items_to_config(config_path: &Path, items: &[ImportableItem]) -> anyhow::Result<usize> {
-    // Read existing TOML, reporting parse errors instead of silently discarding the file
-    // An atomic rewrite would otherwise drop unrelated sections ([model], [ui], etc.) and overwrite a hand-edited config that happens to have a trailing comma
-    let mut root: TomlValue = match std::fs::read_to_string(config_path) {
-        Ok(s) => toml::from_str(&s).map_err(|e| {
-            anyhow::anyhow!(
-                "refusing to import: existing config at {} is not valid TOML \
-                 ({}). Fix the file (or move it aside) and retry.",
-                config_path.display(),
-                e
-            )
-        })?,
-        Err(e) if e.kind() == std::io::ErrorKind::NotFound => TomlValue::Table(TomlMap::new()),
-        Err(e) => return Err(e.into()),
-    };
-
-    let table = root
-        .as_table_mut()
-        .ok_or_else(|| anyhow::anyhow!("config root is not a table"))?;
-
-    let mut count = 0usize;
-
-    // Group items by type.
-    let mut permissions: Vec<&PermissionRule> = Vec::new();
-    let mut env_vars: Vec<(&str, &str)> = Vec::new();
-    let mut mcp_servers: Vec<(&str, &McpServerConfig)> = Vec::new();
-    let mut skill_dirs: Vec<&str> = Vec::new();
-    let mut rule_dirs: Vec<&str> = Vec::new();
-
-    for item in items {
-        match item {
-            ImportableItem::Permission(rule) => permissions.push(rule),
-            ImportableItem::EnvVar { key, value } => env_vars.push((key, value)),
-            ImportableItem::McpServer { name, config } => mcp_servers.push((name, config)),
-            // Hooks are written to .grok/hooks/ JSON files in apply_hooks_to_dir, not into config.toml
-            ImportableItem::Hook { .. } => {}
-            ImportableItem::PathEntry { kind, path } => match kind {
-                PathKind::Skill => skill_dirs.push(path.as_str()),
-                PathKind::Rule => rule_dirs.push(path.as_str()),
-            },
-        }
-    }
-
-    if !permissions.is_empty() {
-        count += merge_permissions(table, &permissions)?;
-    }
-
-    if !skill_dirs.is_empty() {
-        count += merge_paths(table, "extra_skill_dirs", &skill_dirs)?;
-    }
-    if !rule_dirs.is_empty() {
-        count += merge_paths(table, "extra_rule_dirs", &rule_dirs)?;
-    }
-
-    if !env_vars.is_empty() {
-        count += merge_env_vars(table, &env_vars);
-    }
-
-    if !mcp_servers.is_empty() {
-        count += merge_mcp_servers(table, &mcp_servers)?;
-    }
-
-    if count > 0 {
-        // Atomic write: write to .tmp, then rename.
-        let toml_str = toml::to_string_pretty(&root)?;
-        let tmp = config_path.with_extension("toml.tmp");
-        if let Some(parent) = config_path.parent() {
-            std::fs::create_dir_all(parent)?;
-        }
-        std::fs::write(&tmp, &toml_str)?;
-        std::fs::rename(&tmp, config_path)?;
-        info!(
-            path = %config_path.display(),
-            count,
-            "Wrote imported settings to config.toml"
-        );
-    }
-
-    Ok(count)
-}
-
-/// Merge permission rules into `[permission]` using the compact format.
-/// Existing rules are preserved. New rules are appended to the appropriate action list (`allow`, `deny`, `ask`).
-fn merge_permissions(
-    table: &mut TomlMap<String, TomlValue>,
-    rules: &[&PermissionRule],
-) -> anyhow::Result<usize> {
-    let permission = table
-        .entry("permission")
-        .or_insert_with(|| TomlValue::Table(TomlMap::new()));
-    let perm_table = permission
-        .as_table_mut()
-        .ok_or_else(|| anyhow::anyhow!("[permission] is not a table"))?;
-
-    let mut count = 0;
-
-    // Group rules by action.
-    let mut allow_rules: Vec<String> = Vec::new();
-    let mut deny_rules: Vec<String> = Vec::new();
-    let mut ask_rules: Vec<String> = Vec::new();
-
-    for rule in rules {
-        let formatted = format_rule_string(rule);
-        match rule.action {
-            RuleAction::Allow => allow_rules.push(formatted),
-            RuleAction::Deny => deny_rules.push(formatted),
-            RuleAction::Ask => ask_rules.push(formatted),
-        }
-    }
-
-    for (key, new_rules) in [
-        ("allow", allow_rules),
-        ("deny", deny_rules),
-        ("ask", ask_rules),
-    ] {
-        if new_rules.is_empty() {
-            continue;
-        }
-
-        let arr = perm_table
-            .entry(key)
-            .or_insert_with(|| TomlValue::Array(Vec::new()));
-        let existing = arr
-            .as_array_mut()
-            .ok_or_else(|| anyhow::anyhow!("permission.{key} is not an array"))?;
-
-        // Collect existing strings for dedup.
-        let existing_set: std::collections::HashSet<String> = existing
-            .iter()
-            .filter_map(|v| v.as_str().map(|s| s.to_string()))
-            .collect();
-
-        for rule_str in new_rules {
-            if !existing_set.contains(&rule_str) {
-                existing.push(TomlValue::String(rule_str));
-                count += 1;
-=======
 pub fn scan_importable_settings(cwd: &Path) -> ImportPlan {
     let paths = find_claude_settings_paths(cwd);
     let mcp_json_files = crate::util::config::find_mcp_json_files(cwd);
@@ -254,7 +98,6 @@ fn snapshot_at(path: &Path) -> Option<ClaudeSettingsSnapshot> {
                         );
                     }
                 }
->>>>>>> upstream
             }
         }
     }
@@ -278,68 +121,10 @@ fn import_permission(
         ToolFilter::WebSearch => ImportTool::WebSearch,
         ToolFilter::AgentMessage => ImportTool::AgentMessage,
     };
-<<<<<<< fork
-
-    match (&rule.pattern, &rule.tool) {
-        // Catch-all: any tool and no pattern formats to "*"
-        (None, ToolFilter::Any) => "*".to_string(),
-        (Some(pat), ToolFilter::Any) => pat.clone(),
-        (None, _) => tool_name.to_string(),
-        (Some(pat), _) => {
-            let pattern = match rule.pattern_mode {
-                PatternMode::Domain => format!("domain:{}", pat),
-                PatternMode::Glob => pat.clone(),
-            };
-            format!("{}({})", tool_name, pattern)
-        }
-    }
-}
-
-/// Merge environment variables into `[env]`. Existing keys are NOT overwritten.
-fn merge_env_vars(table: &mut TomlMap<String, TomlValue>, vars: &[(&str, &str)]) -> usize {
-    let env = table
-        .entry("env")
-        .or_insert_with(|| TomlValue::Table(TomlMap::new()));
-    let env_table = match env.as_table_mut() {
-        Some(t) => t,
-        None => {
-            warn!("`env` in config.json is not an object, skipping env import");
-            return 0;
-        }
-||||||| base
-
-    match (&rule.pattern, &rule.tool) {
-        // Catch-all: any tool and no pattern formats to "*"
-        (None, ToolFilter::Any) => "*".to_string(),
-        (Some(pat), ToolFilter::Any) => pat.clone(),
-        (None, _) => tool_name.to_string(),
-        (Some(pat), _) => {
-            let pattern = match rule.pattern_mode {
-                PatternMode::Domain => format!("domain:{}", pat),
-                PatternMode::Glob => pat.clone(),
-            };
-            format!("{}({})", tool_name, pattern)
-        }
-    }
-}
-
-/// Merge environment variables into `[env]`. Existing keys are NOT overwritten.
-fn merge_env_vars(table: &mut TomlMap<String, TomlValue>, vars: &[(&str, &str)]) -> usize {
-    let env = table
-        .entry("env")
-        .or_insert_with(|| TomlValue::Table(TomlMap::new()));
-    let env_table = match env.as_table_mut() {
-        Some(t) => t,
-        None => {
-            warn!("[env] in config.toml is not a table, skipping env import");
-            return 0;
-        }
-=======
     let action = match rule.action {
         RuleAction::Allow => ImportRuleAction::Allow,
         RuleAction::Deny => ImportRuleAction::Deny,
         RuleAction::Ask => ImportRuleAction::Ask,
->>>>>>> upstream
     };
 <<<<<<< fork
 

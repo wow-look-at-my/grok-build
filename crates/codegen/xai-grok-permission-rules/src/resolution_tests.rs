@@ -7,40 +7,6 @@ use crate::ENV_TEST_LOCK as ENV_LOCK;
 // The crate-shared generic env-var guard, defined once in `lib.rs`
 use crate::TestEnvGuard as EnvVarGuard;
 
-/// An empty user tier for one test, isolated for this value's lifetime.
-struct IsolatedHome {
-    /// Declared first so it drops first: the env restore runs before the lock releases.
-    _env: crate::LockedTestEnv,
-    home: tempfile::TempDir,
-}
-
-impl IsolatedHome {
-    fn new() -> Self {
-        let home = tempfile::tempdir().unwrap();
-        let env = crate::LockedTestEnv::lock()
-            .set("HOME", home.path())
-            // `home_dir()` prefers USERPROFILE on Windows.
-            .set("USERPROFILE", home.path())
-            .set("GROK_HOME", home.path())
-            .unset("_GROK_CLAUDE_MARKER_OVERRIDE");
-        Self { _env: env, home }
-    }
-
-    /// The temp home, for a test that seeds user-tier settings of its own.
-    fn path(&self) -> &Path {
-        self.home.path()
-    }
-
-    /// Drive `fut` on a fresh current-thread runtime.
-    fn block_on<F: std::future::Future>(&self, fut: F) -> F::Output {
-        tokio::runtime::Builder::new_current_thread()
-            .enable_all()
-            .build()
-            .expect("test runtime")
-            .block_on(fut)
-    }
-}
-
 /// Only `Deny` rules on read-capable tools (Read/Grep/Any) become grep excludes; write-only denies and non-deny actions are left out.
 #[test]
 fn deny_read_globs_selects_read_capable_denies_only() {

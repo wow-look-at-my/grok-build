@@ -953,41 +953,8 @@ pub(super) fn prompt_complete_ext_failed_with_error_kind(
     agent_result: &str,
     error_kind: &str,
 ) -> acp::ExtNotification {
-<<<<<<< fork
-    let raw = serde_json::value::to_raw_value(
-            &PromptCompletePayload {
-                session_id: session_id.to_string(),
-                stop_reason: Some("error".to_string()),
-                prompt_id: None,
-                agent_result: Some(agent_result.to_string()),
-                cancel_trigger: None,
-                cancellation_category: None,
-                cancellation_context: None,
-                error_kind: Some(error_kind.to_string()),
-                meta: None,
-            },
-        )
-        .unwrap();
-    acp::ExtNotification::new("example.invalid/session/prompt_complete", std::sync::Arc::from(raw))
-||||||| base
-    let raw = serde_json::value::to_raw_value(
-            &PromptCompletePayload {
-                session_id: session_id.to_string(),
-                stop_reason: Some("error".to_string()),
-                prompt_id: None,
-                agent_result: Some(agent_result.to_string()),
-                cancel_trigger: None,
-                cancellation_category: None,
-                cancellation_context: None,
-                error_kind: Some(error_kind.to_string()),
-                meta: None,
-            },
-        )
-        .unwrap();
-    acp::ExtNotification::new("x.ai/session/prompt_complete", std::sync::Arc::from(raw))
-=======
     acp_fixtures::ext_notification(
-        "x.ai/session/prompt_complete",
+        "example.invalid/session/prompt_complete",
         &PromptCompletePayload {
             session_id: session_id.to_string(),
             stop_reason: Some("error".to_string()),
@@ -1000,7 +967,6 @@ pub(super) fn prompt_complete_ext_failed_with_error_kind(
             meta: None,
         },
     )
->>>>>>> upstream
 }
 /// Build an `example.invalid/session/prompt_complete` ext-notification carrying a `promptId` (shells with the lost-response fix).
 /// Built through the typed [`PromptCompletePayload`] so the test wire shape can never drift from what `handle_prompt_complete` parses.
@@ -1009,41 +975,8 @@ pub(super) fn prompt_complete_ext_with_prompt_id(
     prompt_id: &str,
     stop_reason: &str,
 ) -> acp::ExtNotification {
-<<<<<<< fork
-    let raw = serde_json::value::to_raw_value(
-            &PromptCompletePayload {
-                session_id: session_id.to_string(),
-                stop_reason: Some(stop_reason.to_string()),
-                prompt_id: Some(prompt_id.to_string()),
-                agent_result: None,
-                cancel_trigger: None,
-                cancellation_category: None,
-                cancellation_context: None,
-                error_kind: None,
-                meta: None,
-            },
-        )
-        .unwrap();
-    acp::ExtNotification::new("example.invalid/session/prompt_complete", std::sync::Arc::from(raw))
-||||||| base
-    let raw = serde_json::value::to_raw_value(
-            &PromptCompletePayload {
-                session_id: session_id.to_string(),
-                stop_reason: Some(stop_reason.to_string()),
-                prompt_id: Some(prompt_id.to_string()),
-                agent_result: None,
-                cancel_trigger: None,
-                cancellation_category: None,
-                cancellation_context: None,
-                error_kind: None,
-                meta: None,
-            },
-        )
-        .unwrap();
-    acp::ExtNotification::new("x.ai/session/prompt_complete", std::sync::Arc::from(raw))
-=======
     acp_fixtures::ext_notification(
-        "x.ai/session/prompt_complete",
+        "example.invalid/session/prompt_complete",
         &PromptCompletePayload {
             session_id: session_id.to_string(),
             stop_reason: Some(stop_reason.to_string()),
@@ -1056,7 +989,6 @@ pub(super) fn prompt_complete_ext_with_prompt_id(
             meta: None,
         },
     )
->>>>>>> upstream
 }
 /// Build a live `AgentMessageChunk` whose meta carries `promptId` plus a `turnStartMs` `start_ms_ago` milliseconds in the past.
 /// Drives the viewer adoption path with a known authoritative turn start.
@@ -1457,19 +1389,7 @@ pub(super) fn xai_hook_execution_notif_with_runs(
         },
         meta: Some(serde_json::json!({ "isReplay": is_replay })),
     };
-<<<<<<< fork
-    acp::ExtNotification::new(
-        "example.invalid/session/update",
-        serde_json::value::to_raw_value(&payload).unwrap().into(),
-    )
-||||||| base
-    acp::ExtNotification::new(
-        "x.ai/session/update",
-        serde_json::value::to_raw_value(&payload).unwrap().into(),
-    )
-=======
-    acp_fixtures::ext_notification("x.ai/session/update", &payload)
->>>>>>> upstream
+    acp_fixtures::ext_notification("example.invalid/session/update", &payload)
 }
 /// Work-only status lines ("N … still running") pushed as system rows.
 /// Never pushed in production; tests assert emptiness.
@@ -2012,16 +1932,10 @@ pub(super) fn dispatch_goal_update(
     let (tx, _rx) = tokio::sync::oneshot::channel();
     handle(
         AcpClientMessage::ExtNotification(xai_acp_lib::AcpArgs {
-<<<<<<< fork
-            request: acp::ExtNotification::new("example.invalid/session_notification", raw.into()),
-||||||| base
-            request: acp::ExtNotification::new("x.ai/session_notification", raw.into()),
-=======
             request: acp_fixtures::ext_notification(
-                "x.ai/session_notification",
+                "example.invalid/session_notification",
                 &raw_payload,
             ),
->>>>>>> upstream
             response_tx: tx,
         }),
         app,
