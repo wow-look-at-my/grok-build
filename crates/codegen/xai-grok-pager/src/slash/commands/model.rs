@@ -360,7 +360,6 @@ fn pick_token(models: &ModelState, id: &acp::ModelId) -> String {
     }
 }
 
-<<<<<<< fork
 /// Every model whose display name is `name`, in catalog order.
 fn models_named<'a>(models: &'a ModelState, name: &str) -> Vec<&'a acp::ModelId> {
     models
@@ -412,40 +411,41 @@ fn detect_route_phase<'a>(
         .map(|name| (models_named(models, name), name.len()))
 }
 
-/// Trailing space on reasoning models: it signals "more input expected" to
-/// the prompt widget, so Enter advances to the effort phase instead of
-/// submitting.
-fn chained_insert(token: &str, info: &acp::ModelInfo) -> String {
-    if supports_reasoning_effort(info) {
+/// The model with a sub-menu that `args` leads with, and the window or effort text after it.
+fn split_model_rest<'a>(models: &ModelState, args: &'a str) -> Option<(acp::ModelId, &'a str)> {
+    let (id, len) = detect_chained_prefix(models, args)?;
+    let rest = args[len..].trim();
+    (!rest.is_empty()).then_some((id, rest))
+}
+
+/// A trailing space on a model with a window or effort sub-menu signals "more input expected" to the prompt widget.
+/// Enter then advances to that sub-menu instead of submitting.
+fn chained_insert(models: &ModelState, id: &acp::ModelId, token: &str, info: &acp::ModelInfo) -> String {
+    if has_chained_args(models, id, info) {
         format!("{token} ")
-||||||| base
-fn split_model_effort<'a>(
-    models: &'a ModelState,
-    args: &'a str,
-) -> Option<(acp::ModelId, &'a str)> {
-    let (id, _, rest) = longest_reasoning_prefix(models, args)?;
-    let token = rest.trim();
-    if token.is_empty() {
-        None
-=======
-fn split_model_rest<'a>(models: &'a ModelState, args: &'a str) -> Option<(acp::ModelId, &'a str)> {
-    let (id, _, rest) = longest_chained_prefix(models, args)?;
-    let rest = rest.trim();
-    if rest.is_empty() {
-        None
->>>>>>> upstream
     } else {
-<<<<<<< fork
         token.to_owned()
-||||||| base
-        Some((id.clone(), token))
-=======
-        Some((id.clone(), rest))
->>>>>>> upstream
     }
 }
 
-<<<<<<< fork
+/// A window is always the first token, and the remaining words are the effort.
+fn split_window_effort<'a>(
+    rest: &'a str,
+    windows: &[u64],
+) -> Result<(Option<std::num::NonZeroU64>, &'a str), String> {
+    let (first, tail) = match rest.split_once(char::is_whitespace) {
+        Some((first, tail)) => (first, tail.trim()),
+        None => (rest, ""),
+    };
+    if windows.is_empty() || parse_window_token(first).is_none() {
+        return Ok((None, rest));
+    }
+    match supported_window(first, windows) {
+        Some(window) => Ok((Some(window), tail)),
+        None => Err(unknown_window_error(first, windows)),
+    }
+}
+
 /// The row description: the model's own, else where it routes.
 fn row_description(info: &acp::ModelInfo) -> String {
     match info.description.as_deref() {
@@ -456,8 +456,7 @@ fn row_description(info: &acp::ModelInfo) -> String {
     }
 }
 
-/// One row per route for the `/model` route phase. A route that differs from
-/// the others only in its id shows its id.
+/// One row per route for the `/model` route phase. A route that differs from the others only in its id shows its id.
 fn build_route_items(models: &ModelState, group: &[&acp::ModelId]) -> Vec<ArgItem> {
     let labels: Vec<String> = group
         .iter()
@@ -489,38 +488,13 @@ fn build_route_items(models: &ModelState, group: &[&acp::ModelId]) -> Vec<ArgIte
         items.push(ArgItem {
             display,
             match_text: format!("{} {}", label, id.0),
-            insert_text: chained_insert(id.0.as_ref(), info),
+            insert_text: chained_insert(models, id, id.0.as_ref(), info),
             description: info.description.clone().unwrap_or_default(),
             loaded_in_vram: loaded_in_vram_meta(info.meta.as_ref()),
             favorite: is_favorite(info),
         });
     }
     items
-||||||| base
-fn matched_reasoning_prefix(
-    models: &ModelState,
-    args_query: &str,
-) -> Option<(acp::ModelId, String)> {
-    let (id, key, _) = longest_reasoning_prefix(models, args_query)?;
-    Some((id.clone(), key.to_string()))
-=======
-/// A window is always the first token, and the remaining words are the effort.
-fn split_window_effort<'a>(
-    rest: &'a str,
-    windows: &[u64],
-) -> Result<(Option<std::num::NonZeroU64>, &'a str), String> {
-    let (first, tail) = match rest.split_once(char::is_whitespace) {
-        Some((first, tail)) => (first, tail.trim()),
-        None => (rest, ""),
-    };
-    if windows.is_empty() || parse_window_token(first).is_none() {
-        return Ok((None, rest));
-    }
-    match supported_window(first, windows) {
-        Some(window) => Ok((Some(window), tail)),
-        None => Err(unknown_window_error(first, windows)),
-    }
->>>>>>> upstream
 }
 
 <<<<<<< fork

@@ -60,12 +60,6 @@ pub const REMOTE_FETCH_CONFIG_PATH: &str = "features.remote_fetch";
 /// The effective merge lets the user file win for every other key.
 pub const MANAGED_WINS_OVER_USER: &[&str] = &[REMOTE_FETCH_CONFIG_PATH];
 
-<<<<<<< fork
-/// The user `config.json` tier stays fail-open: it is a preference, not deployment policy.
-||||||| base
-/// The user `config.toml` tier stays fail-open: it is a preference, not deployment policy.
-=======
->>>>>>> upstream
 #[cfg(test)]
 mod turn_transient_retry_toml_tests {
     use super::turn_transient_retry_from_toml;

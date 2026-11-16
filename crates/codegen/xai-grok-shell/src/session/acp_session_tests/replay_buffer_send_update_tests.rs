@@ -44,14 +44,8 @@ pub(super) async fn make_replay_send_update_fixture() -> ReplaySendUpdateFixture
     ));
     let sent_ext = Arc::new(tokio::sync::Mutex::new(Vec::<acp::ExtNotification>::new()));
     let sent_for_task = sent.clone();
-<<<<<<< fork
-    xai_spawn::spawn_local(async move {
-||||||| base
-    tokio::task::spawn_local(async move {
-=======
     let sent_ext_for_task = sent_ext.clone();
-    tokio::task::spawn_local(async move {
->>>>>>> upstream
+    xai_spawn::spawn_local(async move {
         while let Some(msg) = gateway_rx.recv().await {
             match msg {
                 xai_acp_lib::AcpClientMessage::SessionNotification(args) => {
@@ -143,41 +137,7 @@ pub(super) async fn make_replay_send_update_fixture() -> ReplaySendUpdateFixture
         rewind_pending_prompt: std::sync::Mutex::new(None),
         startup_hints: StartupHints::default(),
         forked_tool_override: None,
-<<<<<<< fork
-        compaction: crate::session::compaction_config::CompactionConfig {
-            threshold_percent: std::cell::Cell::new(85),
-            pending_manual_compact: std::cell::Cell::new(None),
-            force_compact: std::sync::Arc::new(std::sync::atomic::AtomicBool::new(false)),
-            context_window_override: None,
-            count: std::sync::atomic::AtomicU64::new(0),
-            auto_compact_suppressed: std::sync::atomic::AtomicU8::new(0),
-            previous_model: std::cell::Cell::new(None),
-            compaction_mode: xai_chat_state::CompactionMode::Transcript,
-            verbatim_input: true,
-            tool_choice: crate::util::config::CompactionToolChoice::Auto,
-            prefire: crate::session::compaction_config::PrefireState::default(),
-            prefix_released: std::sync::atomic::AtomicBool::new(false),
-            cancel: Default::default(),
-            context_overflow_recovery: Default::default(),
-        },
-||||||| base
-        compaction: crate::session::compaction_config::CompactionConfig {
-            threshold_percent: std::cell::Cell::new(85),
-            force_compact: std::sync::Arc::new(std::sync::atomic::AtomicBool::new(false)),
-            context_window_override: None,
-            count: std::sync::atomic::AtomicU64::new(0),
-            auto_compact_suppressed: std::sync::atomic::AtomicU8::new(0),
-            previous_model: std::cell::Cell::new(None),
-            compaction_mode: xai_chat_state::CompactionMode::Transcript,
-            verbatim_input: true,
-            tool_choice: crate::util::config::CompactionToolChoice::Auto,
-            prefire: crate::session::compaction_config::PrefireState::default(),
-            prefix_released: std::sync::atomic::AtomicBool::new(false),
-            cancel: Default::default(),
-        },
-=======
         compaction: test_compaction_config(85),
->>>>>>> upstream
         long_reasoning_reminder: crate::session::long_reasoning_reminder::LongReasoningReminder {
             enabled: false,
             tokens: crate::session::long_reasoning_reminder::DEFAULT_TOKENS,
@@ -573,7 +533,6 @@ async fn available_commands_update_is_forwarded_but_not_persisted() {
         })
         .await;
 }
-<<<<<<< fork
 
 /// A call is named from the arguments it has so far, not from the arguments
 /// it ends with. Before this the row wore the wire name (`read_file`) for the
@@ -720,8 +679,8 @@ async fn deliver_tool_delta(
             arguments_delta: arguments_delta.map(str::to_string),
         })
         .await;
-||||||| base
-=======
+}
+
 #[tokio::test]
 async fn server_overflow_clears_a_larger_context_window_selection() {
     let local = tokio::task::LocalSet::new();
@@ -866,5 +825,4 @@ fn selected_window_config(
         context_window: std::num::NonZeroU64::new(window).unwrap(),
         ..Default::default()
     }
->>>>>>> upstream
 }

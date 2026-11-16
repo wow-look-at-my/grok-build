@@ -770,39 +770,17 @@ fn mark_keeps_fail_closed_armed_without_on_disk_file() {
 
     // Once the served file is deleted, the decision is compromised
     std::fs::remove_file(home.join("requirements.toml")).unwrap();
-<<<<<<< fork
-    assert!(managed_policy_compromised_decision(
-        SignedVerdict::Inactive,
-        || false,
-        cache.as_ref(),
-        home,
-        &team("team-1")
-    ));
-    assert!(managed_policy_compromised_for_at(home, &team("team-1")));
-||||||| base
-    assert!(managed_policy_compromised_decision(
-        SignedVerdict::Inactive,
-        || false,
-        false,
-        cache.as_ref(),
-        home,
-        &team("team-1")
-    ));
-    assert!(managed_policy_compromised_for_at(home, &team("team-1")));
-=======
     assert_eq!(
         Some(ManagedPolicyCompromise::PolicyFileMissing),
         managed_policy_compromised_decision(
             SignedVerdict::Inactive,
             || false,
-            false,
             cache.as_ref(),
             home,
             &team("team-1")
         )
     );
     assert!(managed_policy_compromised_for_at(home, &team("team-1")).is_some());
->>>>>>> upstream
 
     // A no-write sync (file still absent) stays armed: opt-in is from the response.
     mark_managed_config_synced_at(
