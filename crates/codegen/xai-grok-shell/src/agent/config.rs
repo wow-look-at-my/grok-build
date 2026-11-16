@@ -18,21 +18,11 @@ use xai_grok_config::{Capability, Distribution};
 use xai_grok_login::{AuthManager, GrokComConfig};
 use xai_grok_sampler::{AuthScheme, SamplerConfig};
 use xai_grok_sampling_types::{
-<<<<<<< fork
-    CompactionAtTokens, CompactionsRemaining, ENDPOINT_META_KEY, FAVORITE_META_KEY,
-    LOADED_IN_VRAM_META_KEY, PROVIDER_META_KEY, REASONING_EFFORT_META_KEY,
-    REASONING_EFFORTS_META_KEY, ReasoningEffort, ReasoningEffortOption, ReasoningSummary,
-    endpoint_host, reasoning_effort_meta_value, reasoning_efforts_meta_value,
-||||||| base
-    CompactionAtTokens, CompactionsRemaining, REASONING_EFFORT_META_KEY,
-    REASONING_EFFORTS_META_KEY, ReasoningEffort, ReasoningEffortOption, ReasoningSummary,
+    CONTEXT_WINDOWS_META_KEY, CompactionAtTokens, CompactionsRemaining, ENDPOINT_META_KEY,
+    FAVORITE_META_KEY, LOADED_IN_VRAM_META_KEY, MODEL_NOTICE_META_KEY, ModelNotice,
+    PROVIDER_META_KEY, REASONING_EFFORT_META_KEY, REASONING_EFFORTS_META_KEY, ReasoningEffort,
+    ReasoningEffortOption, ReasoningSummary, context_windows_meta_value, endpoint_host,
     reasoning_effort_meta_value, reasoning_efforts_meta_value,
-=======
-    CONTEXT_WINDOWS_META_KEY, CompactionAtTokens, CompactionsRemaining, MODEL_NOTICE_META_KEY,
-    ModelNotice, REASONING_EFFORT_META_KEY, REASONING_EFFORTS_META_KEY, ReasoningEffort,
-    ReasoningEffortOption, ReasoningSummary, context_windows_meta_value,
-    reasoning_effort_meta_value, reasoning_efforts_meta_value,
->>>>>>> upstream
 };
 use xai_grok_tools::types::compat::{CompatConfig, CompatConfigToml};
 /// Determines behavior like relay sync enablement.
@@ -148,42 +138,10 @@ impl std::fmt::Display for EnvKeys {
         f.write_str(&self.names().join(", "))
     }
 }
-/// `[endpoints]` keys of the removed direct S3 and direct GCS upload modes.
-/// A config that names one fails to load. Trace uploads go through the proxy only.
-pub const REMOVED_DIRECT_UPLOAD_KEYS: &[&str] = &[
-    "trace_upload_bucket",
-    "trace_upload_region",
-    "trace_upload_credentials_file",
-    "trace_upload_credentials",
-    "trace_upload_endpoint_url",
-    "gcs_service_account_key",
-];
-
-/// Env vars of the removed direct S3 and direct GCS upload modes.
-pub const REMOVED_DIRECT_UPLOAD_ENV_VARS: &[&str] = &[
-    "GROK_TRACE_UPLOAD_BUCKET",
-    "GROK_TRACE_UPLOAD_REGION",
-    "GROK_TRACE_UPLOAD_CREDENTIALS_FILE",
-    "GROK_TRACE_UPLOAD_ENDPOINT_URL",
-    "GROK_TELEMETRY_GCS_BUCKET",
-];
-
-/// The message for a setting of a removed upload mode.
-pub fn removed_direct_upload_message(setting: &str) -> String {
-    format!(
-        "`{setting}` selects a direct S3 or direct GCS trace upload, and those upload modes \
-         were removed. Trace uploads go through the proxy only. Remove `{setting}`."
-    )
-}
-
-/// The first removed direct-upload env var that is set, as an error message.
-pub fn removed_direct_upload_env_error() -> Option<String> {
-    REMOVED_DIRECT_UPLOAD_ENV_VARS
-        .iter()
-        .find(|name| std::env::var_os(name).is_some())
-        .map(|name| removed_direct_upload_message(name))
-}
-
+pub use xai_grok_config::{
+    EndpointsConfigError, REMOVED_DIRECT_UPLOAD_ENV_VARS, REMOVED_DIRECT_UPLOAD_KEYS,
+    removed_direct_upload_env_error, removed_direct_upload_message,
+};
 /// The default is `context_window`, else the first listed window; the choices keep list order and include it.
 pub(crate) fn context_window_choices(
     context_window: Option<NonZeroU64>,

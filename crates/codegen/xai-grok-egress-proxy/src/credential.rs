@@ -11,8 +11,8 @@ use std::net::SocketAddr;
 use std::sync::Mutex;
 
 use base64::Engine;
-use rand::TryRngCore;
-use rand::rngs::OsRng;
+use rand::TryRng;
+use rand::rngs::SysRng;
 use subtle::ConstantTimeEq;
 use xai_grok_sandbox::command::CommandTag;
 
@@ -30,7 +30,7 @@ pub struct ProxyToken(String);
 impl ProxyToken {
     pub(crate) fn generate() -> io::Result<ProxyToken> {
         let mut bytes = [0u8; 32];
-        OsRng.try_fill_bytes(&mut bytes).map_err(io::Error::other)?;
+        SysRng.try_fill_bytes(&mut bytes).map_err(io::Error::other)?;
         Ok(ProxyToken(
             base64::engine::general_purpose::URL_SAFE_NO_PAD.encode(bytes),
         ))
