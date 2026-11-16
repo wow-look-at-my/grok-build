@@ -1044,15 +1044,9 @@ pub struct AppView {
     /// When false (remote kill switch or `GROK_VOICE_MODE=0`) the STT pipeline is not started and session voice mode cannot turn on.
     /// Unit tests leave this false until they call [`Self::apply_voice_mode_enabled`].
     pub voice_mode_enabled: bool,
-<<<<<<< fork
-    /// Session UI mode from `/voice` (this CLI process only, not in config.json).
-||||||| base
-    /// Session UI mode from `/voice` (this CLI process only, not in config.toml).
-=======
     /// What this build may do. Tests set it; everything else takes [`Distribution::current`].
     pub distribution: xai_grok_config::Distribution,
-    /// Session UI mode from `/voice` (this CLI process only, not in config.toml).
->>>>>>> upstream
+    /// Session UI mode from `/voice` (this CLI process only, not in config.json).
     /// When true and the pipeline is up, the in-prompt dictation overlay can show and capture may start.
     /// Cleared on exit or when the remote flag turns off.
     pub voice_ui_active: bool,

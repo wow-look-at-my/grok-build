@@ -101,13 +101,6 @@ fn command_needs_pre_sandbox_policy_heal(command: Option<&Command>) -> bool {
     }
 }
 use std::env;
-<<<<<<< fork
-||||||| base
-use xai_grok_update::{UpdateConfig, auto_update, enforce_version_policy_or_exit};
-=======
-use xai_grok_update::enforce_version_policy_or_exit;
-use xai_grok_update::{UpdateConfig, auto_update};
->>>>>>> upstream
 #[cfg(all(feature = "test-seams", debug_assertions))]
 mod test_seam {
     const TEST_TRUSTED_PUBKEY_FILE_ENV: &str = "GROK_TEST_TRUSTED_PUBKEY_FILE";
@@ -1555,107 +1548,6 @@ async fn run_agent_command(
         Some(AgentCmd::Leader(a)) => {
             let mut agent_config = agent_config.clone();
             apply_headless_args_to_config(&a.headless, &mut agent_config);
-<<<<<<< fork
-||||||| base
-            let leader_auto_update = if !should_check_for_updates(
-                no_auto_update || a.no_auto_update,
-            ) {
-                tracing::info!("Leader auto-update disabled");
-                None
-            } else {
-                let update_config_for_leader = update_config.clone();
-                Some(xai_grok_shell::agent::app::LeaderAutoUpdateConfig {
-                    check_interval: std::time::Duration::from_secs(60 * 60),
-                    check_fn: Box::new(move || {
-                        let uc = update_config_for_leader.clone();
-                        Box::pin(async move {
-                            let current_config = xai_grok_shell::util::config::load_config().await;
-                            if current_config.cli.auto_update == Some(false) {
-                                return false;
-                            }
-                            match auto_update::ensure_latest_on_disk(&uc).await {
-                                Ok(outcome) => {
-                                    if let Some(v) = &outcome.installed {
-                                        if let Err(e) = xai_grok_shell::managed_config::sync().await
-                                        {
-                                            tracing::warn!(
-                                                "Leader auto-update: managed config refresh failed: {e}"
-                                            );
-                                        }
-                                        tracing::info!(
-                                            "Leader auto-update: v{v} installed successfully"
-                                        );
-                                    } else if outcome.relaunch_needed {
-                                        tracing::info!(
-                                            "Leader auto-update: newer binary already on disk, \
-                                             relaunching without download"
-                                        );
-                                    }
-                                    outcome.relaunch_needed
-                                }
-                                Err(e) => {
-                                    tracing::warn!(
-                                        "Leader auto-update: check/download failed, \
-                                         staying alive: {e:#}"
-                                    );
-                                    false
-                                }
-                            }
-                        })
-                    }),
-                })
-            };
-=======
-            let leader_auto_update = if !should_check_for_updates(
-                no_auto_update || a.no_auto_update,
-            ) {
-                tracing::info!("Leader auto-update disabled");
-                None
-            } else {
-                let update_config_for_leader = update_config.clone();
-                Some(xai_grok_shell::agent::app::LeaderAutoUpdateConfig {
-                    check_interval: std::time::Duration::from_secs(60 * 60),
-                    check_fn: Box::new(move || {
-                        let uc = update_config_for_leader.clone();
-                        Box::pin(async move {
-                            let current_config = xai_grok_shell::util::config::load_config().await;
-                            if current_config.cli.auto_update == Some(false) {
-                                return false;
-                            }
-                            match auto_update::ensure_latest_on_disk(&uc).await {
-                                Ok(outcome) => {
-                                    if let Some(v) = &outcome.installed {
-                                        if let Err(e) =
-                                            xai_grok_cloud_config::managed_config::sync().await
-                                        {
-                                            tracing::warn!(
-                                                "Leader auto-update: managed config refresh failed: {e}"
-                                            );
-                                        }
-                                        tracing::info!(
-                                            "Leader auto-update: v{v} installed successfully"
-                                        );
-                                    } else if outcome.relaunch_needed {
-                                        tracing::info!(
-                                            "Leader auto-update: newer binary already on disk, \
-                                             relaunching without download"
-                                        );
-                                    }
-                                    outcome.relaunch_needed
-                                }
-                                Err(e) => {
-                                    tracing::warn!(
-                                        "Leader auto-update: check/download failed, \
-                                         staying alive: {e:#}"
-                                    );
-                                    false
-                                }
-                            }
-                        })
-                    }),
-                })
-            };
->>>>>>> upstream
             let cursor_worker = None;
             run_leader(
                 &agent_config,

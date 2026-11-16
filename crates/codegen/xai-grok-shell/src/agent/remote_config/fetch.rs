@@ -1,5 +1,6 @@
 //! Model-catalog fetch transport.
 
+use chrono::{DateTime, Utc};
 use indexmap::IndexMap;
 
 use super::{ModelFetchAuth, ModelsCacheManager, resolve_models_cache_scope};
@@ -69,10 +70,9 @@ fn fetched_model_map(
     fetch_auth: ModelFetchAuth,
 ) -> Option<(IndexMap<String, ModelEntry>, Option<String>)> {
     let _timer = crate::instrumentation_timer!("startup.fetch_models_blocking");
-<<<<<<< fork
     let fetched_at = Utc::now();
     let result = source.fetch(auth);
-    prefetch_from_result(result, endpoints, fetch_auth, scope, fetched_at)
+    prefetch_from_result(result, endpoints, fetch_auth, &source.cache_origin(), fetched_at)
 }
 
 /// [`prefetch_models_blocking`] for a caller on a runtime. The fetch runs on the
