@@ -1,23 +1,4 @@
-<<<<<<< fork
 #![allow(clippy::cast_lossless)]
-// lib.rs holds the lib code.
-#![allow(
-    unused_imports,
-    unused_variables,
-    unused_mut,
-    unreachable_code,
-    dead_code
-)]
-||||||| base
-#![allow(
-    unused_imports,
-    unused_variables,
-    unused_mut,
-    unreachable_code,
-    dead_code
-)]
-=======
->>>>>>> upstream
 #![deny(clippy::indexing_slicing)]
 
 mod file_acceleration;

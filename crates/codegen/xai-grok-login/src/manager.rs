@@ -446,18 +446,14 @@ impl AuthManager {
         proxy_base_url: String,
         disk_state: Option<DiskAuthState>,
     ) -> Self {
-<<<<<<< fork
         // An inline `GROK_AUTH` token never passes `lookup_auth`.
         if let Some(auth) = inner.as_ref() {
             auth.register_session();
         }
-||||||| base
-=======
         let (login_changes, _) = tokio::sync::watch::channel(LoginSnapshot {
             login: Login::of(Self::served_login(&grok_com_config, &inner)),
             generation: 0,
         });
->>>>>>> upstream
         Self {
             inner: RwLock::new(inner),
             path,
@@ -699,17 +695,11 @@ impl AuthManager {
     pub(crate) fn with_inner_write<R>(&self, f: impl FnOnce(&mut Option<GrokAuth>) -> R) -> R {
         let fingerprint = |auth: &GrokAuth| auth.key.clone();
         let mut guard = self.inner.write();
-<<<<<<< fork
-        let out = f(&mut guard);
+        let before = Self::served_login(&self.grok_com_config, &guard).map(fingerprint);
+        let result = f(&mut guard);
         if let Some(auth) = guard.as_ref() {
             auth.register_session();
         }
-        out
-||||||| base
-        f(&mut guard)
-=======
-        let before = Self::served_login(&self.grok_com_config, &guard).map(fingerprint);
-        let result = f(&mut guard);
         let after = Self::served_login(&self.grok_com_config, &guard);
         let snapshot = (after.map(fingerprint) != before).then(|| LoginSnapshot {
             login: Login::of(after),
@@ -723,7 +713,6 @@ impl AuthManager {
             Self::publish_login_if_newer(&self.login_changes, snapshot);
         }
         result
->>>>>>> upstream
     }
     /// Closure-scoped read counterpart to [`Self::with_inner_write`].
     #[inline]
