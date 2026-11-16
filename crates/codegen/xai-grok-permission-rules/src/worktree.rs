@@ -2,6 +2,7 @@
 //!
 //! Reading a WAL database can still create `-wal` and `-shm` side files, and on a network mount the open may convert the journal mode
 
+use std::ffi::OsStr;
 use std::path::{Path, PathBuf};
 
 use rusqlite::{Connection, OptionalExtension, Row};
@@ -15,17 +16,33 @@ const GET_BY_ID: &str = "SELECT * FROM worktrees WHERE id = ?1";
 const GET_BY_LABEL: &str = "SELECT * FROM worktrees WHERE json_valid(metadata) AND json_extract(metadata, '$.label') = ?1 ORDER BY created_at DESC";
 const GET_BY_PATH: &str = "SELECT * FROM worktrees WHERE path = ?1";
 
-/// The recorded source repo of the grok-managed worktree containing `cwd`; the DB is not opened unless `cwd` is under `<grok_home>/worktrees/`
+/// The recorded source repo of the grok-managed worktree containing `cwd`.
 pub(crate) fn source_repo_for_cwd(cwd: &str) -> Option<PathBuf> {
     source_repo_for_cwd_in(&xai_dirs::resolve_grok_home()?, cwd)
 }
 
-fn source_repo_for_cwd_in(grok_home: &Path, cwd: &str) -> Option<PathBuf> {
-    let worktrees_dir = grok_home.join("worktrees");
-    let mut path = Path::new(cwd);
-    if !path.starts_with(&worktrees_dir) {
-        return None;
+/// The managed worktrees root that contains `path`: `<grok_home>/worktrees`, else the outermost `<X>/.grok/worktrees` above `path`
+fn managed_worktrees_boundary(grok_home: &Path, path: &Path) -> Option<PathBuf> {
+    let home_root = grok_home.join("worktrees");
+    if path.starts_with(&home_root) {
+        return Some(home_root);
     }
+    let mut outermost = None;
+    for ancestor in path.ancestors().skip(1) {
+        let here_is_worktrees = ancestor.file_name() == Some(OsStr::new("worktrees"));
+        let parent_is_dot_grok = ancestor
+            .parent()
+            .is_some_and(|p| p.file_name() == Some(OsStr::new(".grok")));
+        if here_is_worktrees && parent_is_dot_grok {
+            outermost = Some(ancestor.to_path_buf());
+        }
+    }
+    outermost
+}
+
+fn source_repo_for_cwd_in(grok_home: &Path, cwd: &str) -> Option<PathBuf> {
+    let mut path = Path::new(cwd);
+    let worktrees_dir = managed_worktrees_boundary(grok_home, path)?;
 
     let conn = open_read_only(grok_home)?;
     if !schema_supported(&conn) {
@@ -178,6 +195,42 @@ mod tests {
         insert(&reg, "wt", &outside.to_string_lossy(), "1", None);
         assert_eq!(
             source_repo_for_cwd_in(&reg.home, &outside.to_string_lossy()),
+            None
+        );
+    }
+
+    #[test]
+    fn repo_local_worktree_resolves_to_registered_source() {
+        let reg = registry();
+        let wt = reg
+            .home
+            .parent()
+            .unwrap()
+            .join("thing")
+            .join(".grok")
+            .join("worktrees")
+            .join("label");
+        std::fs::create_dir_all(&wt).unwrap();
+        insert(&reg, "label", &wt.to_string_lossy(), "1", None);
+        let nested = wt.join("crates").join("inner");
+        std::fs::create_dir_all(&nested).unwrap();
+        assert_eq!(
+            source_repo_for_cwd_in(&reg.home, &nested.to_string_lossy()),
+            Some(PathBuf::from("/src/label"))
+        );
+    }
+
+    #[test]
+    fn dir_beside_repo_local_worktrees_is_a_miss() {
+        let reg = registry();
+        let repo = reg.home.parent().unwrap().join("thing");
+        let wt = repo.join(".grok").join("worktrees").join("label");
+        std::fs::create_dir_all(&wt).unwrap();
+        insert(&reg, "label", &wt.to_string_lossy(), "1", None);
+        let unmanaged = repo.join(".grok").join("worktrees-other").join("dir");
+        std::fs::create_dir_all(&unmanaged).unwrap();
+        assert_eq!(
+            source_repo_for_cwd_in(&reg.home, &unmanaged.to_string_lossy()),
             None
         );
     }

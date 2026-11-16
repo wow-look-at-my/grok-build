@@ -7,16 +7,17 @@ description = "Import Claude settings into Grok config: permissions, hooks, MCP 
 
 [dependencies]
 dunce = { workspace = true }
-git2 = { version = "0.20", default-features = false, features = ["vendored-libgit2"] }
 serde_json = { workspace = true }
 thiserror = { workspace = true }
 toml = { workspace = true }
 tracing = { workspace = true }
 xai-dirs = { workspace = true }
+xai-gix-status = { workspace = true }
 xai-grok-config = { workspace = true }
 
 [dev-dependencies]
 tempfile = { workspace = true }
+xai-test-utils = { workspace = true }
 
 [lints]
 workspace = true

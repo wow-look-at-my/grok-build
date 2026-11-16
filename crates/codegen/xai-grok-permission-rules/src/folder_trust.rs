@@ -116,13 +116,13 @@ fn is_durably_trusted(feature_enabled: bool, inputs: &DecideInputs) -> bool {
     !feature_enabled || inputs.store_trusted
 }
 
-/// True for a binary built without a `GROK_VERSION` stamp.
+/// True for a binary that carries no release stamp.
 /// That binary trusts every folder without reading the trust store.
 pub fn folder_trust_inert() -> bool {
     if std::env::var(xai_grok_version::TEST_VERSION_ENV).is_ok() {
         return false;
     }
-    option_env!("GROK_VERSION").is_none()
+    !xai_grok_version::is_release_stamped()
 }
 
 pub fn feature_enabled(remote: Option<&RemoteSettings>) -> bool {
@@ -368,9 +368,9 @@ mod tests {
             let _sim = EnvVar::set(xai_grok_version::TEST_VERSION_ENV, "0.0.0-sim");
             assert!(!folder_trust_inert());
         }
+        // With it unset this is a local build, unconditionally: the stamper writes the release number into the shipped binary only.
         let _unset = EnvVar::unset(xai_grok_version::TEST_VERSION_ENV);
-        if option_env!("GROK_VERSION").is_none() {
-            assert!(folder_trust_inert());
-        }
+        assert!(!xai_grok_version::is_release_stamped());
+        assert!(folder_trust_inert());
     }
 }

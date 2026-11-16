@@ -4,19 +4,8 @@ use pretty_assertions::assert_eq;
 use std::sync::Arc;
 use xai_grok_login::{AuthManager, AuthMode, GrokAuth, GrokComConfig};
 use xai_grok_test_support::EnvGuard;
-<<<<<<< fork
 use xai_grok_voice::{Auth, VoiceAuthError};
 
-use super::build_voice_auth;
-
-||||||| base
-use xai_grok_voice::VoiceAuthError;
-
-use super::build_voice_auth;
-
-=======
-use xai_grok_voice::VoiceAuthError;
->>>>>>> upstream
 fn session(issuer: &str) -> GrokAuth {
     GrokAuth {
         key: "session-token".to_owned(),
@@ -39,32 +28,18 @@ async fn foreign_session_is_refused_and_xai_credential_is_served() {
     let mgr = Arc::new(AuthManager::new(dir.path(), GrokComConfig::default()));
     let auth = build_voice_auth(mgr.clone());
     mgr.hot_swap(session("https://cursor.com"));
-<<<<<<< fork
     assert_eq!(
         Err(VoiceAuthError::ForeignSession),
         auth.auth().await.map(|_| ())
     );
 
     // A static key is not the login, so it goes as an API key.
-||||||| base
-    assert_eq!(Err(VoiceAuthError::ForeignSession), auth.bearer().await);
-
-=======
-    assert_eq!(Err(VoiceAuthError::ForeignSession), auth.bearer().await);
->>>>>>> upstream
     mgr.set_process_static_api_key(Some("xai-static-key".to_owned()));
-<<<<<<< fork
     match auth.auth().await {
         Ok(Auth::ApiKey { key, .. }) => assert_eq!("xai-static-key", key),
         other => panic!("expected the static key as an API key, got {other:?}"),
     }
 
-||||||| base
-    assert_eq!(Ok("xai-static-key".to_owned()), auth.bearer().await);
-
-=======
-    assert_eq!(Ok("xai-static-key".to_owned()), auth.bearer().await);
->>>>>>> upstream
     mgr.set_process_static_api_key(None);
     mgr.clear().unwrap();
     assert_eq!(
@@ -92,8 +67,11 @@ async fn stt_routes_offer_the_clip_route_only_beside_a_foreign_session() {
     mgr.hot_swap(session("https://cursor.com"));
     assert_eq!(
         Err(VoiceAuthError::ForeignSession),
-        routes.auth.bearer().await
+        routes.auth.auth().await.map(|_| ())
     );
     mgr.set_process_static_api_key(Some("xai-static-key".to_owned()));
-    assert_eq!(Ok("xai-static-key".to_owned()), routes.auth.bearer().await);
+    match routes.auth.auth().await {
+        Ok(Auth::ApiKey { key, .. }) => assert_eq!("xai-static-key", key),
+        other => panic!("expected the static key as an API key, got {other:?}"),
+    }
 }

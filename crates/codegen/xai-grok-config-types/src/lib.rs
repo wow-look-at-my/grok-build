@@ -16,684 +16,6 @@ pub use permission::*;
 mod auth_provider;
 pub use auth_provider::*;
 <<<<<<< fork
-pub mod retry_budget;
-use serde::{Deserialize, Serialize};
-use xai_grok_announcements::RemoteAnnouncement;
-pub use xai_grok_config::DisplayRefreshSettings;
-use xai_grok_config::deserialize::optional_bool as de_opt_bool_tolerant;
-/// A remote `campaigns[]` entry: an `id` gate plus a flattened patch that can set any config key.
-/// It is the JSON sibling of a `[[campaigns]]` TOML override.
-/// `campaign_id` folds through [`CampaignOverride::ID_KEYS`], so an entry naming both keys still parses.
-#[derive(Debug, Clone, Default, Deserialize, Serialize, PartialEq, Eq)]
-#[serde(try_from = "CampaignOverrideWire")]
-pub struct CampaignOverride {
-    pub id: Option<String>,
-    #[serde(flatten, default)]
-    pub patch: serde_json::Map<String, serde_json::Value>,
-}
-
-impl CampaignOverride {
-    /// The keys [`id`](Self::id) is read under. The first is what this type
-    /// writes; `campaign_id` is the TOML sibling's spelling.
-    pub const ID_KEYS: xai_tool_types::Aliases =
-        xai_tool_types::Aliases::new("id", &["campaign_id"]);
-}
-
-/// `CampaignOverride` as it arrives, with each id spelling its own field so the
-/// flattened patch keeps everything else.
-#[derive(Debug, Default, Deserialize)]
-struct CampaignOverrideWire {
-    #[serde(default)]
-    id: Option<String>,
-    #[serde(default, rename = "campaign_id")]
-    campaign_id: Option<String>,
-    #[serde(flatten, default)]
-    patch: serde_json::Map<String, serde_json::Value>,
-}
-
-impl TryFrom<CampaignOverrideWire> for CampaignOverride {
-    type Error = xai_tool_types::AliasConflict;
-
-    fn try_from(wire: CampaignOverrideWire) -> Result<Self, Self::Error> {
-        Ok(Self {
-            id: CampaignOverride::ID_KEYS.fold(vec![wire.id, wire.campaign_id])?,
-            patch: wire.patch,
-        })
-    }
-}
-/// Doom-loop recovery settings: one struct serves both the local `[doom_loop_recovery]` TOML table and the remote `doom_loop_recovery` JSON object.
-/// Every field is `Option` with a per-field default, so a partial object parses and unknown future keys are ignored.
-/// Unset fields fall through per-field in `resolve_doom_loop_recovery`: env, then TOML, then remote, then default.
-/// The namespace is distinct from the removed legacy `doom_loop_*` keys.
-#[derive(Debug, Clone, Default, Deserialize, Serialize, PartialEq, Eq, schemars::JsonSchema)]
-#[serde(default)]
-pub struct DoomLoopRecoverySettings {
-    /// Send the `x-grok-doom-loop-check` header, parse the reported triggers, and resample confident loops.
-    /// `Some(false)` is a kill-switch; absent uses the client default (on).
-    #[serde(skip_serializing_if = "Option::is_none")]
-    pub enabled: Option<bool>,
-    /// Highest `tail_repetition` threshold considered confident.
-    #[serde(skip_serializing_if = "Option::is_none")]
-    pub max_threshold: Option<u32>,
-    /// Resample budget per turn. `-1` or `"unlimited"` never runs out.
-    #[serde(with = "retry_budget", skip_serializing_if = "Option::is_none")]
-    #[schemars(schema_with = "retry_budget::json_schema")]
-    pub max_retries: Option<u32>,
-    /// Detector window sent as the value of `x-grok-doom-loop-check` (honored in 512..=4096, otherwise 4096; absent uses the client default, 1024).
-    #[serde(skip_serializing_if = "Option::is_none")]
-    pub window_tokens: Option<u32>,
-}
-/// Shared shape of the `[long_reasoning_reminder]` TOML table and the remote `long_reasoning_reminder` object; unset fields fall through per field.
-#[derive(Debug, Clone, Default, Deserialize, Serialize, PartialEq, Eq, schemars::JsonSchema)]
-#[serde(default)]
-pub struct LongReasoningReminderSettings {
-    /// Mid-turn reminder to reason briefly after a long hidden-reasoning call; default off.
-    #[serde(skip_serializing_if = "Option::is_none")]
-    pub enabled: Option<bool>,
-    /// Reasoning tokens in one model call that count as a long step; absent uses the client default (1000).
-    #[serde(skip_serializing_if = "Option::is_none")]
-    pub tokens: Option<u32>,
-    /// Model calls to wait after the long step before the reminder is injected; absent uses the client default (1).
-    #[serde(skip_serializing_if = "Option::is_none")]
-    pub delay: Option<u32>,
-}
-/// Advanced knobs for the output-rate floor: the `[output_rate_floor]` TOML
-/// table. Every field is `Option` so a partial table never fails the parse
-/// and each key falls through to the client default on its own.
-#[derive(Debug, Clone, Default, Deserialize, Serialize, PartialEq, Eq, schemars::JsonSchema)]
-#[serde(default)]
-pub struct OutputRateFloorSettings {
-    /// Trailing window the rate is measured over, in seconds.
-    #[serde(skip_serializing_if = "Option::is_none")]
-    pub window_secs: Option<u64>,
-    /// Reissue budget per model call. `-1` or `"unlimited"` never runs out.
-    #[serde(with = "retry_budget", skip_serializing_if = "Option::is_none")]
-    #[schemars(schema_with = "retry_budget::json_schema")]
-    pub max_retries: Option<u32>,
-}
-
-/// Per-kind age policy for auto-GC: seconds or never.
-#[derive(Debug, Clone, PartialEq, Eq)]
-pub enum WorktreeKindMaxAge {
-    Secs(u64),
-    Never,
-}
-impl Serialize for WorktreeKindMaxAge {
-    fn serialize<S: serde::Serializer>(&self, serializer: S) -> Result<S::Ok, S::Error> {
-        match self {
-            Self::Secs(n) => serializer.serialize_u64(*n),
-            Self::Never => serializer.serialize_str("never"),
-        }
-    }
-}
-impl schemars::JsonSchema for WorktreeKindMaxAge {
-    fn schema_name() -> std::borrow::Cow<'static, str> {
-        "WorktreeKindMaxAge".into()
-    }
-    fn json_schema(_: &mut schemars::SchemaGenerator) -> schemars::Schema {
-        schemars::json_schema!({
-            "description": "Seconds, or \"never\".",
-            "anyOf": [
-                { "type": "integer", "minimum": 0 },
-                { "type": "string", "pattern": "^([Nn][Ee][Vv][Ee][Rr]|[0-9]+)$" }
-            ]
-        })
-    }
-}
-impl<'de> Deserialize<'de> for WorktreeKindMaxAge {
-    fn deserialize<D: serde::Deserializer<'de>>(deserializer: D) -> Result<Self, D::Error> {
-        struct V;
-        impl<'de> serde::de::Visitor<'de> for V {
-            type Value = WorktreeKindMaxAge;
-            fn expecting(&self, f: &mut std::fmt::Formatter) -> std::fmt::Result {
-                f.write_str("u64 seconds or \"never\"")
-            }
-            fn visit_u64<E: serde::de::Error>(self, v: u64) -> Result<Self::Value, E> {
-                Ok(WorktreeKindMaxAge::Secs(v))
-            }
-            fn visit_i64<E: serde::de::Error>(self, v: i64) -> Result<Self::Value, E> {
-                u64::try_from(v)
-                    .map(WorktreeKindMaxAge::Secs)
-                    .map_err(E::custom)
-            }
-            fn visit_str<E: serde::de::Error>(self, v: &str) -> Result<Self::Value, E> {
-                if v.eq_ignore_ascii_case("never") {
-                    Ok(WorktreeKindMaxAge::Never)
-                } else if let Ok(n) = v.parse::<u64>() {
-                    Ok(WorktreeKindMaxAge::Secs(n))
-                } else {
-                    Err(E::custom("expected \"never\" or integer seconds"))
-                }
-            }
-            fn visit_unit<E: serde::de::Error>(self) -> Result<Self::Value, E> {
-                Ok(WorktreeKindMaxAge::Never)
-            }
-            fn visit_none<E: serde::de::Error>(self) -> Result<Self::Value, E> {
-                Ok(WorktreeKindMaxAge::Never)
-            }
-        }
-        deserializer.deserialize_any(V)
-    }
-}
-/// Policy from the local `[worktree.auto_gc]` table or the remote `worktree_auto_gc` object.
-/// Each field deserializes tolerantly, so one bad key cannot drop a sibling kill-switch.
-#[derive(Debug, Clone, Default, Deserialize, Serialize, PartialEq, Eq, schemars::JsonSchema)]
-#[serde(default)]
-pub struct WorktreeAutoGcSettings {
-    /// `Some(false)` is a kill-switch; absent defaults to on (an env kill still applies).
-    #[serde(
-        default,
-        deserialize_with = "de_opt_bool_tolerant",
-        skip_serializing_if = "Option::is_none"
-    )]
-    pub enabled: Option<bool>,
-    /// Age cutoff in seconds, on platforms where expiring by age is allowed; the resolver clamps it.
-    #[serde(
-        default,
-        deserialize_with = "de_opt_u64_tolerant",
-        skip_serializing_if = "Option::is_none"
-    )]
-    pub max_age_secs: Option<u64>,
-    /// Minimum seconds between successful auto-GC runs; the resolver clamps it.
-    #[serde(
-        default,
-        deserialize_with = "de_opt_u64_tolerant",
-        skip_serializing_if = "Option::is_none"
-    )]
-    pub min_interval_secs: Option<u64>,
-    /// When set, counts worktrees old enough to delete without deleting them.
-    #[serde(
-        default,
-        deserialize_with = "de_opt_bool_tolerant",
-        skip_serializing_if = "Option::is_none"
-    )]
-    pub dry_run: Option<bool>,
-    /// Only has an effect on Linux.
-    #[serde(
-        default,
-        deserialize_with = "de_opt_bool_tolerant",
-        skip_serializing_if = "Option::is_none"
-    )]
-    pub include_orphan_snapshots: Option<bool>,
-    /// Per-kind max ages (`session`, `ab`, `pool`, `fork`, `manual`, `subagent`), each seconds or `"never"`.
-    /// Absent keys use the defaults; the client default keeps `manual` at never.
-    /// Remote may set `manual` to a finite TTL, and local TOML can restore `"never"`.
-    /// Unknown kind keys are ignored at resolve time.
-    #[serde(
-        default,
-        deserialize_with = "de_opt_max_age_by_kind_tolerant",
-        skip_serializing_if = "Option::is_none"
-    )]
-    pub max_age_by_kind: Option<std::collections::BTreeMap<String, WorktreeKindMaxAge>>,
-    /// Also rebuild discovery and scrub grok's stale `.git/worktrees/` entries (default off).
-    #[serde(
-        default,
-        deserialize_with = "de_opt_bool_tolerant",
-        skip_serializing_if = "Option::is_none"
-    )]
-    pub include_rebuild: Option<bool>,
-    /// Seconds between rebuilds, throttled independently of GC; absent means 24h. It is clamped like `min_interval_secs`.
-    #[serde(
-        default,
-        deserialize_with = "de_opt_u64_tolerant",
-        skip_serializing_if = "Option::is_none"
-    )]
-    pub rebuild_min_interval_secs: Option<u64>,
-}
-fn de_opt_u64_tolerant<'de, D: serde::Deserializer<'de>>(
-    deserializer: D,
-) -> Result<Option<u64>, D::Error> {
-    struct V;
-    impl<'de> serde::de::Visitor<'de> for V {
-        type Value = Option<u64>;
-        fn expecting(&self, f: &mut std::fmt::Formatter) -> std::fmt::Result {
-            f.write_str("u64 (wrong types ignored)")
-        }
-        fn visit_u64<E: serde::de::Error>(self, v: u64) -> Result<Self::Value, E> {
-            Ok(Some(v))
-        }
-        fn visit_i64<E: serde::de::Error>(self, v: i64) -> Result<Self::Value, E> {
-            Ok(u64::try_from(v).ok())
-        }
-        fn visit_u32<E: serde::de::Error>(self, v: u32) -> Result<Self::Value, E> {
-            Ok(Some(u64::from(v)))
-        }
-        fn visit_i32<E: serde::de::Error>(self, v: i32) -> Result<Self::Value, E> {
-            Ok(u64::try_from(v).ok())
-        }
-        fn visit_unit<E: serde::de::Error>(self) -> Result<Self::Value, E> {
-            Ok(None)
-        }
-        fn visit_none<E: serde::de::Error>(self) -> Result<Self::Value, E> {
-            Ok(None)
-        }
-        fn visit_some<A: serde::de::Deserializer<'de>>(
-            self,
-            d: A,
-        ) -> Result<Self::Value, A::Error> {
-            d.deserialize_any(V)
-        }
-        fn visit_str<E: serde::de::Error>(self, _: &str) -> Result<Self::Value, E> {
-            Ok(None)
-        }
-        fn visit_string<E: serde::de::Error>(self, _: String) -> Result<Self::Value, E> {
-            Ok(None)
-        }
-        fn visit_bool<E: serde::de::Error>(self, _: bool) -> Result<Self::Value, E> {
-            Ok(None)
-        }
-        fn visit_f64<E: serde::de::Error>(self, _: f64) -> Result<Self::Value, E> {
-            Ok(None)
-        }
-    }
-    deserializer.deserialize_any(V)
-}
-/// A bad whole value becomes `None`; a bad per-entry value is skipped and its siblings kept.
-fn de_opt_max_age_by_kind_tolerant<'de, D: serde::Deserializer<'de>>(
-    deserializer: D,
-) -> Result<Option<std::collections::BTreeMap<String, WorktreeKindMaxAge>>, D::Error> {
-    let value = serde_json::Value::deserialize(deserializer)?;
-    match value {
-        serde_json::Value::Null => Ok(None),
-        serde_json::Value::Object(map) => {
-            let mut out = std::collections::BTreeMap::new();
-            for (k, v) in map {
-                if let Ok(age) = serde_json::from_value::<WorktreeKindMaxAge>(v) {
-                    out.insert(k, age);
-                }
-            }
-            Ok(Some(out))
-        }
-        _ => Ok(None),
-    }
-}
-/// A nested value that is present but malformed becomes `None` with a warning, so one bad setting cannot fail the whole [`RemoteSettings`] parse.
-pub fn deserialize_tolerant<'de, D, T>(deserializer: D) -> Result<Option<T>, D::Error>
-where
-    D: serde::Deserializer<'de>,
-    T: serde::de::DeserializeOwned,
-{
-    let Some(value) =
-        Option::<serde_json::Value>::deserialize(deserializer)?.filter(|v| !v.is_null())
-    else {
-        return Ok(None);
-    };
-    match serde_json::from_value::<T>(value) {
-        Ok(parsed) => Ok(Some(parsed)),
-        Err(e) => {
-            tracing::warn!(
-                error = %e,
-                setting = std::any::type_name::<T>(),
-                "ignoring malformed remote setting; falling through to local defaults"
-            );
-            Ok(None)
-        }
-    }
-}
-/// Consent notice from `grok_build_settings.consent_gate`.
-/// The server decides which accounts see it; the payload carries no targeting.
-#[derive(Debug, Clone, Default, Deserialize, Serialize, PartialEq, Eq)]
-pub struct ConsentGate {
-    /// The id keys the stored answer and the upstream record. A payload without one is dropped whole.
-    pub id: String,
-    /// Acceptance version for this notice. It only compares against an answer to the same `id`.
-    #[serde(default)]
-    pub version: Option<i32>,
-    #[serde(default)]
-    pub title: Option<String>,
-    /// `[label](https://…)` links are painted inline; there is no scrolling, so keep it short.
-    #[serde(default)]
-    pub body: Option<String>,
-    /// This button is the only way past the notice.
-    #[serde(default)]
-    pub accept_label: Option<String>,
-}
-/// Remote settings fetched from cli-chat-proxy `GET /v1/settings`.
-///
-/// All fields are `Option` with `#[serde(default)]` so that:
-/// - Missing fields from old servers are ignored
-/// - New fields added in the future don't break existing clients
-/// - Callers can distinguish "server said false" from "server didn't say"
-/// `remote = "Self"` makes the derives inherent functions. The trait impls
-/// below call them, and `Deserialize` folds `nfs_worktree` first.
-/// trait method, never the inherent `RemoteSettings::deserialize`.
-#[derive(Debug, Clone, Default, Deserialize, Serialize)]
-#[serde(remote = "Self")]
-pub struct RemoteSettings {
-    /// When `Some(true)`, the server recommends enabling leader mode.
-    /// It is the fallback when the user hasn't set `[cli] use_leader` locally.
-    #[serde(default)]
-    pub leader_mode: Option<bool>,
-    #[serde(default)]
-    pub max_upload_file_bytes: Option<u64>,
-    #[serde(default)]
-    pub max_upload_untracked_bytes: Option<u64>,
-    /// When `Some(true)`, capture workspace files for non-git project dirs (client default: off).
-    #[serde(default)]
-    pub non_git_workspace_capture: Option<bool>,
-    #[serde(default)]
-    pub login_shell_capture: Option<bool>,
-    /// Fleet-wide kill switch for turn-level transient retries; it applies at the next spawn, and local config or env wins.
-    /// Malformed values must not fail the parse.
-    #[serde(default, deserialize_with = "de_opt_bool_tolerant")]
-    pub turn_transient_retry: Option<bool>,
-    /// Kill switch for the credential-less-401 park: `Some(false)` restores terminal behavior;
-    /// absent = enabled. Resolved at spawn; running turns finish on their spawn-time value.
-    #[serde(default, deserialize_with = "de_opt_bool_tolerant")]
-    pub uncharged_401_park: Option<bool>,
-    /// Release channel: `"stable"` or `"alpha"`.
-    /// It is the fallback when no local `[cli] channel` or `--alpha`/`--stable` flag is set.
-    #[serde(default)]
-    pub release_channel: Option<String>,
-    /// When `Some(true)`, enable LOC attribution tracking for this session.
-    #[serde(default)]
-    pub loc_tracking: Option<bool>,
-    /// Legacy remote memory toggle, used only when memory v2 is not enabled.
-    #[serde(default)]
-    pub memory_enabled: Option<bool>,
-    /// Dedicated memory-v2 settings object. This is isolated from the legacy
-    /// memory fields and populated from `grok_build_memory_v2_*` features.
-    #[serde(default)]
-    pub memory_v2: Option<memory::MemoryV2Settings>,
-    #[serde(default)]
-    pub memory_search_max_results: Option<u32>,
-    #[serde(default)]
-    pub memory_search_min_score: Option<f32>,
-    #[serde(default)]
-    pub memory_initial_injection_enabled: Option<bool>,
-    #[serde(default)]
-    pub memory_initial_injection_min_score: Option<f32>,
-    #[serde(default)]
-    pub memory_embedding_model: Option<String>,
-    #[serde(default)]
-    pub memory_embedding_dimensions: Option<u32>,
-    #[serde(default)]
-    pub pruning_enabled: Option<bool>,
-    #[serde(default)]
-    pub pruning_keep_last_n_turns: Option<u32>,
-    #[serde(default)]
-    pub pruning_soft_trim_threshold: Option<u32>,
-    #[serde(default)]
-    pub flush_enabled: Option<bool>,
-    #[serde(default)]
-    pub flush_soft_threshold_tokens: Option<u64>,
-    #[serde(default)]
-    pub flush_idle_timeout_secs: Option<u64>,
-    #[serde(default)]
-    pub flush_semantic_dedup_threshold: Option<f64>,
-    #[serde(default)]
-    pub memory_temporal_decay_enabled: Option<bool>,
-    #[serde(default)]
-    pub memory_temporal_decay_half_life_days: Option<f64>,
-    #[serde(default)]
-    pub memory_mmr_enabled: Option<bool>,
-    #[serde(default)]
-    pub memory_mmr_lambda: Option<f64>,
-    #[serde(default)]
-    pub memory_watcher_enabled: Option<bool>,
-    #[serde(default)]
-    pub dream_enabled: Option<bool>,
-    #[serde(default)]
-    pub dream_min_hours: Option<u64>,
-    #[serde(default)]
-    pub dream_min_sessions: Option<u64>,
-    #[serde(default)]
-    pub dream_check_interval_secs: Option<u64>,
-    /// Cadence (seconds) of the pager's watch for a free account becoming paid.
-    /// `0` disables it; the pager clamps and defaults (see its `app::subscription` module).
-    /// It arrives from the `grok_build_settings` remote settings flag via the cli-chat-proxy `/settings` flatten catch-all.
-    #[serde(default)]
-    pub subscription_watch_interval_secs: Option<u64>,
-    #[serde(default)]
-    pub writeback_enabled: Option<bool>,
-    /// OAuth2 provider issuer URL (e.g., "https://auth.example.invalid").
-    /// When present together with `oauth2_client_id`, the client uses the OAuth2 authorization code flow.
-    /// Remote settings control it so the rollout can be gradual.
-    #[serde(default)]
-    pub oauth2_issuer: Option<String>,
-    /// OAuth2 client_id for the CLI. It pairs with `oauth2_issuer`.
-    #[serde(default)]
-    pub oauth2_client_id: Option<String>,
-    /// When `Some(true)`, enables grok's default OAuth2 (xAI auth.example.invalid).
-    /// Enterprise OIDC (user's own IdP via `oidc` config) always wins.
-    /// The `--oauth` CLI flag overrides it.
-    #[serde(default)]
-    pub grok_oauth_enabled: Option<bool>,
-    #[serde(default)]
-    pub lsp_tools_enabled: Option<bool>,
-    /// Remote kill-switch and default for the folder-trust gate.
-    /// The gate decides whether repo-local MCP/LSP servers (commands from working-tree config files) need a per-folder trust decision before they spawn.
-    /// `Some(true)` enables, `Some(false)` is a kill-switch, `None` falls back to the client default (on).
-    /// It sits below env `GROK_FOLDER_TRUST`, user `[folder_trust] enabled`, and managed config in the resolver chain.
-    /// See `agent::folder_trust::feature_enabled`.
-    #[serde(default)]
-    pub folder_trust_enabled: Option<bool>,
-    #[serde(default)]
-    pub write_file_enabled: Option<bool>,
-    #[serde(default)]
-    pub active_agent_messages_enabled: Option<bool>,
-    /// File toolset: `"standard"` or `"hashline"`.
-    #[serde(default)]
-    pub file_toolset: Option<String>,
-    /// Per-chunk idle timeout in seconds for inference streaming.
-    #[serde(default)]
-    pub inference_idle_timeout_secs: Option<u64>,
-    #[serde(default)]
-    pub subagent_rate_limit_max_attempts: Option<u32>,
-    /// Global default MCP startup-handshake timeout (seconds).
-    /// It is the lowest-precedence fallback; per-server config, env, and requirements/managed override it.
-    #[serde(default)]
-    pub mcp_startup_timeout_secs: Option<u64>,
-    /// Global default MCP tool-result inline cap (bytes), from remote settings `grok_build_settings.max_mcp_output_bytes`.
-    /// Requirements, env, and `mcp.max_output_bytes` in config.json override it.
-    #[serde(default)]
-    pub max_mcp_output_bytes: Option<u64>,
-    /// When `Some(true)`, enable session registry hooks (register, update, finalize, memory upload).
-    /// When absent or `Some(false)`, all hooks are disabled.
-    #[serde(default)]
-    pub session_registry_enabled: Option<bool>,
-    /// The remote settings `doom_loop_recovery` JSON object; see [`DoomLoopRecoverySettings`].
-    /// Absent means every knob falls through to TOML/defaults; a partial object falls through per-field.
-    #[serde(default)]
-    pub doom_loop_recovery: Option<DoomLoopRecoverySettings>,
-    /// Automatic worktree GC policy; see [`WorktreeAutoGcSettings`].
-    /// Absent means every knob falls through to TOML/defaults; a partial object falls through per-field.
-    /// A value that is present but malformed drops to `None` instead of failing the whole `RemoteSettings` parse.
-    /// Which platforms may expire worktrees by age is hardcoded in the client; remote cannot override it.
-    #[serde(default, deserialize_with = "deserialize_tolerant")]
-    pub worktree_auto_gc: Option<WorktreeAutoGcSettings>,
-    /// Enable/disable the runtime turn-end TodoGate remotely.
-    /// Precedence: CLI `--todo-gate`, then this field, then the built-in default (`false`).
-    /// The gate ships disabled; set this to `Some(true)` (via the `grok_build_settings` remote settings key) to enable it.
-    /// See `session::acp_session::resolve_reminder_policy`.
-    #[serde(default)]
-    pub todo_gate_enabled: Option<bool>,
-    /// Hard cap on TodoGate fires per user prompt.
-    /// Precedence: this field, then the built-in default (`DEFAULT_TODO_GATE_MAX_FIRES`).
-    /// There is no CLI override. See `session::acp_session::resolve_reminder_policy`.
-    #[serde(default)]
-    pub todo_gate_max_fires_per_prompt: Option<u32>,
-    /// Length-salvage continue budget for `max_tokens`-truncated turns.
-    /// `Some(0)` is explicit off and kills every tier, including the
-    /// always-on cursor one and the `GROK_LENGTH_SALVAGE` env opt-in.
-    /// Otherwise: cursor tier > env opt-in > this field > off. See
-    /// `session::acp_session_impl::length_salvage`.
-    #[serde(default)]
-    pub length_salvage_budget: Option<u32>,
-    #[serde(default)]
-    pub auto_wake_enabled: Option<bool>,
-    #[serde(default)]
-    pub cursor_skills_enabled: Option<bool>,
-    #[serde(default)]
-    pub cursor_rules_enabled: Option<bool>,
-    #[serde(default)]
-    pub cursor_agents_enabled: Option<bool>,
-    #[serde(default)]
-    pub claude_skills_enabled: Option<bool>,
-    #[serde(default)]
-    pub claude_rules_enabled: Option<bool>,
-    #[serde(default)]
-    pub claude_agents_enabled: Option<bool>,
-    #[serde(default)]
-    pub cursor_mcps_enabled: Option<bool>,
-    #[serde(default)]
-    pub cursor_hooks_enabled: Option<bool>,
-    #[serde(default)]
-    pub claude_mcps_enabled: Option<bool>,
-    #[serde(default)]
-    pub claude_hooks_enabled: Option<bool>,
-    #[serde(default)]
-    pub cursor_sessions_enabled: Option<bool>,
-    #[serde(default)]
-    pub claude_sessions_enabled: Option<bool>,
-    /// When `Some(true)`, enable goal mode remotely.
-    /// When `Some(false)`, force-disable it (kill-switch).
-    /// Absent uses the client default (enabled).
-    #[serde(default)]
-    pub goal_enabled: Option<bool>,
-    /// When `Some(true)`, enable the goal-completion classifier remotely.
-    /// When `Some(false)`, force-disable it.
-    /// Absent tracks goal mode: enabled exactly when goal mode is on.
-    #[serde(default)]
-    pub goal_classifier_enabled: Option<bool>,
-    /// When `Some(true)`, enable the goal planner remotely.
-    /// When `Some(false)`, force-disable it.
-    /// Absent tracks goal mode: enabled exactly when goal mode is on.
-    #[serde(default)]
-    pub goal_planner_enabled: Option<bool>,
-    /// When `Some(true)`, enable the goal summarizer remotely (the one-shot closing "what was accomplished" summary on a verified achievement).
-    /// When `Some(false)`, force-disable it (kill-switch).
-    /// Absent tracks goal mode: enabled exactly when goal mode is on.
-    #[serde(default)]
-    pub goal_summary_enabled: Option<bool>,
-    /// Number of adversarial skeptics spawned per goal-verification attempt (step 2 of the staged gate); clamped to `1..=5` at the resolver.
-    /// Absent uses the harness default, `goal_classifier::GOAL_VERIFIER_SKEPTIC_COUNT` (3 today).
-    #[serde(default, skip_serializing_if = "Option::is_none")]
-    pub goal_verifier_count: Option<u32>,
-    /// Maximum per-goal classifier runs before the goal auto-pauses (BackOff); clamped to `1..=10` at the resolver.
-    /// Absent uses the harness default, `goal_classifier::GOAL_CLASSIFIER_MAX_RUNS_DEFAULT` (3 today).
-    #[serde(default, skip_serializing_if = "Option::is_none")]
-    pub goal_classifier_max_runs: Option<u32>,
-    /// Fire the stall-triggered strategist every N consecutive `NotAchieved` verifications; clamped to `>= 1` at the resolver.
-    /// Absent defaults to `max(1, goal_classifier_max_runs / 2)`.
-    #[serde(default, skip_serializing_if = "Option::is_none")]
-    pub goal_strategist_every: Option<u32>,
-    /// Planner role model and toolset. Absent inherits the current model.
-    /// A malformed value drops to `None` rather than failing the whole `RemoteSettings` payload (see [`deserialize_tolerant_goal_role_model`]).
-    #[serde(
-        default,
-        deserialize_with = "deserialize_tolerant_goal_role_model",
-        skip_serializing_if = "Option::is_none"
-    )]
-    pub goal_planner_model: Option<GoalRoleModel>,
-    /// Strategist role model and toolset. Absent inherits the current model.
-    /// A malformed value drops to `None` (see [`deserialize_tolerant_goal_role_model`]).
-    #[serde(
-        default,
-        deserialize_with = "deserialize_tolerant_goal_role_model",
-        skip_serializing_if = "Option::is_none"
-    )]
-    pub goal_strategist_model: Option<GoalRoleModel>,
-    /// Ordered skeptic pool: `pool[0]` is skeptic-0's model, and skeptics `1..N` are assigned round-robin over the pool.
-    /// Empty or absent inherits the current model.
-    /// A single malformed pool entry is dropped rather than discarding the whole pool (see [`deserialize_tolerant_goal_skeptic_models`]).
-    #[serde(
-        default,
-        deserialize_with = "deserialize_tolerant_goal_skeptic_models",
-        skip_serializing_if = "Vec::is_empty"
-    )]
-    pub goal_skeptic_models: Vec<GoalRoleModel>,
-    #[serde(default)]
-    pub workflows_enabled: Option<bool>,
-    /// Remote fallback for managed MCP connector fetching.
-    #[serde(default)]
-    pub managed_mcps_enabled: Option<bool>,
-    #[serde(default)]
-    pub managed_mcp_gateway_tools_enabled: Option<bool>,
-    /// Remote-policy disable lever for the external OTEL stream (customer collectors); feeds `ExternalOtelRemotePolicy.force_disable`.
-    /// Tighten-only: there is no `external_otel_enabled` remote field and `apply_remote_policy` never enables, so even a stale disk cache can only restrict.
-    /// Org-wide enable ships via managed config instead.
-    #[serde(default)]
-    pub external_otel_disabled: Option<bool>,
-    /// Force the external stream's content gates (`OTEL_LOG_USER_PROMPTS`, `OTEL_LOG_TOOL_DETAILS`) off regardless of local env/config.
-    /// It is tighten-only, like `external_otel_disabled`.
-    #[serde(default)]
-    pub external_otel_content_gates_locked: Option<bool>,
-    /// `Some(false)` disables managed-config signature verification (remote kill-switch).
-    #[serde(default)]
-    pub managed_config_signature_verification: Option<bool>,
-    #[serde(default)]
-    pub telemetry_enabled: Option<bool>,
-    /// Telemetry mode override (string): `"session-metrics"`, `"full"`, `"off"`.
-    /// It takes precedence over `telemetry_enabled` (bool) when present.
-    #[serde(default)]
-    pub telemetry_mode: Option<String>,
-    #[serde(default)]
-    pub trace_upload_enabled: Option<bool>,
-    /// Request body encodings the server accepts on the chat routes. Empty or absent means plain JSON only.
-    #[serde(default)]
-    pub accept_request_encodings: Vec<RemoteRequestEncoding>,
-    /// Enable user-facing feedback (heuristic popups, `/feedback` command).
-    /// Session analytics (signal sync, turn deltas) are gated separately by `telemetry_enabled`.
-    #[serde(default)]
-    pub feedback_enabled: Option<bool>,
-    /// Gradual rollout of the `/feedback` trace-consent card.
-    #[serde(default)]
-    pub feedback_trace_card_enabled: Option<bool>,
-    /// Two-pass (prefire) compaction.
-    /// Near the auto-compact threshold the shell speculatively summarizes the history prefix in the background (pass 1 produces an interim note).
-    /// At compaction it summarizes that note plus the recent tail (pass 2), keeping summarizer latency off the critical path.
-    /// `Some(false)` forces off; `None` falls through env, `[features]`, then the default (on).
-    #[serde(default)]
-    pub two_pass_compaction_enabled: Option<bool>,
-    /// Dynamic tip list from remote settings. When present with non-empty entries, one tip is shown at startup (rotated daily by UTC day).
-    /// `None` or `[]` shows no tips.
-    #[serde(default)]
-    pub tips: Option<Vec<String>>,
-    /// Free-form per-command tags (e.g. `new`, `beta`) rendered as a bracketed label in the slash dropdown, keyed by canonical command name.
-    /// A malformed value drops to `None` without failing the whole parse; local `[slash_command_tags]` overrides per key.
-    /// See `resolve_slash_command_tags`.
-    #[serde(default, deserialize_with = "deserialize_tolerant")]
-    pub slash_command_tags: Option<std::collections::BTreeMap<String, String>>,
-    /// When present, controls the non-Git-repo warning at session start.
-    /// It arrives as `non_git_warning` in `grok_build_settings`.
-    /// It takes precedence over `features.non_git_warning` in config.json.
-    /// `Some(true)` enables, `Some(false)` acts as a kill-switch, `None` falls back to local config.
-    #[serde(default)]
-    pub non_git_warning: Option<bool>,
-    /// Remote settings gate for first-run auto-registration of the official xAI marketplace source.
-    /// `Some(true)` enables, `Some(false)` is a kill-switch, `None` falls back to env/default (off).
-    #[serde(default)]
-    pub official_marketplace_auto_register: Option<bool>,
-    /// Remote settings gate for the inline plugin-install CTA (the keyword-matched marketplace upsell above the prompt).
-    /// `Some(true)` enables, `Some(false)` is a kill-switch, `None` falls back to env/default (off).
-    #[serde(default)]
-    pub plugin_cta: Option<bool>,
-    /// Remote announcements list from proxy. Malformed items are skipped entirely.
-    /// `None` or `[]` displays no announcements.
-    #[serde(default, deserialize_with = "deserialize_tolerant_announcements")]
-    pub announcements: Option<Vec<RemoteAnnouncement>>,
-    #[serde(default)]
-    pub web_search_model: Option<String>,
-    #[serde(default)]
-    pub session_summary_model: Option<String>,
-    #[serde(default)]
-    pub image_description_model: Option<String>,
-    /// Server-side pin for the next-prompt suggestion model (tab-autocomplete ghost text), from the `grok_build_settings` remote settings flag.
-    /// It sits below env (`GROK_PROMPT_SUGGESTIONS_MODEL`) and `models.prompt_suggestion` in config.json.
-    /// It sits above the client hint and the built-in `grok-4.6` default.
-    /// When the effective model is not in the shell's model catalog the suggestion request is skipped entirely; the session model is never used instead.
-    /// See `ModelOverrideConfig::resolve` and `handle_suggest_prompt`.
-    #[serde(default)]
-    pub prompt_suggestion_model: Option<String>,
-    /// Server-recommended default model ID for new sessions.
-    #[serde(default)]
-    pub default_model: Option<String>,
-    #[serde(default)]
-    pub campaigns: Vec<CampaignOverride>,
-    /// When `Some(true)`, foreground commands that hit the default timeout are auto-backgrounded instead of killed.
-    #[serde(default)]
-    pub auto_background_on_timeout: Option<bool>,
     /// When `Some(false)`, foreground commands containing a background `&` operator are rejected.
     /// It is the fallback when no local `[toolset.bash] allow_background_operator` is set; absent uses the client default (allow).
     #[serde(default)]
@@ -703,7 +25,7 @@ pub struct RemoteSettings {
     #[serde(default)]
     pub ask_user_question_timeout_enabled: Option<bool>,
     /// Remote settings fallback for `[toolset.ask_user_question] timeout_secs` (positive seconds).
-    /// Absent uses the client default (1800 seconds, 30 minutes).
+    /// Absent uses the client default (many seconds, many minutes).
     #[serde(default)]
     pub ask_user_question_timeout_secs: Option<u64>,
     /// When `Some(true)`, a completed subagent's isolated worktree is snapshotted into a durable git ref and its directory deleted.
@@ -821,7 +143,7 @@ pub struct RemoteSettings {
     #[serde(default)]
     pub privacy_notice_rollout: Option<bool>,
     /// Days after a privacy-banner dismiss before it may re-show for users who remain opted out of coding-data sharing.
-    /// It comes from `grok_build_settings`; `None` or `0` means it never re-shows after dismiss.
+    /// It comes means it never re-shows after dismiss.
     #[serde(default)]
     pub privacy_banner_reshow_days: Option<u64>,
     /// Remote settings tier of the `remember_tool_approvals` gate (whether per-tool "Always allow …" prompt options are shown).
@@ -852,16 +174,16 @@ pub struct RemoteSettings {
     /// A partial object falls through per-field; `resolve_display_refresh` resolves it.
     #[serde(default)]
     pub display_refresh: Option<DisplayRefreshSettings>,
-    /// Raw remote settings JSON for the `[auto_mode]` table (gate `enabled`, `prompt_type`, `classifier_model`).
-    /// The shell coerces it into its typed `AutoModeConfig`, keeping this crate free of that dependency.
-    /// It is the lowest-precedence layer in `resolve_auto_permission_mode_enabled` (client default on).
+    /// Raw remote settings JSON for the `[auto_mode]` table. The shell coerces it into its typed
+    /// `AutoModeConfig`, keeping this crate free of that dependency. It is the lowest-precedence layer in
+    /// `resolve_auto_permission_mode_enabled` (client default on).
     #[serde(default)]
     pub auto_mode: Option<serde_json::Value>,
     /// Remote next-prompt suggestion settings, parsed by the shell.
     #[serde(default)]
     pub prompt_suggestions: Option<serde_json::Value>,
-    /// Soft default permission mode (`"ask"`, `"auto"`, `"always-approve"`, or `"default"`).
-    /// It is used only when no effective TOML permission key is set.
+    /// Soft default permission mode. It is used only when no effective TOML permission key
+    /// is set.
     #[serde(default)]
     pub permission_mode: Option<String>,
     /// User's subscription tier from remote settings `grok_build_access_gate`.
@@ -907,7 +229,6 @@ pub struct RemoteSettings {
     /// Enable AI-powered shell command suggestions remotely.
     #[serde(default)]
     pub suggestions_ai_enabled: Option<bool>,
-    /// Global auto-compact threshold percent (0-100) from remote settings `grok_build_settings`.
     /// A per-model override on `ModelInfo` (`grok_build_models`) takes precedence; user config and env var further override per the resolver chain.
     #[serde(default)]
     pub auto_compact_threshold_percent: Option<u8>,
@@ -936,12 +257,12 @@ pub struct RemoteSettings {
     /// Env (`GROK_COMPACTION_WALL_CLOCK_SECS`) overrides it. `resolve_compaction_wall_clock_budget_secs` resolves it.
     #[serde(default)]
     pub compaction_wall_clock_budget_secs: Option<u64>,
-    /// Compaction mode (`summary`, `transcript`, or `segments`) from remote settings.
-    /// Env (`GROK_COMPACTION_MODE`) and user config override it.
+    /// Compaction mode from remote settings. Env (`GROK_COMPACTION_MODE`) and user
+    /// config override it.
     #[serde(default)]
     pub compaction_mode: Option<String>,
-    /// Segments verbatim detail (`none`, `minimal`, `balanced`, or `verbose`) from remote settings.
-    /// Env (`GROK_COMPACTION_DETAIL`) and config override it.
+    /// Segments verbatim detail from remote settings. Env (`GROK_COMPACTION_DETAIL`) and config
+    /// override it.
     #[serde(default)]
     pub compaction_detail: Option<String>,
     /// remote settings verbatim-input flag; env (`GROK_COMPACTION_VERBATIM_INPUT`) and config override it. `None` = default (true).
@@ -962,10 +283,9 @@ pub struct RemoteSettings {
     pub workspace_command_enabled: Option<bool>,
     #[serde(default)]
     pub workspace_dashboard_enabled: Option<bool>,
-    /// Soft default for `keep_text_selection` (`"flash"`, `"hold"`, or `"word_select"`), from `grok_build_settings.keep_text_selection_default`.
-    /// It applies only when the user has set no local text-selection preference; an explicit local `keep_text_selection` always wins.
-    /// An absent or unrecognized value keeps the client default (`flash`).
-    /// Set it remotely to stage a new default to a segment, cut everyone over, or revert it for a customer.
+    /// Soft default for `keep_text_selection`, from `grok_build_settings.keep_text_selection_default`. It applies only when the user has set no
+    /// local text-selection preference; an explicit local `keep_text_selection` always wins. An absent or unrecognized value keeps the client
+    /// default (`flash`). Set it remotely to stage a new default to a segment, cut everyone over, or revert it for a customer.
     #[serde(default)]
     pub keep_text_selection_default: Option<String>,
 }
@@ -1039,7 +359,7 @@ pub struct ContextualHintsRemote {
     /// Word-select tip after a double-click fold or nav (helps users find the setting).
     #[serde(default)]
     pub word_select: Option<bool>,
-    /// Export/copy tip after three nearby drag-copies.
+    /// Export/copy tip after nearby drag-copies.
     #[serde(default)]
     pub export_copy: Option<bool>,
     /// SSH wrap session-load tip (recommend `grok wrap ssh` for remote sessions).
@@ -1078,8 +398,8 @@ where
     }
 }
 /// Parse one JSON value as a [`GoalRoleModel`], returning `None` (with a `tracing::warn!`) instead of erroring when the value is malformed.
-/// The tolerant deserializers for the single-pair role fields and the skeptic pool share it.
-/// All three goal-role-model fields drop bad remote payloads rather than failing the whole `RemoteSettings` parse.
+/// The tolerant deserializers for the single-pair role fields and the skeptic pool share it. All of them goal-role-model fields drop bad
+/// remote payloads rather than failing the whole `RemoteSettings` parse.
 fn parse_goal_role_model_tolerant(value: serde_json::Value) -> Option<GoalRoleModel> {
     match serde_json::from_value::<GoalRoleModel>(value) {
         Ok(model) => Some(model),
@@ -3482,15 +2802,32 @@ mod tests {
         }
     }
 }
-=======
+@@END_DROP@@
+pub mod retry_budget;
 mod privacy;
 pub use privacy::{PrivacyMode, SharedPrivacyMode};
 mod sandbox;
 pub use sandbox::*;
+
+use serde::{Deserialize, Serialize};
 
 pub use xai_grok_config::{
     CampaignOverride, ConsentGate, ContextualHintsRemote, DisplayRefreshSettings,
     DoomLoopRecoverySettings, GoalRoleModel, LongReasoningReminderSettings, RemoteRequestEncoding,
     RemoteSettings, WorktreeAutoGcSettings, WorktreeKindMaxAge, deserialize_tolerant,
 };
->>>>>>> upstream
+
+/// Advanced knobs for the output-rate floor: the `[output_rate_floor]` TOML
+/// table. Every field is `Option` so a partial table never fails the parse
+/// and each key falls through to the client default on its own.
+#[derive(Debug, Clone, Default, Deserialize, Serialize, PartialEq, Eq, schemars::JsonSchema)]
+#[serde(default)]
+pub struct OutputRateFloorSettings {
+    /// Trailing window the rate is measured over, in seconds.
+    #[serde(skip_serializing_if = "Option::is_none")]
+    pub window_secs: Option<u64>,
+    /// Reissue budget per model call. `-1` or `"unlimited"` never runs out.
+    #[serde(with = "retry_budget", skip_serializing_if = "Option::is_none")]
+    #[schemars(schema_with = "retry_budget::json_schema")]
+    pub max_retries: Option<u32>,
+}

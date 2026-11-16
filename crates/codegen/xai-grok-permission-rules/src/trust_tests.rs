@@ -152,7 +152,7 @@ fn trust_cascades_to_subdirectories() {
     let repo = tmp.path().join("repo");
     let child = repo.join("crates").join("inner");
     std::fs::create_dir_all(&child).unwrap();
-    git2::Repository::init(&repo).unwrap();
+    crate::test_git::init(&repo);
     let repo_key = canonicalize_or_owned(&repo);
     let child_key = canonicalize_or_owned(&child);
 
@@ -177,7 +177,7 @@ fn parent_grant_does_not_cover_nested_git_root() {
     let parent = tmp.path().join("work");
     let nested = parent.join("evil");
     std::fs::create_dir_all(&nested).unwrap();
-    git2::Repository::init(&nested).unwrap();
+    crate::test_git::init(&nested);
     let parent_key = canonicalize_or_owned(&parent);
     let nested_key = canonicalize_or_owned(&nested);
 
@@ -202,8 +202,8 @@ fn git_parent_grant_does_not_cover_nested_git_root() {
     let sibling = parent.join("src");
     std::fs::create_dir_all(&nested).unwrap();
     std::fs::create_dir_all(&sibling).unwrap();
-    git2::Repository::init(&parent).unwrap();
-    git2::Repository::init(&nested).unwrap();
+    crate::test_git::init(&parent);
+    crate::test_git::init(&nested);
     let parent_key = canonicalize_or_owned(&parent);
     let nested_key = canonicalize_or_owned(&nested);
     let sibling_key = canonicalize_or_owned(&sibling);
@@ -238,7 +238,7 @@ fn parent_grant_does_not_cover_nongit_descendant() {
     let parent_key = canonicalize_or_owned(&parent);
     let child_key = canonicalize_or_owned(&child);
 
-    // Plant a dummy .git because libgit2 discover ignores GIT_CEILING_DIRECTORIES.
+    // Plant a dummy .git because discovery ignores GIT_CEILING_DIRECTORIES.
     std::fs::write(tmp.path().join(".git"), "gitdir: /nonexistent\n").unwrap();
 
     let mut store = TrustStore::load_from(tmp.path().join(TRUST_FILE_NAME));
@@ -264,7 +264,7 @@ fn most_specific_decision_wins_over_ancestor_cascade() {
     let other = parent.join("other");
     std::fs::create_dir_all(&child).unwrap();
     std::fs::create_dir_all(&other).unwrap();
-    git2::Repository::init(&parent).unwrap();
+    crate::test_git::init(&parent);
     let parent_key = canonicalize_or_owned(&parent);
     let child_key = canonicalize_or_owned(&child);
     let other_key = canonicalize_or_owned(&other);
@@ -301,7 +301,7 @@ fn most_specific_trust_wins_over_untrusted_ancestor() {
     let parent = tmp.path().join("parent");
     let child = parent.join("child");
     std::fs::create_dir_all(&child).unwrap();
-    git2::Repository::init(&parent).unwrap();
+    crate::test_git::init(&parent);
     let parent_key = canonicalize_or_owned(&parent);
     let child_key = canonicalize_or_owned(&child);
 
@@ -377,7 +377,7 @@ fn workspace_key_falls_back_to_cwd_outside_repo() {
     let key = workspace_key(&sub);
     assert!(key.is_absolute());
     // Only pin the fallback when the temp dir is outside any git repo (a dev/CI checkout may place $TMPDIR inside the source repository)
-    if git2::Repository::discover(&sub).is_err() {
+    if crate::git_repo::discover(&sub).is_err() {
         assert_eq!(key, canonicalize_or_owned(&sub));
     }
 }
@@ -392,7 +392,7 @@ fn workspace_key_ignores_home_git_repo_for_subdir() {
     let home = tempfile::tempdir().unwrap();
     let _home_guard = crate::TestEnvGuard::set("HOME", home.path());
     let _userprofile_guard = crate::TestEnvGuard::set("USERPROFILE", home.path());
-    git2::Repository::init(home.path()).unwrap();
+    crate::test_git::init(home.path());
     let civ = home.path().join("Documents").join("civ");
     std::fs::create_dir_all(&civ).unwrap();
 
@@ -414,7 +414,7 @@ fn empty_key_is_not_trusted() {
     // The empty path is a prefix of every path, so honoring it would trust the whole filesystem (fail open)
     let tmp = tempfile::tempdir().unwrap();
     let store_path = tmp.path().join(TRUST_FILE_NAME);
-    std::fs::write(&store_path, "[folders.\"\"]\ntrusted = true\n").unwrap();
+    std::fs::write(&store_path, r#"{"folders": {"": {"trusted": true}}}"#).unwrap();
 
     let store = TrustStore::load_from(store_path);
     // The record loads, so this exercises the read-side guard (not a parse drop).
@@ -430,7 +430,7 @@ fn malformed_store_fails_soft_to_empty() {
     // Corrupt TOML must fail closed: empty store, trust nothing, no panic.
     let tmp = tempfile::tempdir().unwrap();
     let store_path = tmp.path().join(TRUST_FILE_NAME);
-    std::fs::write(&store_path, "this is not = valid toml [[[").unwrap();
+    std::fs::write(&store_path, "this is not { valid json [[[").unwrap();
 
     let store = TrustStore::load_from(store_path);
     assert!(store.is_empty(), "malformed store must load as empty");
@@ -443,7 +443,7 @@ fn root_key_is_not_trusted() {
     // The root is a prefix of all of them via the cascade, so it is ignored on read even if it reaches the file by hand-edit / migration
     let tmp = tempfile::tempdir().unwrap();
     let store_path = tmp.path().join(TRUST_FILE_NAME);
-    std::fs::write(&store_path, "[folders.\"/\"]\ntrusted = true\n").unwrap();
+    std::fs::write(&store_path, r#"{"folders": {"/": {"trusted": true}}}"#).unwrap();
 
     let store = TrustStore::load_from(store_path);
     assert!(!store.is_empty(), "root-key record should still load");
@@ -464,8 +464,7 @@ fn tied_conflicting_aliases_fail_closed() {
         std::fs::write(
             &store_path,
             format!(
-                "[folders.'/a/b']\ntrusted = {trusted_ab}\n\
-                     [folders.'/a/b/']\ntrusted = {trusted_ab_slash}\n"
+                r#"{{"folders": {{"/a/b": {{"trusted": {trusted_ab}}}, "/a/b/": {{"trusted": {trusted_ab_slash}}}}}}}"#
             ),
         )
         .unwrap();
@@ -502,12 +501,10 @@ fn home_key_on_disk_is_not_honored() {
     let canonical_home = canonicalize_or_owned(&home);
     let tmp = tempfile::tempdir().unwrap();
     let store_path = tmp.path().join(TRUST_FILE_NAME);
-    // TOML literal-string key avoids escaping issues on any platform.
-    let body = format!(
-        "[folders.'{}']\ntrusted = true\n",
-        canonical_home.to_string_lossy()
-    );
-    std::fs::write(&store_path, body).unwrap();
+    let body = serde_json::json!({
+        "folders": { canonical_home.to_string_lossy(): { "trusted": true } }
+    });
+    std::fs::write(&store_path, body.to_string()).unwrap();
 
     let store = TrustStore::load_from(store_path);
     let sub = canonical_home.join("some").join("sub");
@@ -660,12 +657,9 @@ fn persist_failure_leaves_memory_unchanged() {
 fn corrupt_store_is_not_rewritten_by_set_trusted() {
     let tmp = tempfile::tempdir().unwrap();
     let store_path = tmp.path().join(TRUST_FILE_NAME);
-    let good = br#"
-[folders."/tmp/keep"]
-trusted = true
-"#;
+    let good = br#"{"folders": {"/tmp/keep": {"trusted": true}}}"#;
     std::fs::write(&store_path, good).unwrap();
-    let corrupt = b"this is not toml [[[";
+    let corrupt = b"this is not json {[[";
     std::fs::write(&store_path, corrupt).unwrap();
     let before = std::fs::read(&store_path).unwrap();
 
@@ -757,23 +751,14 @@ fn workspace_key_collapses_linked_worktrees_onto_main_checkout() {
     let dir = tempfile::tempdir().unwrap();
     let main = dir.path().join("main");
     std::fs::create_dir_all(&main).unwrap();
-    let repo = git2::Repository::init(&main).unwrap();
-
     // Worktree creation requires a valid HEAD, so make an initial commit.
-    let sig = git2::Signature::now("t", "t@t").unwrap();
-    let tree = {
-        let mut idx = repo.index().unwrap();
-        let oid = idx.write_tree().unwrap();
-        repo.find_tree(oid).unwrap()
-    };
-    repo.commit(Some("HEAD"), &sig, &sig, "init", &tree, &[])
-        .unwrap();
+    crate::test_git::init_with_commit(&main);
 
-    // Linked worktrees OUTSIDE the main dir (git2 creates the paths).
+    // Linked worktrees OUTSIDE the main dir (git creates the paths).
     let wt1 = dir.path().join("wt1");
     let wt2 = dir.path().join("wt2");
-    repo.worktree("wt1", &wt1, None).unwrap();
-    repo.worktree("wt2", &wt2, None).unwrap();
+    crate::test_git::worktree_add(&main, &wt1);
+    crate::test_git::worktree_add(&main, &wt2);
 
     let main_key = workspace_key(&main);
     // Parity: the main checkout keys off its own workdir.
@@ -797,17 +782,13 @@ fn workspace_key_bare_repo_worktree_does_not_widen_to_parent() {
     // The key must instead fall back to the worktree's OWN dir (narrow, never widened)
     let dir = tempfile::tempdir().unwrap();
     let bare = dir.path().join("repo.git");
-    let repo = git2::Repository::init_bare(&bare).unwrap();
+    crate::test_git::init_bare(&bare);
 
-    // Worktree creation needs a valid HEAD; build an empty commit (bare repo has no index, so use a treebuilder for the empty tree)
-    let sig = git2::Signature::now("t", "t@t").unwrap();
-    let tree_oid = repo.treebuilder(None).unwrap().write().unwrap();
-    let tree = repo.find_tree(tree_oid).unwrap();
-    repo.commit(Some("HEAD"), &sig, &sig, "init", &tree, &[])
-        .unwrap();
+    // Worktree creation needs a valid HEAD; build an empty-tree commit (a bare repo has no index)
+    crate::test_git::commit_empty_bare(&bare);
 
     let wt = dir.path().join("wt");
-    repo.worktree("wt", &wt, None).unwrap();
+    crate::test_git::worktree_add(&bare, &wt);
 
     let key = workspace_key(&wt);
     assert_ne!(
@@ -862,10 +843,10 @@ fn workspace_key_separate_gitdir_worktree_does_not_widen() {
     }
 
     // Only assert once the worktree is a linked worktree whose common gitdir is the relocated separate gitdir (the layout this test targets)
-    let Ok(repo) = git2::Repository::discover(&wt) else {
+    let Ok(repo) = crate::git_repo::discover(&wt) else {
         return;
     };
-    if !repo.is_worktree() {
+    if !crate::git_repo::is_linked_worktree(&repo) {
         return;
     }
 

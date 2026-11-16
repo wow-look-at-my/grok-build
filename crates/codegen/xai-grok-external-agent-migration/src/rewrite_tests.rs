@@ -233,7 +233,7 @@ fn apply_items_to_config_writes_path_entries() {
 #[test]
 fn project_import_replaces_config_symlink_not_referent() {
     let tmp = tempfile::tempdir().unwrap();
-    git2::Repository::init(tmp.path()).unwrap();
+    xai_test_utils::git::init_git_repo(tmp.path());
     let outside = tmp.path().join("outside.toml");
     std::fs::write(&outside, "[paths]\nextra_rule_dirs = [\"/keep\"]\n").unwrap();
     let project_cfg = tmp.path().join(".grok").join("config.toml");

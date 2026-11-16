@@ -1348,113 +1348,16 @@ fn apply_requirements_inner(
             push("sandbox.auto_allow_bash", format!("{val}"));
         }
     }
-<<<<<<< fork
-    enforce_str!(
-        "endpoints",
-        "trace_upload_url",
-        config.endpoints.trace_upload_url
-    );
-    enforce_str!(
-        "endpoints",
-        "feedback_base_url",
-        config.endpoints.feedback_base_url
-    );
-    enforce_str!("telemetry", "events_url", config.telemetry.events_url);
-    enforce_str!(
-        "telemetry",
-        "events_api_key",
-        config.telemetry.events_api_key,
-        redacted
-    );
-    enforce_val!(
-        "telemetry",
-        "mixpanel_enabled",
-        config.telemetry.mixpanel_enabled
-    );
-    enforce_str!(
-        "telemetry",
-        "mixpanel_token",
-        config.telemetry.mixpanel_token,
-        redacted
-||||||| base
-    enforce_str!(
-        "endpoints",
-        "trace_upload_url",
-        config.endpoints.trace_upload_url
-    );
-    enforce_str!(
-        "endpoints",
-        "feedback_base_url",
-        config.endpoints.feedback_base_url
-    );
-    enforce_str!(
-        "endpoints",
-        "deployment_key",
-        config.endpoints.deployment_key,
-        redacted
-    );
-    enforce_str!("telemetry", "events_url", config.telemetry.events_url);
-    enforce_str!(
-        "telemetry",
-        "events_api_key",
-        config.telemetry.events_api_key,
-        redacted
-    );
-    enforce_val!(
-        "telemetry",
-        "mixpanel_enabled",
-        config.telemetry.mixpanel_enabled
-    );
-    enforce_str!(
-        "telemetry",
-        "mixpanel_token",
-        config.telemetry.mixpanel_token,
-        redacted
-    );
-    enforce_str!(
-        "endpoints",
-        "trace_upload_bucket",
-        config.endpoints.trace_upload_bucket
-    );
-    enforce_str!(
-        "endpoints",
-        "trace_upload_region",
-        config.endpoints.trace_upload_region
-    );
-    enforce_str!(
-        "endpoints",
-        "trace_upload_credentials_file",
-        config.endpoints.trace_upload_credentials_file
-    );
-    enforce_str!(
-        "endpoints",
-        "trace_upload_endpoint_url",
-        config.endpoints.trace_upload_endpoint_url
-    );
-    enforce_str!(
-        "endpoints",
-        "trace_upload_credentials",
-        config.endpoints.trace_upload_credentials,
-        redacted
-    );
-=======
     parsed.enforce_upload_and_telemetry(
         &mut xai_grok_config::UploadTelemetryPins {
             trace_upload_url: &mut config.endpoints.trace_upload_url,
             feedback_base_url: &mut config.endpoints.feedback_base_url,
-            deployment_key: &mut config.endpoints.deployment_key,
             events_url: &mut config.telemetry.events_url,
             events_api_key: &mut config.telemetry.events_api_key,
             mixpanel_enabled: &mut config.telemetry.mixpanel_enabled,
             mixpanel_token: &mut config.telemetry.mixpanel_token,
-            trace_upload_bucket: &mut config.endpoints.trace_upload_bucket,
-            trace_upload_region: &mut config.endpoints.trace_upload_region,
-            trace_upload_credentials_file: &mut config.endpoints.trace_upload_credentials_file,
-            trace_upload_endpoint_url: &mut config.endpoints.trace_upload_endpoint_url,
-            trace_upload_credentials: &mut config.endpoints.trace_upload_credentials,
         },
         &mut push,
->>>>>>> upstream
     );
     if let Some(val) = req.get("features").and_then(|f| f.get("codebase_indexing")) {
         use crate::agent::config::CodebaseIndexingSetting;
@@ -1543,7 +1446,7 @@ pub fn apply_sandbox(
         .and_then(|p| dunce::canonicalize(p).ok())
         .or_else(|| std::env::current_dir().ok())
         .unwrap_or_else(|| std::path::PathBuf::from("."));
-<<<<<<< fork
+    xai_grok_sandbox::set_confinement_root(&workspace);
     // Whether a bwrap re-exec follows decides how the worker's fd is handed over, so it is settled before the worker starts.
     #[cfg(target_os = "linux")]
     let reexec_follows = xai_grok_sandbox::bwrap_reexec_planned(&sandbox_profile, &workspace);
@@ -1554,10 +1457,6 @@ pub fn apply_sandbox(
     if sandbox_profile != xai_grok_sandbox::ProfileName::Off {
         let _ = xai_grok_sandbox::ci_host::start_ci_host_for_session(&workspace, reexec_follows);
     }
-||||||| base
-=======
-    xai_grok_sandbox::set_confinement_root(&workspace);
->>>>>>> upstream
     #[cfg(target_os = "linux")]
     let requires_read_deny = xai_grok_sandbox::requires_read_deny(&sandbox_profile, &workspace);
     #[cfg(target_os = "linux")]
@@ -1689,79 +1588,9 @@ pub fn apply_sandbox(
         sandbox.install();
     }
 }
-<<<<<<< fork
-pub use xai_grok_workspace::project_config::find_project_configs;
-/// Resolve the effective `extensions.plugins` config for a working directory the same way a session does at reload time: global/user config ([`load_effective_config`]), plus every ancestor project `.grok/config.json` ([`find_project_configs`], extending `paths` and `disabled`), plus the imported `enabledPlugins` merge.
-/// All three must discover the same plugins for a given cwd.
-/// Centralizing it prevents the paths/disabled/discovered-command drift those callers would otherwise accumulate.
-pub(crate) fn resolve_effective_plugins_config(
-    cwd: &std::path::Path,
-) -> crate::agent::config::PluginsConfig {
-    let extract = |toml_val: &toml::Value| -> Option<crate::agent::config::PluginsConfig> {
-        toml_val
-            .get("plugins")
-            .and_then(|v| v.clone().try_into().ok())
-    };
-    let mut plugins_cfg = load_effective_config()
-        .ok()
-        .and_then(|t| extract(&t))
-        .unwrap_or_default();
-    let project_trusted = crate::agent::folder_trust::project_scope_allowed(cwd);
-    for config_path in find_project_configs(cwd) {
-        if let Ok(toml_val) = load_config_file(&config_path)
-            && let Some(proj) = extract(&toml_val)
-        {
-            if project_trusted {
-                plugins_cfg.paths.extend(proj.paths);
-            }
-            plugins_cfg.disabled.extend(proj.disabled);
-        }
-    }
-    plugins_cfg.merge_claude_enabled_plugins(Some(cwd));
-    plugins_cfg
-}
-||||||| base
-pub use xai_grok_workspace::project_config::find_project_configs;
-/// Resolve the effective `[plugins]` config for a working directory the same way a session does at reload time: global/user config ([`load_effective_config`]), plus every ancestor project `.grok/config.toml` ([`find_project_configs`], extending `paths` and `disabled`), plus the imported `enabledPlugins` merge.
-/// All three must discover the same plugins for a given cwd.
-/// Centralizing it prevents the paths/disabled/discovered-command drift those callers would otherwise accumulate.
-pub(crate) fn resolve_effective_plugins_config(
-    cwd: &std::path::Path,
-) -> crate::agent::config::PluginsConfig {
-    let extract = |toml_val: &toml::Value| -> Option<crate::agent::config::PluginsConfig> {
-        toml_val
-            .get("plugins")
-            .and_then(|v| v.clone().try_into().ok())
-    };
-    let mut plugins_cfg = load_effective_config()
-        .ok()
-        .and_then(|t| extract(&t))
-        .unwrap_or_default();
-    let project_trusted = crate::agent::folder_trust::project_scope_allowed(cwd);
-    for config_path in find_project_configs(cwd) {
-        if let Ok(toml_val) = load_config_file(&config_path)
-            && let Some(proj) = extract(&toml_val)
-        {
-            if project_trusted {
-                plugins_cfg.paths.extend(proj.paths);
-            }
-            plugins_cfg.disabled.extend(proj.disabled);
-        }
-    }
-    plugins_cfg.merge_claude_enabled_plugins(Some(cwd));
-    plugins_cfg
-}
-=======
->>>>>>> upstream
 pub use xai_grok_config::{deep_merge_toml, expand_env_vars_in_string, expand_env_vars_in_toml};
-<<<<<<< fork
-/// Locked read-modify-write of `~/.grok/config.json`: the whole window runs under the config-init
-||||||| base
-/// Locked read-modify-write of `~/.grok/config.toml`: the whole window runs under the config-init
-=======
 pub use xai_grok_workspace::project_config::find_project_configs;
-/// Locked read-modify-write of `~/.grok/config.toml`: the whole window runs under the config-init
->>>>>>> upstream
+/// Locked read-modify-write of `~/.grok/config.json`: the whole window runs under the config-init
 /// flock and lands via atomic replace; unchanged configs skip the write.
 fn update_config_toml_locked(
     grok_home: &std::path::Path,

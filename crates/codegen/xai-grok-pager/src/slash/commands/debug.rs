@@ -1,31 +1,4 @@
-<<<<<<< fork
 //! `/debug <what is wrong>` — a self-debugging skill.
-||||||| base
-//! `/debug`: debug-overlay toggles (scroll HUD, FPS HUD, scroll log).
-//!
-//! The command is registered on every binary and fully functional in release, like the hidden diagnostics it fronts (`/scroll-debug`, `/gboom`).
-//! It is listed (dropdown, completion, recognized-token highlight via `visible()`) only on debug binaries (`cfg(debug_assertions)`).
-//! Release users never see it in a menu, but support can still ask them to type it.
-//!
-//! Subcommands (args-based; a popup menu can come later):
-//! - `/debug` bare: print the toggles and their state to the transcript.
-//! - `/debug scroll`: the scroll-diagnostics HUD, the same [`Action::ToggleScrollDebugHud`] as `/scroll-debug`.
-//!   `/scroll-debug` stays registered as the hidden long-form alias.
-//! - `/debug fps`: the release-safe FPS HUD ([`crate::views::fps_hud`]).
-//! - `/debug log`: the scroll flight recorder (`input::scroll_log` in xai-grok-pager-render), constructed at runtime to a fresh timestamped path.
-=======
-//! `/debug`: debug-overlay toggles (scroll HUD, FPS HUD, scroll log).
-//!
-//! The command is registered on every binary and fully functional in release, like the hidden diagnostic `/gboom`.
-//! It is listed (dropdown, completion, recognized-token highlight via `visible()`) only on debug binaries (`cfg(debug_assertions)`).
-//! Release users never see it in a menu, but support can still ask them to type it.
-//!
-//! Subcommands (args-based; a popup menu can come later):
-//! - `/debug` bare: print the toggles and their state to the transcript.
-//! - `/debug scroll`: the scroll-diagnostics HUD ([`Action::ToggleScrollDebugHud`]).
-//! - `/debug fps`: the release-safe FPS HUD ([`crate::views::fps_hud`]).
-//! - `/debug log`: the scroll flight recorder (`input::scroll_log` in xai-grok-pager-render), constructed at runtime to a fresh timestamped path.
->>>>>>> upstream
 
 use std::path::{Path, PathBuf};
 
