@@ -2406,6 +2406,7 @@ mod tests {
         );
     }
 
+    #[test]
     fn task_tools_name_block_until_ms_zero_when_bash_lacks_is_background() {
         let naming = |bash_background_param, bash_block_param, subagent_background_param| {
             TaskOutputToolNaming {

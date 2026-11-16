@@ -52,6 +52,7 @@ fn bash_command_gate_distinguishes_ask_provenance() {
     assert!(policy.evaluate_bash_command_gate("echo hi").is_none());
 }
 
+#[test]
 fn an_undecomposed_script_that_names_a_ruled_command_never_fails_closed() {
     let policy = CompiledPolicy::new(PermissionConfig::new(vec![
         parse_permission_rule("Bash(sed:*)", RuleAction::Deny).unwrap(),
