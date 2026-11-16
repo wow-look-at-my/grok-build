@@ -1365,8 +1365,7 @@ impl SessionActor {
                 && let Some(new_cw) = std::num::NonZeroU64::new(cw)
                 && self.compaction.context_window_override.is_none()
             {
-<<<<<<< fork
-                cfg.context_window = new_cw;
+                cfg.context_window = self.context_window_after_overflow(&cfg, new_cw);
                 self.chat_state_handle.update_sampling_config(cfg);
             }
             // A context-window-exceeded error can recur immediately after a

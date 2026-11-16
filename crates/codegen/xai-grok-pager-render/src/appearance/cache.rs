@@ -1035,12 +1035,6 @@ mod tests {
                 "show_thinking_blocks must NOT toggle when timestamps changed"
             );
 
-<<<<<<< fork
-            // ── show_thinking_blocks independent ──
-||||||| base
-            // ── simple_mode independent ──
-=======
->>>>>>> upstream
             set(true);
             set_timestamps(true);
             set_show_thinking_blocks(false);

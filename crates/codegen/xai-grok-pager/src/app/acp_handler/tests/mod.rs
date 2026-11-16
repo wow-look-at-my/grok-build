@@ -308,61 +308,17 @@ pub(super) fn follow_ups_ext_with_prompt(
     acp_fixtures::ext_notification("example.invalid/follow_ups", &params)
 }
 pub(super) fn voice_settings_update(enabled: bool) -> acp::ExtNotification {
-<<<<<<< fork
-    acp::ExtNotification::new(
-        "example.invalid/settings/update",
-        std::sync::Arc::from(
-            serde_json::value::to_raw_value(
-                    &serde_json::json!({ "voice_mode_enabled": enabled }),
-                )
-                .unwrap(),
-        ),
-||||||| base
-    acp::ExtNotification::new(
-        "x.ai/settings/update",
-        std::sync::Arc::from(
-            serde_json::value::to_raw_value(
-                    &serde_json::json!({ "voice_mode_enabled": enabled }),
-                )
-                .unwrap(),
-        ),
-=======
     acp_fixtures::ext_notification(
-        "x.ai/settings/update",
+        "example.invalid/settings/update",
         &serde_json::json!({ "voice_mode_enabled": enabled }),
->>>>>>> upstream
     )
 }
 pub(super) fn tier_settings_update(tier: &str) -> acp::ExtNotification {
-<<<<<<< fork
-    acp::ExtNotification::new(
-        "example.invalid/settings/update",
-        std::sync::Arc::from(
-            serde_json::value::to_raw_value(
-                    &serde_json::json!({
-                    "subscription_tier_display": tier
-                }),
-                )
-                .unwrap(),
-        ),
-||||||| base
-    acp::ExtNotification::new(
-        "x.ai/settings/update",
-        std::sync::Arc::from(
-            serde_json::value::to_raw_value(
-                    &serde_json::json!({
-                    "subscription_tier_display": tier
-                }),
-                )
-                .unwrap(),
-        ),
-=======
     acp_fixtures::ext_notification(
-        "x.ai/settings/update",
+        "example.invalid/settings/update",
         &serde_json::json!({
                 "subscription_tier_display": tier
             }),
->>>>>>> upstream
     )
 }
 pub(super) fn group_tool_verbs_settings_update(
@@ -372,19 +328,7 @@ pub(super) fn group_tool_verbs_settings_update(
         Some(v) => serde_json::json!({ "group_tool_verbs": v }),
         None => serde_json::json!({}),
     };
-<<<<<<< fork
-    acp::ExtNotification::new(
-        "example.invalid/settings/update",
-        std::sync::Arc::from(serde_json::value::to_raw_value(&params).unwrap()),
-    )
-||||||| base
-    acp::ExtNotification::new(
-        "x.ai/settings/update",
-        std::sync::Arc::from(serde_json::value::to_raw_value(&params).unwrap()),
-    )
-=======
-    acp_fixtures::ext_notification("x.ai/settings/update", &params)
->>>>>>> upstream
+    acp_fixtures::ext_notification("example.invalid/settings/update", &params)
 }
 pub(super) fn collapsed_edit_blocks_settings_update(
     value: Option<bool>,
@@ -393,19 +337,7 @@ pub(super) fn collapsed_edit_blocks_settings_update(
         Some(v) => serde_json::json!({ "collapsed_edit_blocks": v }),
         None => serde_json::json!({}),
     };
-<<<<<<< fork
-    acp::ExtNotification::new(
-        "example.invalid/settings/update",
-        std::sync::Arc::from(serde_json::value::to_raw_value(&params).unwrap()),
-    )
-||||||| base
-    acp::ExtNotification::new(
-        "x.ai/settings/update",
-        std::sync::Arc::from(serde_json::value::to_raw_value(&params).unwrap()),
-    )
-=======
-    acp_fixtures::ext_notification("x.ai/settings/update", &params)
->>>>>>> upstream
+    acp_fixtures::ext_notification("example.invalid/settings/update", &params)
 }
 pub(super) fn subagent_notification_with_event_id(
     session_id: &str,
@@ -417,19 +349,7 @@ pub(super) fn subagent_notification_with_event_id(
         update,
         meta: event_id.map(|event_id| serde_json::json!({ "eventId": event_id })),
     };
-<<<<<<< fork
-    acp::ExtNotification::new(
-        "example.invalid/session_notification",
-        std::sync::Arc::from(serde_json::value::to_raw_value(&payload).unwrap()),
-    )
-||||||| base
-    acp::ExtNotification::new(
-        "x.ai/session_notification",
-        std::sync::Arc::from(serde_json::value::to_raw_value(&payload).unwrap()),
-    )
-=======
-    acp_fixtures::ext_notification("x.ai/session_notification", &payload)
->>>>>>> upstream
+    acp_fixtures::ext_notification("example.invalid/session_notification", &payload)
 }
 pub(super) fn subagent_notification_with_seq(
     session_id: &str,

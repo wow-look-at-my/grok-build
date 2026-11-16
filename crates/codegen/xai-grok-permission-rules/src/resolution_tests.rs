@@ -351,15 +351,9 @@ fn discovery_with_no_settings_files() {
 
 #[test]
 fn project_claude_absent_when_home_is_git_repo() {
-<<<<<<< HEAD:crates/codegen/xai-grok-workspace/src/permission/resolution_tests.rs
-    // Home-is-a-git-repo (dotfiles in $HOME): for a cwd under home.
-    let home = IsolatedHome::new();
-    crate::test_git::init(home.path());
-=======
     // When `$HOME` is a git repo, a cwd under home must not treat `~/.claude` as project-tier (that env is injected into every subprocess)
     let home = isolated_home();
-    git2::Repository::init(home.path()).unwrap();
->>>>>>> upstream/main:crates/codegen/xai-grok-permission-rules/src/resolution_tests.rs
+    crate::test_git::init(home.path());
     let claude_dir = home.path().join(".claude");
     std::fs::create_dir_all(&claude_dir).unwrap();
     std::fs::write(claude_dir.join("settings.json"), "{}").unwrap();
@@ -1172,13 +1166,8 @@ fn default_mode_inherited_from_parent_when_not_set() {
 
 #[test]
 fn single_file_still_works() {
-<<<<<<< HEAD:crates/codegen/xai-grok-workspace/src/permission/resolution_tests.rs
-    // Isolate HOME so host/CI `~/.claude` rules don't bleed into the count (paths merge global + project).
-    let _home = IsolatedHome::new();
-=======
     // Isolate HOME so host/CI `~/.claude` rules don't bleed into the count; paths merge global and project settings
     let _home = isolated_home();
->>>>>>> upstream/main:crates/codegen/xai-grok-permission-rules/src/resolution_tests.rs
 
     let tmp = tempfile::tempdir().unwrap();
     let claude_dir = tmp.path().join(".claude");
@@ -1295,14 +1284,8 @@ allow = ["Bash(evil *)"]
     )
     .unwrap();
 
-<<<<<<< HEAD:crates/codegen/xai-grok-workspace/src/permission/resolution_tests.rs
-    // Untrusted may be None when no global rules load (GROK_HOME OnceLock
-    // already pinned by another test) — empty after dropping project is OK.
-    let untrusted = home.block_on(resolve_permissions_with_provenance_inner(
-=======
     // Untrusted may be None when no global rules load (GROK_HOME OnceLock already pinned by another test); empty after dropping project is OK
     let untrusted = block_on(resolve_permissions_with_provenance_inner(
->>>>>>> upstream/main:crates/codegen/xai-grok-permission-rules/src/resolution_tests.rs
         tmp.path(),
         inputs_trusted(None, false),
     ));
@@ -1316,14 +1299,6 @@ allow = ["Bash(evil *)"]
         "untrusted project config.toml allow must not load"
     );
 
-<<<<<<< HEAD:crates/codegen/xai-grok-workspace/src/permission/resolution_tests.rs
-    let trusted = home
-        .block_on(resolve_permissions_with_provenance_inner(
-            tmp.path(),
-            inputs_trusted(None, true),
-        ))
-        .expect("trusted project rules resolve");
-=======
     let trusted = block_on(resolve_permissions_with_provenance_inner(
         tmp.path(),
         inputs_trusted(None, true),

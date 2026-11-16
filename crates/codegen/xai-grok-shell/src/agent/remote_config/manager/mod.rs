@@ -14,8 +14,7 @@ use super::{
     fallback_model_id, is_campaign_only_flip, merge_additive_catalog,
     models_endpoint_empty_message, models_fetch_enabled, resolve_catalog_key,
     resolve_default_model, resolve_model_catalog, resolve_models_cache_scope,
-    resolve_route_catalog_key,
-    task_model_error_for_catalog, validate_selectable,
+    resolve_route_catalog_key, task_model_error_for_catalog, validate_selectable,
 };
 use crate::agent::config::{self, ModelEntry, resolve_credentials, sampling_config_for_model};
 use crate::agent::remote_config::task_model_policy::{
@@ -1453,14 +1452,6 @@ impl ModelsManager {
         self.inner.catalog.read().allowlist_excludes_all
     }
 
-<<<<<<< fork
-    /// Re-pick the default when the current model is gone or unselectable;
-    /// auth visibility never evicts an explicit user pick. Keeps the picker
-    /// and sampler aligned when an additive provider is the only signed-in
-    /// provider.
-||||||| base
-    /// Re-pick the default when the current model is gone or unselectable; auth visibility never evicts an explicit user pick.
-=======
     /// The message that stops a prompt because no model can serve it, or `None`.
     pub(crate) async fn prompt_block_message(&self) -> Option<String> {
         if CatalogSource::for_config(&self.inner.cfg.read()) == CatalogSource::Standard {
@@ -1491,8 +1482,10 @@ impl ModelsManager {
             .then(|| allowlist_excludes_all_message(&cfg))
     }
 
-    /// Re-pick the default when the current model is gone or unselectable; auth visibility never evicts an explicit user pick.
->>>>>>> upstream
+    /// Re-pick the default when the current model is gone or unselectable;
+    /// auth visibility never evicts an explicit user pick. Keeps the picker
+    /// and sampler aligned when an additive provider is the only signed-in
+    /// provider.
     fn reselect_current_model_if_missing(&self, config: &config::Config) {
         let current = self.inner.current_model_id.read().clone();
         let user_selected = self.inner.user_selected_model.load(Ordering::Relaxed);
