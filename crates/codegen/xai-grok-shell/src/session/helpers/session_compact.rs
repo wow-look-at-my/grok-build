@@ -433,12 +433,8 @@ mod compact_cancel_await_tests;
 /// `chat_history` must already include the summarization prompt as its final user message.
 /// The split lets callers persist the exact request payload before issuing it.
 /// Omitting them would shift the entire prefix and force a full prefill on the summarizer call.
-<<<<<<< fork
-/// The client's usage sink bills the call, also when it then fails.
-||||||| base
-=======
 /// The session's reasoning effort is sent for the same reason: effort changes the prompt ahead of the history.
->>>>>>> upstream
+/// The client's usage sink bills the call, also when it then fails.
 pub(crate) async fn generate_session_compact(
     chat_history: impl Into<
         crate::session::helpers::prepared_compaction_history::CompactionHistoryInput,

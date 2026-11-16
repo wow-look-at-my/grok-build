@@ -128,7 +128,7 @@ async fn fetch_bundle_inner(
     alpha_test_key: Option<&str>,
 ) -> Result<FetchedBundle, BackendError> {
     let archive_url = format!("{}/bundle/archive", cli_chat_proxy_base_url);
-<<<<<<< fork
+
     let client = crate::http::shared_client();
     let request_auth = if let Some(am) = auth_manager {
         let provider: std::sync::Arc<dyn xai_grok_auth::AuthCredentialProvider> =
@@ -139,63 +139,20 @@ async fn fetch_bundle_inner(
                 ),
             );
         crate::http::auth_retry(provider, &archive_url)
-||||||| base
-    let raw_client = crate::http::shared_client();
-    let client: reqwest_middleware::ClientWithMiddleware = if let Some(am) = auth_manager {
-        let provider: std::sync::Arc<dyn xai_grok_auth::AuthCredentialProvider> = std::sync::Arc::new(
-            xai_grok_login::credential_provider::ShellAuthCredentialProvider::with_deployment_id_resolver(
-                am.clone(),
-                deployment_key.map(str::to_owned),
-                alpha_test_key.map(str::to_owned),
-                std::sync::Arc::new(crate::managed_config::resolve_deployment_id),
-            ),
-        );
-        crate::http::with_auth_retry(raw_client, provider)
-=======
-
-    let raw_client = crate::http::shared_client();
-    let client: reqwest_middleware::ClientWithMiddleware = if let Some(am) = auth_manager {
-        let provider: std::sync::Arc<dyn xai_grok_auth::AuthCredentialProvider> =
-            std::sync::Arc::new(
-                xai_grok_login::credential_provider::ShellAuthCredentialProvider::with_deployment_id_resolver(
-                    am.clone(),
-                    deployment_key.map(str::to_owned),
-                    alpha_test_key.map(str::to_owned),
-                    std::sync::Arc::new(xai_grok_cloud_config::managed_config::resolve_deployment_id),
-                ),
-            );
-        crate::http::with_auth_retry(raw_client, provider)
->>>>>>> upstream
     } else {
         xai_grok_auth::RequestAuth::none()
     };
-<<<<<<< fork
+
     let mut request = request_auth
         .headers_on(client.get(&archive_url, request_auth.auth.clone()))
-||||||| base
-    let mut request = client
-        .get(&archive_url)
-=======
-
-    let mut request = client
-        .get(&archive_url)
->>>>>>> upstream
         .timeout(std::time::Duration::from_secs(30))
         .header("x-grok-client-version", xai_grok_version::version())
         .header(
             crate::http::CLIENT_MODE_HEADER,
             crate::http::process_client_mode(),
         );
-<<<<<<< fork
-    if let Some(am) = auth_manager
-||||||| base
-    if deployment_key.is_none()
-        && let Some(am) = auth_manager
-=======
 
-    if deployment_key.is_none()
-        && let Some(am) = auth_manager
->>>>>>> upstream
+    if let Some(am) = auth_manager
         && let Some(auth) = am.current()
     {
         request = request.header("x-userid", &auth.user_id);
@@ -203,34 +160,16 @@ async fn fetch_bundle_inner(
             request = request.header("x-email", email);
         }
     }
-<<<<<<< fork
+
     let archive_response = request.send().await?;
-||||||| base
-    let archive_response = request.send().await.map_err(|e| match e {
-        reqwest_middleware::Error::Reqwest(e) => BackendError::Network(e),
-        reqwest_middleware::Error::Middleware(e) => BackendError::Auth(e.to_string()),
-    })?;
-=======
 
-    let archive_response = request.send().await.map_err(|e| match e {
-        reqwest_middleware::Error::Reqwest(e) => BackendError::Network(e),
-        reqwest_middleware::Error::Middleware(e) => BackendError::Auth(e.to_string()),
-    })?;
-
->>>>>>> upstream
     if archive_response.status().is_success() {
         let bytes = archive_response.bytes().await?;
         return Ok(FetchedBundle::Archive(bytes.to_vec()));
     }
-<<<<<<< fork
-    if archive_response.status() == xai_grok_net::StatusCode::UNAUTHORIZED {
-||||||| base
-    if archive_response.status() == reqwest::StatusCode::UNAUTHORIZED {
-=======
 
     // Propagate 401 immediately; don't fall through to legacy with stale creds.
-    if archive_response.status() == reqwest::StatusCode::UNAUTHORIZED {
->>>>>>> upstream
+    if archive_response.status() == xai_grok_net::StatusCode::UNAUTHORIZED {
         let body = archive_response.text().await.unwrap_or_default();
         return Err(BackendError::RequestFailed { status: 401, body });
     }
@@ -239,27 +178,9 @@ async fn fetch_bundle_inner(
         status = %archive_response.status(),
         "archive endpoint unavailable, falling back to legacy JSON"
     );
-<<<<<<< fork
+
     let bundle =
         fetch_subagent_bundle(cli_chat_proxy_base_url, auth_manager, alpha_test_key).await?;
-||||||| base
-    let bundle = fetch_subagent_bundle(
-        cli_chat_proxy_base_url,
-        auth_manager,
-        deployment_key,
-        alpha_test_key,
-    )
-    .await?;
-=======
-
-    let bundle = fetch_subagent_bundle(
-        cli_chat_proxy_base_url,
-        auth_manager,
-        deployment_key,
-        alpha_test_key,
-    )
-    .await?;
->>>>>>> upstream
     Ok(FetchedBundle::Legacy(bundle))
 }
 
@@ -325,14 +246,8 @@ pub struct SessionUpdate {
 #[derive(Debug, thiserror::Error)]
 pub enum BackendError {
     #[error("Network error: {0}")]
-<<<<<<< fork
     Network(xai_grok_net::Error),
-||||||| base
-    Network(#[from] reqwest::Error),
-=======
-    Network(#[from] reqwest::Error),
 
->>>>>>> upstream
     #[error("Request failed: {status} - {body}")]
     RequestFailed { status: u16, body: String },
 

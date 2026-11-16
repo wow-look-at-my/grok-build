@@ -278,7 +278,6 @@ pub fn render_turn_status(
                 | AgentState::TurnCancelling
                 | AgentState::CommandCancelling { .. }
         );
-<<<<<<< fork
 
     let (activity_style, label, is_tool) = compute_activity(
         &theme,
