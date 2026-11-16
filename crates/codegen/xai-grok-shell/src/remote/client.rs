@@ -302,39 +302,17 @@ impl Default for BackendClient {
 }
 
 impl BackendClient {
-<<<<<<< fork
     fn build_default_client() -> xai_grok_net::HttpClient {
         xai_grok_net::HttpClient::build(
-                xai_grok_net::ClientOptions::default()
-                    .connect_timeout(Duration::from_secs(10))
-                    .timeout(DEFAULT_TIMEOUT),
-            )
-            .unwrap_or_else(|e| {
-                tracing::warn!(error = %e, "failed to build backend HTTP client; falling back to shared client");
-                crate::http::shared_client()
-            })
-||||||| base
-    fn build_default_client() -> reqwest::Client {
-        xai_grok_extra_ca::build_reqwest_client(|builder| {
-                builder.connect_timeout(Duration::from_secs(10)).timeout(DEFAULT_TIMEOUT)
-            })
-            .unwrap_or_else(|e| {
-                tracing::warn!(error = %e, "failed to build backend HTTP client; falling back to shared client");
-                crate::http::shared_client()
-            })
-=======
-    fn build_default_client() -> reqwest::Client {
-        xai_grok_extra_ca::build_reqwest_client(|builder| {
-            builder
+            xai_grok_net::ClientOptions::default()
                 .connect_timeout(Duration::from_secs(10))
-                .timeout(DEFAULT_TIMEOUT)
-        })
+                .timeout(DEFAULT_TIMEOUT),
+        )
         .unwrap_or_else(|e| {
             // The CLI runs panic=abort; fall back rather than panic.
             tracing::warn!(error = %e, "failed to build backend HTTP client; falling back to shared client");
             crate::http::shared_client()
         })
->>>>>>> upstream
     }
 
     pub fn new() -> Self {
@@ -423,18 +401,10 @@ impl BackendClient {
 
     /// Must include X-XAI-Token-Auth so nginx auth subrequest routes to OAuth.
     /// See: crates/codegen/xai-grok-shell/src/agent/app.rs:run_headless
-<<<<<<< fork
+    // Returns a HeaderMap; .header() appends, so we must not touch a builder that already has Content-Type from .json()
     async fn auth_header_map(&self) -> Result<xai_grok_net::header::HeaderMap, BackendError> {
         use xai_grok_net::header::{HeaderMap, HeaderValue};
-||||||| base
-    async fn auth_header_map(&self) -> Result<reqwest::header::HeaderMap, BackendError> {
-        use reqwest::header::{HeaderMap, HeaderValue};
-=======
-    // Returns a HeaderMap; reqwest .header() appends, so we must not touch a builder that already has Content-Type from .json()
-    async fn auth_header_map(&self) -> Result<reqwest::header::HeaderMap, BackendError> {
-        use reqwest::header::{HeaderMap, HeaderValue};
 
->>>>>>> upstream
         let auth = self.resolve_auth().await?;
         let mut headers = HeaderMap::new();
 
@@ -467,7 +437,7 @@ impl BackendClient {
         );
         Ok(headers)
     }
-<<<<<<< fork
+
     /// A request to `url` that carries the login credential.
     fn authed(&self, method: xai_grok_net::Method, url: &str) -> xai_grok_net::Request {
         let request_auth = match &self.credential {
@@ -476,10 +446,7 @@ impl BackendClient {
         };
         request_auth.headers_on(self.client.request(method, url, request_auth.auth.clone()))
     }
-||||||| base
-=======
 
->>>>>>> upstream
     async fn send_with_auth(
         &self,
         builder: xai_grok_net::Request,
@@ -547,16 +514,10 @@ impl BackendClient {
 
     pub async fn list_sessions(&self) -> Result<Vec<SessionInfo>, BackendError> {
         let url = format!("{}/sessions", self.base_url);
-<<<<<<< fork
+
         let response = self
             .send_with_auth(self.authed(xai_grok_net::Method::GET, &url))
             .await?;
-||||||| base
-        let response = self.send_with_auth(self.reqwest_client.get(&url)).await?;
-=======
-
-        let response = self.send_with_auth(self.reqwest_client.get(&url)).await?;
->>>>>>> upstream
         if !response.status().is_success() {
             let status = response.status().as_u16();
             let body = response.text().await.unwrap_or_default();
@@ -576,16 +537,10 @@ impl BackendClient {
         session_id: &str,
     ) -> Result<LoadDataResponse, BackendError> {
         let url = format!("{}/sessions/{}/data", self.base_url, session_id);
-<<<<<<< fork
+
         let response = self
             .send_with_auth(self.authed(xai_grok_net::Method::GET, &url))
             .await?;
-||||||| base
-        let response = self.send_with_auth(self.reqwest_client.get(&url)).await?;
-=======
-
-        let response = self.send_with_auth(self.reqwest_client.get(&url)).await?;
->>>>>>> upstream
         if response.status().as_u16() == 404 {
             return Err(BackendError::SessionNotFound {
                 session_id: session_id.to_string(),
@@ -634,208 +589,10 @@ impl BackendClient {
         Ok(())
     }
 }
-<<<<<<< fork
-/// Distinguishes the three cases the external-OTEL gate cares about (see [`crate::agent::mvp_agent`]).
-#[derive(Debug, Clone)]
-#[must_use]
-#[non_exhaustive]
-pub enum SettingsFetch {
-    /// Settings fetched and parsed; carries the policy that resolves the gate.
-    /// Boxed because `RemoteSettings` is large and the other variants are unit-sized.
-    Fetched(Box<crate::util::config::RemoteSettings>),
-    /// Credential unambiguously rejected (401): the remote policy will never reach this leader, so the gate may open without waiting.
-    Rejected,
-    /// Transient/ambiguous (network, 5xx exhausted, 403/429/other 4xx, unparseable 2xx): outcome unknown.
-    /// A completed fetch that failed: the gate may open on local policy.
-    Retry,
-}
-impl SettingsFetch {
-    /// For callers that only want the settings and treat every failure alike.
-    pub fn into_option(self) -> Option<crate::util::config::RemoteSettings> {
-        match self {
-            SettingsFetch::Fetched(s) => Some(*s),
-            SettingsFetch::Rejected | SettingsFetch::Retry => None,
-        }
-    }
-}
-/// Makes up to [`crate::http::SETTINGS_FETCH_MAX_ATTEMPTS`] attempts on transient failures.
-pub fn fetch_settings_blocking(
-    cli_chat_proxy_base_url: &str,
-    auth: &GrokAuth,
-    alpha_test_key: Option<&str>,
-) -> SettingsFetch {
-    fetch_settings_blocking_with_attempts(
-        cli_chat_proxy_base_url,
-        auth,
-        alpha_test_key,
-        crate::http::SETTINGS_FETCH_MAX_ATTEMPTS,
-    )
-}
-/// Private so the attempt count stays out of the public API; tests use it to skip retry backoff on the transient-failure paths.
-fn fetch_settings_blocking_with_attempts(
-    cli_chat_proxy_base_url: &str,
-    auth: &GrokAuth,
-    alpha_test_key: Option<&str>,
-    max_attempts: u32,
-) -> SettingsFetch {
-    let client = crate::http::shared_startup_blocking_client();
-    let url = format!("{cli_chat_proxy_base_url}/settings");
-    let max_attempts = max_attempts.max(1);
-    for attempt in 0u32..max_attempts {
-        if attempt > 0 {
-            std::thread::sleep(crate::http::SETTINGS_RETRY_BACKOFF_STEP * attempt);
-        }
-        let request = add_cli_chat_proxy_headers_blocking(
-            client.get(&url, auth.wire_auth()),
-            auth,
-            alpha_test_key,
-            &url,
-        );
-        match request.send() {
-            Ok(resp) if resp.status().is_success() => match resp.json() {
-                Ok(settings) => {
-                    tracing::debug!("Fetched remote settings from cli-chat-proxy");
-                    return SettingsFetch::Fetched(Box::new(settings));
-                }
-                Err(e) => {
-                    tracing::warn!(attempt, "Failed to parse settings response: {e}");
-                    return SettingsFetch::Retry;
-                }
-            },
-            Ok(resp) if resp.status().is_server_error() => {
-                tracing::warn!(
-                    attempt,
-                    status = resp.status().as_u16(),
-                    "Settings fetch server error, retrying"
-                );
-                continue;
-            }
-            Ok(resp) if resp.status() == xai_grok_net::StatusCode::UNAUTHORIZED => {
-                tracing::warn!(
-                    status = resp.status().as_u16(),
-                    "Settings fetch rejected (401)"
-                );
-                return SettingsFetch::Rejected;
-            }
-            Ok(resp) => {
-                tracing::warn!(
-                    status = resp.status().as_u16(),
-                    "Settings fetch failed (non-2xx)"
-                );
-                return SettingsFetch::Retry;
-            }
-            Err(e) => {
-                tracing::warn!(attempt, "Settings fetch network error: {e}");
-                continue;
-            }
-        }
-    }
-    tracing::error!(max_attempts, "Settings fetch failed");
-    SettingsFetch::Retry
-}
-/// Default context window (256k) when the remote endpoint doesn't provide one.
-||||||| base
-/// Distinguishes the three cases the external-OTEL gate cares about (see [`crate::agent::mvp_agent`]).
-#[derive(Debug, Clone)]
-#[must_use]
-#[non_exhaustive]
-pub enum SettingsFetch {
-    /// Settings fetched and parsed; carries the policy that resolves the gate.
-    /// Boxed because `RemoteSettings` is large and the other variants are unit-sized.
-    Fetched(Box<crate::util::config::RemoteSettings>),
-    /// Credential unambiguously rejected (401): the remote policy will never reach this leader, so the gate may open without waiting.
-    Rejected,
-    /// Transient/ambiguous (network, 5xx exhausted, 403/429/other 4xx, unparseable 2xx): outcome unknown.
-    /// A completed fetch that failed: the gate may open on local policy.
-    Retry,
-}
-impl SettingsFetch {
-    /// For callers that only want the settings and treat every failure alike.
-    pub fn into_option(self) -> Option<crate::util::config::RemoteSettings> {
-        match self {
-            SettingsFetch::Fetched(s) => Some(*s),
-            SettingsFetch::Rejected | SettingsFetch::Retry => None,
-        }
-    }
-}
-/// Makes up to [`crate::http::SETTINGS_FETCH_MAX_ATTEMPTS`] attempts on transient failures.
-pub fn fetch_settings_blocking(
-    cli_chat_proxy_base_url: &str,
-    auth: &GrokAuth,
-    alpha_test_key: Option<&str>,
-) -> SettingsFetch {
-    fetch_settings_blocking_with_attempts(
-        cli_chat_proxy_base_url,
-        auth,
-        alpha_test_key,
-        crate::http::SETTINGS_FETCH_MAX_ATTEMPTS,
-    )
-}
-/// Private so the attempt count stays out of the public API; tests use it to skip retry backoff on the transient-failure paths.
-fn fetch_settings_blocking_with_attempts(
-    cli_chat_proxy_base_url: &str,
-    auth: &GrokAuth,
-    alpha_test_key: Option<&str>,
-    max_attempts: u32,
-) -> SettingsFetch {
-    let client = crate::http::shared_startup_blocking_client();
-    let url = format!("{cli_chat_proxy_base_url}/settings");
-    let max_attempts = max_attempts.max(1);
-    for attempt in 0u32..max_attempts {
-        if attempt > 0 {
-            std::thread::sleep(crate::http::SETTINGS_RETRY_BACKOFF_STEP * attempt);
-        }
-        let request =
-            add_cli_chat_proxy_headers_blocking(client.get(&url), auth, alpha_test_key, &url);
-        match request.send() {
-            Ok(resp) if resp.status().is_success() => match resp.json() {
-                Ok(settings) => {
-                    tracing::debug!("Fetched remote settings from cli-chat-proxy");
-                    return SettingsFetch::Fetched(Box::new(settings));
-                }
-                Err(e) => {
-                    tracing::warn!(attempt, "Failed to parse settings response: {e}");
-                    return SettingsFetch::Retry;
-                }
-            },
-            Ok(resp) if resp.status().is_server_error() => {
-                tracing::warn!(
-                    attempt,
-                    status = resp.status().as_u16(),
-                    "Settings fetch server error, retrying"
-                );
-                continue;
-            }
-            Ok(resp) if resp.status() == reqwest::StatusCode::UNAUTHORIZED => {
-                tracing::warn!(
-                    status = resp.status().as_u16(),
-                    "Settings fetch rejected (401)"
-                );
-                return SettingsFetch::Rejected;
-            }
-            Ok(resp) => {
-                tracing::warn!(
-                    status = resp.status().as_u16(),
-                    "Settings fetch failed (non-2xx)"
-                );
-                return SettingsFetch::Retry;
-            }
-            Err(e) => {
-                tracing::warn!(attempt, "Settings fetch network error: {e}");
-                continue;
-            }
-        }
-    }
-    tracing::error!(max_attempts, "Settings fetch failed");
-    SettingsFetch::Retry
-}
-/// Default context window when the remote endpoint doesn't provide one.
-=======
 
-/// Default context window when the remote endpoint doesn't provide one.
->>>>>>> upstream
+/// Default context window (256k) when the remote endpoint doesn't provide one.
 pub(crate) const DEFAULT_CONTEXT_WINDOW: u64 = 256_000;
-<<<<<<< fork
+
 #[derive(Debug, Deserialize)]
 struct ModelsResponse {
     data: Vec<serde_json::Value>,
@@ -894,15 +651,11 @@ pub(crate) fn provider_request_auth(
 }
 
 /// Fetch result: model entries + optional etag from response.
-||||||| base
-=======
-
->>>>>>> upstream
 pub struct FetchModelsResult {
     pub models: Vec<crate::agent::config::ModelEntryConfig>,
     pub etag: Option<String>,
 }
-<<<<<<< fork
+
 /// Fetch and parse a `/v1/models` listing from an arbitrary OpenAI-compatible
 /// base (BYOK / custom provider, e.g. `https://gateway.pazer.ai/v1`), using a
 /// Bearer API key when supplied.
@@ -958,9 +711,6 @@ pub(crate) fn fetch_models_for_list_url_blocking(
     }
     Ok(models)
 }
-||||||| base
-=======
->>>>>>> upstream
 
 /// Parse a single model entry from the /models-v2 response.
 /// Used by both initial model fetch and session-resume metadata refresh.
@@ -985,14 +735,9 @@ pub(crate) fn parse_remote_model_value(
         .or_else(|| get_string(obj, "base_url"))
         .unwrap_or_else(|| default_base_url.to_owned());
     let name = get_string(obj, "name").or_else(|| Some(model.clone()));
-<<<<<<< fork
     // Anthropic exposes its per-model input-context-window in the `/v1/models` listing as `max_input_tokens` ("Maximum input context window size in tokens for this model").
     let top_provider = obj.get("top_provider").and_then(|v| v.as_object());
     let capabilities = obj.get("capabilities").and_then(|v| v.as_object());
-    let context_window = get_u64(obj, "contextWindow")
-||||||| base
-    let context_window = get_u64(obj, "contextWindow")
-=======
     let listed: Vec<std::num::NonZeroU64> = get_u64_array(obj, "contextWindows")
         .or_else(|| get_u64_array(obj, "context_windows"))
         .or_else(|| meta.and_then(|m| get_u64_array(m, "contextWindows")))
@@ -1004,11 +749,9 @@ pub(crate) fn parse_remote_model_value(
         })
         .unwrap_or_default();
     let scalar = match get_u64(obj, "contextWindow")
->>>>>>> upstream
         .or_else(|| get_u64(obj, "context_window"))
         .or_else(|| meta.and_then(|m| get_u64(m, "contextWindow")))
         .or_else(|| meta.and_then(|m| get_u64(m, "totalContextTokens")))
-<<<<<<< fork
         .or_else(|| get_u64(obj, "context_length"))
         .or_else(|| top_provider.and_then(|tp| get_u64(tp, "context_length")))
         .or_else(|| capabilities.and_then(|c| get_u64(c, "context_length")))
@@ -1016,12 +759,6 @@ pub(crate) fn parse_remote_model_value(
         .or_else(|| get_u64(obj, "max_input_tokens"))
         .or_else(|| get_u64(obj, "maxInputTokens"))
         .filter(|&v| v > 0)
-        .unwrap_or(DEFAULT_CONTEXT_WINDOW);
-    let context_window = std::num::NonZeroU64::new(context_window)?;
-||||||| base
-        .unwrap_or(DEFAULT_CONTEXT_WINDOW);
-    let context_window = std::num::NonZeroU64::new(context_window)?;
-=======
     {
         Some(window) => Some(std::num::NonZeroU64::new(window)?),
         None => None,
@@ -1030,7 +767,6 @@ pub(crate) fn parse_remote_model_value(
         crate::agent::config::context_window_choices(scalar, &listed).or_else(|| {
             std::num::NonZeroU64::new(DEFAULT_CONTEXT_WINDOW).map(|w| (w, Vec::new()))
         })?;
->>>>>>> upstream
     let agent_type = get_string(obj, "systemPromptType")
         .or_else(|| get_string(obj, "system_prompt_type"))
         .or_else(|| get_string(obj, "agent_type"))
@@ -1242,7 +978,6 @@ pub(crate) fn parse_remote_model_value(
     })
 }
 
-<<<<<<< fork
 /// The per-token price a model listing states, or all zeros when it states
 /// none. Shapes are read. OpenRouter's `pricing` object, whose values are
 /// USD per token.
@@ -1368,9 +1103,6 @@ fn listed_native_backend(
     anthropic.then_some(ApiBackend::Messages)
 }
 
-||||||| base
-=======
->>>>>>> upstream
 fn get_string(obj: &serde_json::Map<String, serde_json::Value>, key: &str) -> Option<String> {
     obj.get(key).and_then(|v| v.as_str()).map(|s| s.to_string())
 }
@@ -1406,7 +1138,7 @@ fn parse_capabilities_reasoning_efforts(
     }
     Some((options, !marked))
 }
-<<<<<<< fork
+
 /// Effort menu from the `reasoning` object OpenRouter and Bifrost listings carry: `supported_efforts` is a bare-string list, `default_effort` names the marked entry.
 /// The second value is true when no entry got marked, so the request omits the effort and the server applies its own.
 fn parse_reasoning_object_efforts(
@@ -1436,10 +1168,7 @@ fn parse_reasoning_object_efforts(
     }
     Some((options, !marked))
 }
-||||||| base
-=======
 
->>>>>>> upstream
 /// Parse `env_key` / `envKey` as a single string or a string array.
 fn get_env_keys(
     obj: &serde_json::Map<String, serde_json::Value>,

@@ -1,28 +1,14 @@
 use super::super::load::load_config_from_toml;
-<<<<<<< fork
-use super::super::mcp::{McpConfig, parse_mcp_config_with_oauth};
+use super::super::mcp::McpConfig;
 use super::super::settings_writes::{
     write_dashboard_preview, write_feature_override, write_model_context_window,
     write_notifications_keep_awake,
 };
-||||||| base
-use super::super::mcp::{McpConfig, parse_mcp_config_with_oauth};
-use super::super::settings_writes::{write_dashboard_preview, write_feature_override};
-=======
-use super::super::mcp::McpConfig;
-use super::super::settings_writes::{write_dashboard_preview, write_feature_override};
->>>>>>> upstream
 use super::*;
 use toml::Value as TomlValue;
 use toml::map::Map as TomlMap;
-<<<<<<< fork
-/// First-run `ensure` creates a 0-byte `$GROK_HOME/config.json`.
-||||||| base
-/// First-run `ensure` creates a 0-byte `$GROK_HOME/config.toml`.
-=======
 use xai_grok_config::mcp_servers::parse_mcp_config_with_oauth;
-/// First-run `ensure` creates a 0-byte `$GROK_HOME/config.toml`.
->>>>>>> upstream
+/// First-run `ensure` creates a 0-byte `$GROK_HOME/config.json`.
 /// Empty and whitespace-only files must parse as an empty table so the first settings write is not "refusing to overwrite unparseable".
 /// Non-empty garbage still refuses.
 #[test]

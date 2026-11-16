@@ -289,16 +289,6 @@ pub fn render_turn_status(
     );
 
     // Early return for idle (shouldn't happen if should_show is respected, but be safe).
-||||||| base
-
-    let (activity_style, label, is_tool) =
-        compute_activity(&theme, state, activity, is_bash_turn, goal_verifying);
-
-    // Early return for idle (shouldn't happen if should_show is respected, but be safe).
-=======
-    let (activity_style, label, is_tool) =
-        compute_activity(&theme, state, activity, is_bash_turn, goal_verifying);
->>>>>>> upstream
     if matches!(state, AgentState::Idle) {
         return TurnStatusOutput::default();
     }
@@ -315,7 +305,6 @@ pub fn render_turn_status(
         _ => String::new(),
     };
     let turn_timer_width = turn_timer_str.width();
-<<<<<<< fork
 
     // Output rate, rendered in its own color: gray while healthy, amber once
     // it is near the configured floor, red once it is under it.
@@ -332,12 +321,6 @@ pub fn render_turn_status(
 
     // Bg button: [↓] normally, [send to bg] when hovered. Running execute
     // tools only, and never while cancelling (demote no-ops there).
-||||||| base
-
-    // Bg button: [↓] normally, [send to bg] when hovered
-    // It shows only for running execute tools, never while cancelling (demote no-ops there)
-=======
->>>>>>> upstream
     let show_bg = show_cancel
         && has_running_execute
         && matches!(
@@ -360,21 +343,11 @@ pub fn render_turn_status(
         (true, false) => " [stop]",
     };
     let cancel_width = cancel_str.width();
-<<<<<<< fork
 
     let right_width = turn_timer_width + rate_width + bg_width + cancel_width;
 
     // While a tool is blocked on a permission prompt or `ask_user_question`, swap the running braille spinner for a pulsing `◆`
     // The drain-blocked and plan-approval indicators already use this animation, so every "your turn" status reads with one consistent visual cue
-||||||| base
-
-    let right_width = turn_timer_width + bg_width + cancel_width;
-
-    // While a tool is blocked on a permission prompt or `ask_user_question`, swap the running braille spinner for a pulsing `◆`
-    // The drain-blocked and plan-approval indicators already use this animation, so every "your turn" status reads with one consistent visual cue
-=======
-    let right_width = turn_timer_width + bg_width + cancel_width;
->>>>>>> upstream
     let spinner_str = if is_pending_user_input {
         format!("{} ", crate::glyphs::diamond_filled())
     } else {
@@ -496,13 +469,8 @@ pub fn render_turn_status(
     }
     let left_line = Line::from(left_spans);
     buf.set_line(area.x, area.y, &left_line, area.width);
-<<<<<<< fork
     render_retry_reason(buf, area, state, activity, activity_style);
 
-||||||| base
-
-=======
->>>>>>> upstream
     let right_start_x = area.x + area.width.saturating_sub(right_width as u16);
     let right_style = |fg| {
         Style::default()
@@ -516,7 +484,6 @@ pub fn render_turn_status(
         buf.set_span(x, area.y, &span, turn_timer_width as u16);
         x += turn_timer_width as u16;
     }
-<<<<<<< fork
 
     // Output rate — its own color, so the rest of the right side stays gray.
     if let Some(rate) = output_rate.filter(|_| !rate_str.is_empty()) {
@@ -531,11 +498,6 @@ pub fn render_turn_status(
     }
 
     // Bg button — accent_running on hover
-||||||| base
-
-    // Bg button: accent_running on hover
-=======
->>>>>>> upstream
     let bg_button_rect = if show_bg && !bg_str.is_empty() {
         let bg_x = x;
         let bg_style = if bg_hovered {
@@ -569,7 +531,6 @@ pub fn render_turn_status(
         watching_cue: None,
     }
 }
-<<<<<<< fork
 
 /// A goal-harness phase that owns the running turn: its role and the live
 /// counts of the subagent it runs.
@@ -712,10 +673,6 @@ fn render_retry_reason(
     }
 }
 
-||||||| base
-
-=======
->>>>>>> upstream
 /// Compute activity style, label, and whether it's a tool.
 fn compute_activity(
     theme: &Theme,
@@ -731,18 +688,9 @@ fn compute_activity(
             "Cancelling…".to_string(),
             false,
         ),
-<<<<<<< fork
         // A goal-harness phase (skeptic panel, strategist, summarizer) runs
         // in-turn while the model is idle.
         (AgentState::TurnRunning, _) if goal_harness.is_some() => (
-||||||| base
-        // Goal-mode completion verification runs in-turn after the model stops streaming
-        // The harness drives the skeptic panel (the model is idle), but the turn's last streaming activity can still read as `Responding`/`Thinking`
-        // Label the whole window "Verifying…" so the multi-minute panel isn't mislabelled as the model responding (or a hung "Waiting…")
-        (AgentState::TurnRunning, _) if goal_verifying => (
-=======
-        (AgentState::TurnRunning, _) if goal_verifying => (
->>>>>>> upstream
             Style::default().fg(theme.text_secondary),
             goal_harness.map(|g| g.label()).unwrap_or_default(),
             false,
@@ -896,7 +844,6 @@ pub fn should_show(
 ///
 /// Re-exports [`crate::util::format_duration`] under the old name for backwards compatibility within this module.
 pub use crate::util::format_duration as format_turn_timer;
-<<<<<<< fork
 
 /// The output-rate segment of the status row: ` 42 tok/s`, or ` 3.4 tok/s
 /// (slow 41s)` once the rate is under the floor. A rate a bounded number of
@@ -917,16 +864,6 @@ fn format_output_rate(rate: crate::acp::tracker::OutputRate) -> String {
     }
 }
 
-||||||| base
-
-/// Format a token count for compact display. Under 1000: `1`, `10`, `100` (raw number). 1k-100k:
-/// `1.23k`, `10.1k` (with decimal). 100k-1m: `100k`, `500k` (whole thousands). 1m+: `1.23m`,
-/// `10.1m` (with decimal).
-=======
-/// Format a token count for compact display. Under 1000: `1`, `10`, `100` (raw number). 1k-100k:
-/// `1.23k`, `10.1k` (with decimal). 100k-1m: `100k`, `500k` (whole thousands). 1m+: `1.23m`,
-/// `10.1m` (with decimal).
->>>>>>> upstream
 fn format_tokens_short(tokens: u64) -> String {
     if tokens < 1000 {
         format!("{tokens}")
@@ -949,7 +886,6 @@ fn format_tokens_short(tokens: u64) -> String {
         }
     }
 }
-<<<<<<< fork
 
 /// Render a running turn's row through the real renderer, for tests outside
 /// this module that hold a tracker and an activity rather than a frame.
@@ -988,14 +924,10 @@ pub(crate) fn render_running_row(
         .collect::<String>()
 }
 
-||||||| base
-
-=======
->>>>>>> upstream
 #[cfg(test)]
 mod tests {
     use super::*;
-<<<<<<< fork
+    use std::time::Duration;
 
     /// The header row says how long the wait lasts. The reason goes below it.
     #[test]
@@ -1117,17 +1049,6 @@ mod tests {
     /// foreground subagent await — all take the send-now path). Model waits —
     /// where typing only queues behind the actively-streaming turn — and
     /// non-wait activities keep the busy spinner.
-||||||| base
-
-    /// Sendable waits are exactly the wait reasons the shell aborts on a queued user prompt.
-    /// Blocking task-output, wait_tasks, Await, and a blocked foreground subagent await all take the send-now path.
-    /// Model waits (typing only queues behind the actively streaming turn) and non-wait activities keep the busy spinner.
-=======
-    use std::time::Duration;
-    /// Sendable waits are exactly the wait reasons the shell aborts on a queued user prompt.
-    /// Blocking task-output, wait_tasks, Await, and a blocked foreground subagent await all take the send-now path.
-    /// Model waits (typing only queues behind the actively streaming turn) and non-wait activities keep the busy spinner.
->>>>>>> upstream
     #[test]
     fn sendable_wait_matches_shell_interruptible_waits() {
         let task_wait = |waits| {
@@ -1181,7 +1102,6 @@ mod tests {
         assert_eq!(format_turn_timer(Duration::from_secs(80)), "1m20s");
         assert_eq!(format_turn_timer(Duration::from_secs(600)), "10m0s");
     }
-<<<<<<< fork
 
     fn harness(role: &str) -> Option<GoalHarnessActivity<'_>> {
         Some(GoalHarnessActivity {
@@ -1191,17 +1111,12 @@ mod tests {
         })
     }
 
-||||||| base
-
-=======
->>>>>>> upstream
     #[test]
     fn goal_harness_phase_overrides_stale_streaming_activity() {
         use xai_grok_shell::extensions::notification::{
             GOAL_ROLE_STRATEGIST, GOAL_ROLE_SUMMARIZER, GOAL_ROLE_VERIFIER,
         };
         let theme = Theme::current();
-<<<<<<< fork
         let label = |activity: Option<TurnActivity>, g| {
             compute_activity(&theme, &AgentState::TurnRunning, &activity, false, g, None).1
         };
@@ -1209,21 +1124,6 @@ mod tests {
         assert_eq!(label(None, None), "Waiting…");
         // The model is idle during a harness phase, but its last streaming
         // activity lingers. Each phase must replace it.
-||||||| base
-        // Running turn, no streaming activity, the verifying flag set: "Verifying…"
-        let (_, label, _) = compute_activity(&theme, &AgentState::TurnRunning, &None, false, true);
-        assert_eq!(label, "Verifying…");
-        // The same state without the verifying flag falls back to the generic "Waiting…"
-        let (_, label, _) = compute_activity(&theme, &AgentState::TurnRunning, &None, false, false);
-        assert_eq!(label, "Waiting…");
-        // During verification the model is idle but its last streaming activity (Responding/Thinking) can linger
-        // The flag overrides it so the panel reads "Verifying…", not "Responding…"
-=======
-        let (_, label, _) = compute_activity(&theme, &AgentState::TurnRunning, &None, false, true);
-        assert_eq!(label, "Verifying…");
-        let (_, label, _) = compute_activity(&theme, &AgentState::TurnRunning, &None, false, false);
-        assert_eq!(label, "Waiting…");
->>>>>>> upstream
         for activity in [TurnActivity::Responding, TurnActivity::Thinking] {
             for (role, expected) in [
                 (GOAL_ROLE_VERIFIER, "Verifying…"),
@@ -1233,7 +1133,6 @@ mod tests {
                 assert_eq!(label(Some(activity.clone()), harness(role)), expected);
             }
         }
-<<<<<<< fork
         assert_eq!(label(Some(TurnActivity::Responding), None), "Responding…");
     }
 
@@ -1269,26 +1168,6 @@ mod tests {
         assert_eq!(g.role, "strategist");
         assert_eq!(g.tool_calls, Some(3));
         assert_eq!(g.tokens, None, "a zero count is not shown");
-||||||| base
-        // Without the flag the streaming label stands.
-        let (_, label, _) = compute_activity(
-            &theme,
-            &AgentState::TurnRunning,
-            &Some(TurnActivity::Responding),
-            false,
-            false,
-        );
-        assert_eq!(label, "Responding…");
-=======
-        let (_, label, _) = compute_activity(
-            &theme,
-            &AgentState::TurnRunning,
-            &Some(TurnActivity::Responding),
-            false,
-            false,
-        );
-        assert_eq!(label, "Responding…");
->>>>>>> upstream
     }
     #[test]
     fn waiting_reason_renders_specific_label() {
@@ -1296,7 +1175,6 @@ mod tests {
         let theme = Theme::current();
         let cases = [
             (WaitingReason::Model, "Waiting for response…"),
-<<<<<<< fork
             (
                 WaitingReason::Queued(crate::acp::tracker::RequestQueued { ahead: 0, limit: 7 }),
                 "Queued: 7 model requests already running…",
@@ -1305,12 +1183,7 @@ mod tests {
                 WaitingReason::Queued(crate::acp::tracker::RequestQueued { ahead: 2, limit: 7 }),
                 "Queued behind 2 more: 7 model requests already running…",
             ),
-            (WaitingReason::subagent(), "Waiting on subagent…"),
-||||||| base
-            (WaitingReason::subagent(), "Waiting on subagent…"),
-=======
             (WaitingReason::subagent(), "Waiting for subagent…"),
->>>>>>> upstream
             (
                 WaitingReason::Subagent {
                     display: Some("Waiting for 2 subagents".into()),
@@ -1349,16 +1222,9 @@ mod tests {
     #[test]
     fn bash_turn_still_renders_running_not_waiting() {
         let theme = Theme::current();
-<<<<<<< fork
         // A bash (non-inference) turn.
         let (_, label, _) =
             compute_activity(&theme, &AgentState::TurnRunning, &None, true, None, None);
-||||||| base
-        // A bash (non-inference) turn with no activity keeps its own "Running…" label; the view leaves it as `None` rather than Waiting(Model)
-        let (_, label, _) = compute_activity(&theme, &AgentState::TurnRunning, &None, true, false);
-=======
-        let (_, label, _) = compute_activity(&theme, &AgentState::TurnRunning, &None, true, false);
->>>>>>> upstream
         assert_eq!(label, "Running…");
     }
     #[test]
@@ -1585,7 +1451,6 @@ mod tests {
         let (_, buf) = render_row(args, width);
         buffer_text(&buf, buf.area)
     }
-<<<<<<< fork
 
     /// Render a running turn carrying `rate`, returning the row's text and
     /// the foreground color the rate segment was painted in.
@@ -1729,10 +1594,6 @@ mod tests {
         assert_eq!(fg, Some(theme.gray));
     }
 
-||||||| base
-
-=======
->>>>>>> upstream
     /// Invoke `render_turn_status` for an idle agent whose `session/new` is unanswered.
     fn render_idle_starting_session() -> String {
         let mut args = idle_args(Watchers::default());
