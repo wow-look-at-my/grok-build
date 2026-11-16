@@ -144,7 +144,7 @@ pub const WIRED: &[WireAlias] = &[
         aliases: &["otel_transport"],
     },
     WireAlias {
-        file: "crates/codegen/xai-grok-shell/src/agent/config.rs",
+        file: "crates/codegen/xai-grok-config/src/endpoints.rs",
         ty: "EndpointsConfig",
         canonical: "models_list_url",
         aliases: &["models_endpoint"],

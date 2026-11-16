@@ -213,7 +213,6 @@ impl Fixture {
                         tc("GrokBuild:read_file", Some(ToolKind::Read)),
                         tc("GrokBuild:search_replace", Some(ToolKind::Edit)),
                         tc("OpenCode:write", Some(ToolKind::Write)),
-                        tc("Codex:apply_patch", Some(ToolKind::Edit)),
                     ],
                     behavior_preset: None,
                 }),
@@ -1048,8 +1047,6 @@ async fn a_file_tool_never_writes_a_mode_layer_under_enforce() {
     std::os::unix::fs::symlink(&fx.grok_home, fx.root.join("grok-link")).unwrap();
     let handle = fx.handle(fx.sandbox(BackendSource::Fixed(None)).await);
     let notes = fx.root.join("notes.txt");
-    let patch = "*** Begin Patch\n*** Add File: notes.txt\n+kept out\n\
-                 *** Delete File: .grok/workspaced.toml\n*** End Patch";
     for (tool, args) in [
         (
             "search_replace",
@@ -1071,7 +1068,6 @@ async fn a_file_tool_never_writes_a_mode_layer_under_enforce() {
             "write",
             json!({ "file_path": ".grok/workspaced.toml/workspaced.toml", "content": lowered }),
         ),
-        ("apply_patch", json!({ "patch": patch })),
     ] {
         let call = run_tool(&handle, tool, args).await;
         assert_eq!(
@@ -1082,7 +1078,6 @@ async fn a_file_tool_never_writes_a_mode_layer_under_enforce() {
     }
     assert_eq!(enforce, std::fs::read_to_string(&user_layer).unwrap());
     assert_eq!(enforce, std::fs::read_to_string(&workspace_layer).unwrap());
-    assert!(!notes.exists(), "no hunk of the refused patch ran");
     assert!(!fx.root.join("missing").exists(), "the refused write ran");
 
     let wrote = run_tool(
@@ -1104,16 +1099,6 @@ async fn a_file_tool_never_writes_a_mode_layer_under_enforce() {
         .outcome
         .unwrap_or_else(|error| panic!("search_replace: {error}"));
     assert_eq!("final\n", std::fs::read_to_string(&notes).unwrap());
-    let patched = run_tool(
-        &handle,
-        "apply_patch",
-        json!({ "patch": "*** Begin Patch\n*** Delete File: notes.txt\n*** End Patch" }),
-    )
-    .await;
-    patched
-        .outcome
-        .unwrap_or_else(|error| panic!("apply_patch: {error}"));
-    assert!(!notes.exists(), "the patch ran");
 
     let observed = Fixture::new("observe");
     let handle = observed.handle(observed.sandbox(BackendSource::Fixed(None)).await);
@@ -1158,22 +1143,17 @@ async fn a_file_tool_never_creates_a_missing_mode_layer_under_enforce() {
 
     std::fs::write(&user_layer, enforce).unwrap();
     std::fs::remove_file(&workspace_layer).unwrap();
-    let patch = "*** Begin Patch\n*** Add File: .grok/workspaced.toml\n+[sandbox]\n\
-                 +mode = \"off\"\n*** End Patch";
-    for (tool, args) in [
-        (
-            "write",
-            json!({ "file_path": workspace_layer, "content": lowered }),
-        ),
-        ("apply_patch", json!({ "patch": patch })),
-    ] {
-        let call = run_tool(&handle, tool, args).await;
-        assert_eq!(
-            Err(super::MODE_LAYER_WRITE_TEXT.to_owned()),
-            call.outcome,
-            "{tool}: {call:?}"
-        );
-    }
+    let call = run_tool(
+        &handle,
+        "write",
+        json!({ "file_path": workspace_layer, "content": lowered }),
+    )
+    .await;
+    assert_eq!(
+        Err(super::MODE_LAYER_WRITE_TEXT.to_owned()),
+        call.outcome,
+        "{call:?}"
+    );
     assert!(!workspace_layer.exists(), "the folder's layer was created");
     assert_eq!(enforce, std::fs::read_to_string(&user_layer).unwrap());
 }
