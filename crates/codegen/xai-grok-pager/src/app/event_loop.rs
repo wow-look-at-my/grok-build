@@ -2230,7 +2230,6 @@ pub(crate) async fn run(
                 }
             }
 
-<<<<<<< fork
             // Keep the branch's CI dot polling with no frames in flight.
             _ = ci_poll => {
                 ci_poll_at = Some(Instant::now() + crate::ci_status::CI_POLL_INTERVAL);
@@ -2245,41 +2244,6 @@ pub(crate) async fn run(
                 schedule_tick(&mut animation_tick_at, &app, tick_interval);
             }
 
-            _ = status_line_refresh => {
-                status_line_refresh_at = None;
-                // Lands in `pending_effects`, drained below like every arm's
-                app.note_status_line_refresh_due();
-                // A run is owed; `status_line_tick_demand` owns the routing
-                schedule_tick(&mut animation_tick_at, &app, tick_interval);
-                if app.status_line.take_changed() {
-                    presenter.request(false);
-                }
-                // Re-armed at fire time, so the cadence is independent of how long a run takes
-                // The owed-run rule above is what keeps a slow script from stacking runs behind the timer
-                if let Some(interval) = status_line_refresh_interval {
-                    status_line_refresh_at = Some(Instant::now() + interval);
-                }
-            }
-
-||||||| base
-            _ = status_line_refresh => {
-                status_line_refresh_at = None;
-                // Lands in `pending_effects`, drained below like every arm's
-                app.note_status_line_refresh_due();
-                // A run is owed; `status_line_tick_demand` owns the routing
-                schedule_tick(&mut animation_tick_at, &app, tick_interval);
-                if app.status_line.take_changed() {
-                    presenter.request(false);
-                }
-                // Re-armed at fire time, so the cadence is independent of how long a run takes
-                // The owed-run rule above is what keeps a slow script from stacking runs behind the timer
-                if let Some(interval) = status_line_refresh_interval {
-                    status_line_refresh_at = Some(Instant::now() + interval);
-                }
-            }
-
-=======
->>>>>>> upstream
             _ = subscription_watch => {
                 subscription_watch_at = None;
                 let effs = app.fire_subscription_check("watch");

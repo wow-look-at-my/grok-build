@@ -1428,15 +1428,7 @@ pub(super) fn interjection_ext_with_id(
     if let Some(id) = interjection_id {
         json_set(&mut payload, "interjectionId", serde_json::json!(id));
     }
-<<<<<<< fork
-    let raw = serde_json::value::to_raw_value(&payload).unwrap();
-    acp::ExtNotification::new("example.invalid/session/interjection", std::sync::Arc::from(raw))
-||||||| base
-    let raw = serde_json::value::to_raw_value(&payload).unwrap();
-    acp::ExtNotification::new("x.ai/session/interjection", std::sync::Arc::from(raw))
-=======
-    acp_fixtures::ext_notification("x.ai/session/interjection", &payload)
->>>>>>> upstream
+    acp_fixtures::ext_notification("example.invalid/session/interjection", &payload)
 }
 /// Text of the most recent user prompt block in scrollback, if any.
 /// Interjections render as standard user prompt blocks.
@@ -1990,15 +1982,7 @@ pub(super) fn interaction_resolved_ext(
         },
         meta: None,
     };
-<<<<<<< fork
-    let raw = serde_json::value::to_raw_value(&notif).unwrap();
-    acp::ExtNotification::new("example.invalid/session_notification", std::sync::Arc::from(raw))
-||||||| base
-    let raw = serde_json::value::to_raw_value(&notif).unwrap();
-    acp::ExtNotification::new("x.ai/session_notification", std::sync::Arc::from(raw))
-=======
-    acp_fixtures::ext_notification("x.ai/session_notification", &notif)
->>>>>>> upstream
+    acp_fixtures::ext_notification("example.invalid/session_notification", &notif)
 }
 pub(super) fn make_git_head_changed_notif(
     session_id: &str,
@@ -2012,15 +1996,7 @@ pub(super) fn make_git_head_changed_notif(
         is_worktree,
         main_repo: main_repo.map(str::to_string),
     };
-<<<<<<< fork
-    let raw = serde_json::value::to_raw_value(&payload).unwrap();
-    acp::ExtNotification::new("example.invalid/git_head_changed", std::sync::Arc::from(raw))
-||||||| base
-    let raw = serde_json::value::to_raw_value(&payload).unwrap();
-    acp::ExtNotification::new("x.ai/git_head_changed", std::sync::Arc::from(raw))
-=======
-    acp_fixtures::ext_notification("x.ai/git_head_changed", &payload)
->>>>>>> upstream
+    acp_fixtures::ext_notification("example.invalid/git_head_changed", &payload)
 }
 pub(super) fn make_task_backgrounded_notif(
     session_id: &str,
@@ -2041,15 +2017,7 @@ pub(super) fn make_task_backgrounded_notif(
         },
         meta: None,
     };
-<<<<<<< fork
-    let raw = serde_json::value::to_raw_value(&notif).unwrap();
-    acp::ExtNotification::new("example.invalid/task_backgrounded", std::sync::Arc::from(raw))
-||||||| base
-    let raw = serde_json::value::to_raw_value(&notif).unwrap();
-    acp::ExtNotification::new("x.ai/task_backgrounded", std::sync::Arc::from(raw))
-=======
-    acp_fixtures::ext_notification("x.ai/task_backgrounded", &notif)
->>>>>>> upstream
+    acp_fixtures::ext_notification("example.invalid/task_backgrounded", &notif)
 }
 /// Like [`make_task_backgrounded_notif`] but stamped `_meta.isReplay: true` via the typed [`ReplayMetaStamp`](crate::acp::meta::ReplayMetaStamp).
 /// Mirrors the `session/load` replay envelope.
@@ -2072,15 +2040,7 @@ pub(super) fn make_replayed_task_backgrounded_notif(
         },
         meta: Some(crate::acp::meta::ReplayMetaStamp::replayed()),
     };
-<<<<<<< fork
-    let raw = serde_json::value::to_raw_value(&notif).unwrap();
-    acp::ExtNotification::new("example.invalid/session/update", std::sync::Arc::from(raw))
-||||||| base
-    let raw = serde_json::value::to_raw_value(&notif).unwrap();
-    acp::ExtNotification::new("x.ai/session/update", std::sync::Arc::from(raw))
-=======
-    acp_fixtures::ext_notification("x.ai/session/update", &notif)
->>>>>>> upstream
+    acp_fixtures::ext_notification("example.invalid/session/update", &notif)
 }
 /// Register a pending Execute tool call in the tracker and send an InProgress update to create the scrollback entry.
 /// Returns the agent for further use.
@@ -2213,15 +2173,7 @@ pub(super) fn task_completed_notif(
         },
         meta: None,
     };
-<<<<<<< fork
-    let raw = serde_json::value::to_raw_value(&notif).unwrap();
-    acp::ExtNotification::new("example.invalid/task_completed", std::sync::Arc::from(raw))
-||||||| base
-    let raw = serde_json::value::to_raw_value(&notif).unwrap();
-    acp::ExtNotification::new("x.ai/task_completed", std::sync::Arc::from(raw))
-=======
-    acp_fixtures::ext_notification("x.ai/task_completed", &notif)
->>>>>>> upstream
+    acp_fixtures::ext_notification("example.invalid/task_completed", &notif)
 }
 pub(super) fn make_monitor_event_notif(
     session_id: &str,
@@ -2237,15 +2189,7 @@ pub(super) fn make_monitor_event_notif(
         },
         meta: None,
     };
-<<<<<<< fork
-    let raw = serde_json::value::to_raw_value(&notif).unwrap();
-    acp::ExtNotification::new("example.invalid/monitor_event", std::sync::Arc::from(raw))
-||||||| base
-    let raw = serde_json::value::to_raw_value(&notif).unwrap();
-    acp::ExtNotification::new("x.ai/monitor_event", std::sync::Arc::from(raw))
-=======
-    acp_fixtures::ext_notification("x.ai/monitor_event", &notif)
->>>>>>> upstream
+    acp_fixtures::ext_notification("example.invalid/monitor_event", &notif)
 }
 pub(super) fn make_model_info(id: &str) -> acp::ModelInfo {
     acp_fixtures::model_info(id, id)
@@ -2341,15 +2285,7 @@ pub(super) fn model_changed_ext(
         ),
         meta: None,
     };
-<<<<<<< fork
-    let raw = serde_json::value::to_raw_value(&payload).unwrap();
-    acp::ExtNotification::new("example.invalid/session_notification", std::sync::Arc::from(raw))
-||||||| base
-    let raw = serde_json::value::to_raw_value(&payload).unwrap();
-    acp::ExtNotification::new("x.ai/session_notification", std::sync::Arc::from(raw))
-=======
-    acp_fixtures::ext_notification("x.ai/session_notification", &payload)
->>>>>>> upstream
+    acp_fixtures::ext_notification("example.invalid/session_notification", &payload)
 }
 pub(super) fn model_changed_ext_with_event(
     session_id: &str,
@@ -2361,15 +2297,7 @@ pub(super) fn model_changed_ext_with_event(
         update: XaiSessionUpdate::model_changed(model_id, None, None),
         meta: Some(serde_json::json!({ "eventId": event_id })),
     };
-<<<<<<< fork
-    let raw = serde_json::value::to_raw_value(&payload).unwrap();
-    acp::ExtNotification::new("example.invalid/session_notification", std::sync::Arc::from(raw))
-||||||| base
-    let raw = serde_json::value::to_raw_value(&payload).unwrap();
-    acp::ExtNotification::new("x.ai/session_notification", std::sync::Arc::from(raw))
-=======
-    acp_fixtures::ext_notification("x.ai/session_notification", &payload)
->>>>>>> upstream
+    acp_fixtures::ext_notification("example.invalid/session_notification", &payload)
 }
 pub(super) fn make_tool_call_update(title: &str) -> acp::SessionUpdate {
     acp::SessionUpdate::ToolCallUpdate(
@@ -2484,29 +2412,13 @@ pub(super) fn make_server_status_notif(
         detail: None,
         tools,
     };
-<<<<<<< fork
-    let raw = serde_json::value::to_raw_value(&payload).unwrap();
-    acp::ExtNotification::new("example.invalid/mcp/server_status", std::sync::Arc::from(raw))
-||||||| base
-    let raw = serde_json::value::to_raw_value(&payload).unwrap();
-    acp::ExtNotification::new("x.ai/mcp/server_status", std::sync::Arc::from(raw))
-=======
-    acp_fixtures::ext_notification("x.ai/mcp/server_status", &payload)
->>>>>>> upstream
+    acp_fixtures::ext_notification("example.invalid/mcp/server_status", &payload)
 }
 /// `mcp/servers_updated` real wire shape: `{ mcpServers: [...] }` with NO `sessionId`.
 /// Regression guard: anything that tries to extract a session id here must fail and fall through to the broadcast path.
 pub(super) fn make_servers_updated_notif() -> acp::ExtNotification {
     let payload = serde_json::json!({ "mcpServers": [] });
-<<<<<<< fork
-    let raw = serde_json::value::to_raw_value(&payload).unwrap();
-    acp::ExtNotification::new("example.invalid/mcp/servers_updated", std::sync::Arc::from(raw))
-||||||| base
-    let raw = serde_json::value::to_raw_value(&payload).unwrap();
-    acp::ExtNotification::new("x.ai/mcp/servers_updated", std::sync::Arc::from(raw))
-=======
-    acp_fixtures::ext_notification("x.ai/mcp/servers_updated", &payload)
->>>>>>> upstream
+    acp_fixtures::ext_notification("example.invalid/mcp/servers_updated", &payload)
 }
 /// Real post-handshake / auth-recovery wire shape: `McpToolsChanged { sessionId, serverName, tools }`.
 pub(super) fn make_tools_changed_notif_post_h2(
@@ -2517,29 +2429,13 @@ pub(super) fn make_tools_changed_notif_post_h2(
         server_name: "grok_com_linear".to_string(),
         tools: Vec::new(),
     };
-<<<<<<< fork
-    let raw = serde_json::value::to_raw_value(&payload).unwrap();
-    acp::ExtNotification::new("example.invalid/mcp/tools_changed", std::sync::Arc::from(raw))
-||||||| base
-    let raw = serde_json::value::to_raw_value(&payload).unwrap();
-    acp::ExtNotification::new("x.ai/mcp/tools_changed", std::sync::Arc::from(raw))
-=======
-    acp_fixtures::ext_notification("x.ai/mcp/tools_changed", &payload)
->>>>>>> upstream
+    acp_fixtures::ext_notification("example.invalid/mcp/tools_changed", &payload)
 }
 /// Legacy / forward-compat wire shape: older shells emit `{ serverName, tools }` with NO sessionId.
 /// The pager must fall back to active_view for this shape.
 pub(super) fn make_tools_changed_notif_pre_h2() -> acp::ExtNotification {
     let payload = serde_json::json!({ "serverName": "grok_com_linear", "tools": [] });
-<<<<<<< fork
-    let raw = serde_json::value::to_raw_value(&payload).unwrap();
-    acp::ExtNotification::new("example.invalid/mcp/tools_changed", std::sync::Arc::from(raw))
-||||||| base
-    let raw = serde_json::value::to_raw_value(&payload).unwrap();
-    acp::ExtNotification::new("x.ai/mcp/tools_changed", std::sync::Arc::from(raw))
-=======
-    acp_fixtures::ext_notification("x.ai/mcp/tools_changed", &payload)
->>>>>>> upstream
+    acp_fixtures::ext_notification("example.invalid/mcp/tools_changed", &payload)
 }
 /// Real `mcp_initialized` wire shape: `{ sessionId, mcpToolCount, elapsedMs }`.
 pub(super) fn make_mcp_initialized_notif(session_id: &str) -> acp::ExtNotification {

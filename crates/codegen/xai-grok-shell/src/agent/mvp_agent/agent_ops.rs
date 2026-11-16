@@ -445,27 +445,11 @@ impl MvpAgent {
     }
     /// Inputs for a registry build scoped to `cwd`: a fresh real-remote trust verdict, then
     /// `[plugins]` from disk. Self-free so callers can run it on a blocking thread.
-<<<<<<< fork
     /// `cfg.plugins` is boot-time state that `config.json` edits never refresh, so a snapshot built
     /// from it reports stale `enabled` flags to session-less `example.invalid/plugins/list` / `example.invalid/skills/list`.
-    /// Order is load-bearing: the disk read consults the folder-trust gate, whose cold-key backstop
-    /// resolves remote-less and records a durable verdict that would make an org kill-switch
-    /// unliftable for the process; resolving first (recording, with the real `RemoteSettings`) makes
-    /// the read a cache hit.
-||||||| base
-    /// `cfg.plugins` is boot-time state that `config.toml` edits never refresh, so a snapshot built
-    /// from it reports stale `enabled` flags to session-less `x.ai/plugins/list` / `x.ai/skills/list`.
-    /// Order is load-bearing: the disk read consults the folder-trust gate, whose cold-key backstop
-    /// resolves remote-less and records a durable verdict that would make an org kill-switch
-    /// unliftable for the process; resolving first (recording, with the real `RemoteSettings`) makes
-    /// the read a cache hit.
-=======
-    /// `cfg.plugins` is boot-time state that `config.toml` edits never refresh, so a snapshot built
-    /// from it reports stale `enabled` flags to session-less `x.ai/plugins/list` / `x.ai/skills/list`.
     /// The disk read gates project paths on this verdict, never on the folder-trust gate's cold-key
     /// backstop, which resolves remote-less and records a durable verdict that would make an org
     /// kill-switch unliftable for the process.
->>>>>>> upstream
     /// The verdict is never the startup primer's: that memoizes a point-in-time answer, including
     /// the non-durable no-configs allow, which also leaves the launch dir cold for the gate
     /// (`plugins_reload_rechecks_launch_dir_trust`).
@@ -2272,16 +2256,6 @@ impl MvpAgent {
         let cfg = self.cfg.borrow();
         let alpha_test_key = cfg.endpoints.alpha_test_key.clone();
         let client_version = cfg.client_version.clone();
-<<<<<<< fork
-||||||| base
-        let deployment_id = crate::managed_config::resolve_deployment_id(
-            cfg.endpoints.deployment_key.as_deref(),
-        );
-=======
-        let deployment_id = xai_grok_cloud_config::managed_config::resolve_deployment_id(
-            cfg.endpoints.deployment_key.as_deref(),
-        );
->>>>>>> upstream
         drop(cfg);
         let user_id = self
             .auth_manager
