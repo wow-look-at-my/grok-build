@@ -2,7 +2,7 @@ use super::*;
 use serial_test::serial;
 use xai_grok_test_support::EnvGuard;
 #[test]
-fn coding_data_opt_out_does_not_block_uploads_to_own_bucket() {
+fn coding_data_opt_out_and_zdr_block_trace_uploads() {
     let normal = xai_grok_login::GrokAuth::test_default();
     let opted_out = xai_grok_login::GrokAuth {
         coding_data_retention_opt_out: true,
@@ -12,25 +12,12 @@ fn coding_data_opt_out_does_not_block_uploads_to_own_bucket() {
         team_blocked_reasons: vec!["BLOCKED_REASON_NO_LOGS".into()],
         ..xai_grok_login::GrokAuth::test_default()
     };
-    let cases = [
-        (None, &normal, false),
-        (None, &opted_out, true),
-        (None, &zdr, true),
-        (Some("s3://acme-traces"), &normal, false),
-        (Some("s3://acme-traces"), &opted_out, false),
-        (Some("gs://acme-traces"), &opted_out, false),
-        (Some("s3://acme-traces"), &zdr, true),
-        (Some("ftp://acme-traces"), &opted_out, true),
-    ];
-    for (bucket, auth, expected) in cases {
-        let endpoints = EndpointsConfig {
-            trace_upload_bucket: bucket.map(str::to_owned),
-            ..EndpointsConfig::default()
-        };
+    let endpoints = EndpointsConfig::default();
+    for (auth, expected) in [(&normal, false), (&opted_out, true), (&zdr, true)] {
         assert_eq!(
             expected,
             endpoints.is_trace_upload_blocked_for(auth),
-            "bucket={bucket:?} opt_out={} zdr={}",
+            "opt_out={} zdr={}",
             auth.coding_data_retention_opt_out,
             auth.is_zdr_team()
         );

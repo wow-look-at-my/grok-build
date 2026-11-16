@@ -661,7 +661,8 @@ mod route_tests {
     #[test]
     fn foreign_session_with_a_transcriber_takes_the_clip_route() {
         let transcriber = stub();
-        let route = choose_route(Err(VoiceAuthError::ForeignSession), Some(&transcriber)).unwrap();
+        let route = choose_route::<String>(Err(VoiceAuthError::ForeignSession), Some(&transcriber))
+            .unwrap();
         assert_eq!(VoiceRoute::Clip, route.kind());
         let RouteChoice::Clip(chosen) = route else {
             panic!("expected the clip route: {route:?}");
@@ -674,7 +675,7 @@ mod route_tests {
 
     #[test]
     fn foreign_session_without_a_transcriber_is_the_credential_error() {
-        let error = choose_route(Err(VoiceAuthError::ForeignSession), None).unwrap_err();
+        let error = choose_route::<String>(Err(VoiceAuthError::ForeignSession), None).unwrap_err();
         assert_eq!(
             VoiceError::Auth(VoiceAuthError::ForeignSession.to_string()).to_string(),
             error.to_string()
@@ -683,7 +684,8 @@ mod route_tests {
 
     #[test]
     fn not_signed_in_is_an_error_even_with_a_transcriber() {
-        let error = choose_route(Err(VoiceAuthError::NotSignedIn), Some(&stub())).unwrap_err();
+        let error =
+            choose_route::<String>(Err(VoiceAuthError::NotSignedIn), Some(&stub())).unwrap_err();
         assert_eq!(
             VoiceError::Auth(VoiceAuthError::NotSignedIn.to_string()).to_string(),
             error.to_string()

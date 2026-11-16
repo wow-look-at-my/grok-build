@@ -1,4 +1,4 @@
-//! The user's `config.toml` writers write through a dotfile-managed symlink.
+//! The user's `config.json` writers write through a dotfile-managed symlink.
 
 #![cfg(unix)]
 
@@ -10,6 +10,11 @@ fn is_symlink(path: &Path) -> bool {
         .unwrap_or(false)
 }
 
+fn read_json(path: &Path) -> serde_json::Value {
+    serde_json::from_str(&std::fs::read_to_string(path).unwrap())
+        .expect("the file stays valid JSON")
+}
+
 #[test]
 fn user_config_writers_write_through_a_symlink() {
     // One #[test] per binary: the env is process-global and `grok_home()` is cached.
@@ -18,10 +23,10 @@ fn user_config_writers_write_through_a_symlink() {
     unsafe { std::env::set_var("GROK_HOME", grok_home.path()) };
 
     let dotfiles = tempfile::tempdir().expect("dotfiles");
-    let target = dotfiles.path().join("config.toml");
-    std::fs::write(&target, "[models]\ndefault = \"grok-4.6\"\n").unwrap();
+    let target = dotfiles.path().join("config.json");
+    std::fs::write(&target, "{\"models\": {\"default\": \"grok-4.6\"}}\n").unwrap();
     let link = xai_grok_shell::util::config::user_config_path();
-    assert_eq!(link, grok_home.path().join("config.toml"));
+    assert_eq!(link, grok_home.path().join("config.json"));
     std::os::unix::fs::symlink(&target, &link).unwrap();
 
     let config = xai_grok_shell::util::config::McpServerConfig {
@@ -46,7 +51,7 @@ fn user_config_writers_write_through_a_symlink() {
         .unwrap()
         .block_on(async {
             xai_grok_shell::util::config::update_config(|cfg| {
-                cfg.ui.simple_mode = Some(true);
+                cfg.ui.show_timestamps = Some(true);
             })
             .await
             .expect("settings save");
@@ -56,11 +61,11 @@ fn user_config_writers_write_through_a_symlink() {
                 .await
                 .expect("mcp add");
             assert!(is_symlink(&link), "mcp add must keep the link");
-            let written = std::fs::read_to_string(&target).unwrap();
+            let written = read_json(&target);
             assert!(
-                written.contains("[mcp_servers.qa-echo]")
-                    && written.contains("simple_mode = true")
-                    && written.contains("default = \"grok-4.6\""),
+                written["mcp"]["servers"].get("qa-echo").is_some()
+                    && written["ui"]["show_timestamps"] == true
+                    && written["models"]["default"] == "grok-4.6",
                 "the link target must hold every edit: {written}"
             );
 
@@ -70,28 +75,27 @@ fn user_config_writers_write_through_a_symlink() {
                     .expect("mcp remove")
             );
             assert!(is_symlink(&link), "mcp remove must keep the link");
-            let written = std::fs::read_to_string(&target).unwrap();
+            let written = read_json(&target);
             assert!(
-                !written.contains("qa-echo") && written.contains("simple_mode = true"),
+                !written.to_string().contains("qa-echo")
+                    && written["ui"]["show_timestamps"] == true,
                 "the link target must lose only the server: {written}"
             );
 
             xai_grok_shell::claude_import::mark_claude_imported().expect("claude import marker");
             assert!(is_symlink(&link), "the import marker must keep the link");
-            let written: toml::Value = toml::from_str(&std::fs::read_to_string(&target).unwrap())
-                .expect("target stays valid TOML");
             assert_eq!(
-                written["claude_compat"]["imported"].as_bool(),
+                read_json(&target)["claude_compat"]["imported"].as_bool(),
                 Some(true),
                 "the link target must carry the import marker"
             );
 
-            // A link a repository committed at `.grok/config.toml` is replaced at the link name, never followed.
+            // A link a repository committed at `.grok/config.json` is replaced at the link name, never followed.
             let repo = tempfile::tempdir().expect("repo");
-            let outside = repo.path().join("outside.toml");
-            let defined = "[mcp_servers.planted]\ncommand = \"/bin/echo\"\n";
+            let outside = repo.path().join("outside.json");
+            let defined = "{\"mcp\": {\"servers\": {\"planted\": {\"command\": \"/bin/echo\"}}}}\n";
             std::fs::write(&outside, defined).unwrap();
-            let project_link = repo.path().join(".grok").join("config.toml");
+            let project_link = repo.path().join(".grok").join("config.json");
             std::fs::create_dir_all(project_link.parent().unwrap()).unwrap();
             std::os::unix::fs::symlink(&outside, &project_link).unwrap();
             assert!(

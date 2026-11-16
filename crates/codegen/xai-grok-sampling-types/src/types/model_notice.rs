@@ -15,7 +15,9 @@ const MODEL_NOTICE_MAX_TEXT_CHARS: usize = 160;
 /// Longest notice label kept, in characters.
 const MODEL_NOTICE_MAX_LABEL_CHARS: usize = 24;
 
-#[derive(Debug, Clone, Copy, Default, PartialEq, Eq, Serialize, Deserialize, schemars::JsonSchema)]
+#[derive(
+    Debug, Clone, Copy, Default, PartialEq, Eq, Serialize, Deserialize, schemars::JsonSchema,
+)]
 #[serde(rename_all = "lowercase")]
 pub enum ModelNoticeSeverity {
     Warning,

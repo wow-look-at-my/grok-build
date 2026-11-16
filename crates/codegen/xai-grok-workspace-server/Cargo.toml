@@ -47,6 +47,7 @@ sandbox-enforce = ["xai-grok-workspace/sandbox-enforce"]
 [dev-dependencies]
 # The binary tests read the diag server over plain HTTP.
 request = { workspace = true }
+tempfile = { workspace = true }
 
 [lints]
 workspace = true

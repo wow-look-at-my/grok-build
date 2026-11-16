@@ -1303,11 +1303,7 @@ fn the_sandbox_path_follows_the_tools_kind_and_namespace_and_the_folders_mode() 
             );
         }
     }
-    for namespace in [
-        ToolNamespace::MCP,
-        ToolNamespace::Codex,
-        ToolNamespace::GrokBuildHashline,
-    ] {
+    for namespace in [ToolNamespace::MCP, ToolNamespace::GrokBuildHashline] {
         assert_eq!(
             SandboxPath::Shell,
             SandboxPath::for_tool(execute(namespace), Some(SandboxMode::Enforce)),

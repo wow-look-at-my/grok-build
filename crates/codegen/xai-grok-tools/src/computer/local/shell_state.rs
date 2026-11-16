@@ -1481,7 +1481,9 @@ mod tests {
             return;
         }
         let cwd = std::env::current_dir().unwrap();
-        let mut state = ShellState::init(ShellKind::Bash, &cwd, None).await.unwrap();
+        let mut state = ShellState::init(ShellKind::Bash, &cwd, None, None)
+            .await
+            .unwrap();
 
         // A function makes FUNCTIONS_B64 non-trivial, the way a real rc file would.
         let (code, _) = run_command(&mut state, "grok_probe_fn() { echo hi; }").await;

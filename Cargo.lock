@@ -12110,6 +12110,7 @@ dependencies = [
  "rand 0.10.3",
  "ratatui",
  "regex",
+ "rstest",
  "serde",
  "serde_json",
  "serial_test",
@@ -12482,6 +12483,7 @@ dependencies = [
  "url",
  "xai-dirs",
  "xai-grok-config",
+ "xai-spawn",
  "xai-tty-utils",
 ]
 
@@ -13210,6 +13212,7 @@ dependencies = [
  "reqwest 0.12.24",
  "serde",
  "serde_json",
+ "tempfile",
  "tokio",
  "tracing",
  "tracing-subscriber",

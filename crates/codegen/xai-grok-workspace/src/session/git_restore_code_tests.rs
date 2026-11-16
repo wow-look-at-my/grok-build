@@ -198,11 +198,11 @@ fn restore_code_checkout_allowed_plain_checkout_of_managed_repo_is_refused() {
 }
 #[test]
 fn restore_code_checkout_allowed_moved_cwd_is_refused() {
-    let worktrees = Path::new("/home/u/.grok/worktrees");
+    let worktrees = roots(&["/home/u/.grok/worktrees"]);
     assert!(!restore_code_checkout_allowed_in(
         Path::new("/home/u/repo"),
         Some("/moved/elsewhere"),
-        worktrees,
+        &worktrees,
     ));
 }
 #[test]

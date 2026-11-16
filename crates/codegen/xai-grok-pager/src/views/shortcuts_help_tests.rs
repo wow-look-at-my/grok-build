@@ -157,7 +157,7 @@ fn filter_matches_against_key_display() {
 #[test]
 fn filter_finds_stash_by_natural_queries() {
     let registry = crate::actions::ActionRegistry::defaults();
-    let entries = build_entries(&[When::PromptFocused], &registry, false);
+    let entries = build_entries(&[When::PromptFocused], &registry);
     let stash_row = |filtered: &[usize]| {
         filtered.iter().any(|&i| {
             matches!(

@@ -141,7 +141,8 @@ impl RegistryStatusError {
         self.status.is_client_error()
             && !matches!(
                 self.status,
-                xai_grok_net::StatusCode::REQUEST_TIMEOUT | xai_grok_net::StatusCode::TOO_MANY_REQUESTS
+                xai_grok_net::StatusCode::REQUEST_TIMEOUT
+                    | xai_grok_net::StatusCode::TOO_MANY_REQUESTS
             )
     }
 }

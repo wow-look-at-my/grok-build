@@ -58,9 +58,9 @@ pub mod sandbox_mode;
 pub mod session;
 pub mod status_config;
 pub(crate) mod telemetry;
+pub use status_config::{ProactiveRefreshConfig, StatusConfig};
 #[cfg(test)]
 pub(crate) use xai_test_utils::test_git;
-pub use status_config::{ProactiveRefreshConfig, StatusConfig};
 pub mod trust;
 pub(crate) mod upload;
 pub mod util;

@@ -4240,64 +4240,6 @@ async fn diagnostic_upload_skipped_without_credentials() {
         "missing credentials must fail closed for diagnostics uploads"
     );
 }
-/// The coding-data opt-out governs sharing with xAI, so traces still go to a deployment's own bucket.
-/// Everything else the opt-out gates stays closed.
-#[tokio::test]
-async fn opted_out_user_uploads_traces_only_to_own_bucket() {
-    let agent = build_agent_with_auth(xai_grok_login::GrokAuth {
-        coding_data_retention_opt_out: true,
-        ..xai_grok_login::GrokAuth::test_default()
-    });
-    enable_trace_upload_config(&agent);
-    agent.cfg.borrow_mut().remote_settings = Some(crate::util::config::RemoteSettings::default());
-    assert!(
-        agent.trace_upload_config_snapshot().is_none(),
-        "precondition: no own bucket, so the opt-out blocks uploads"
-    );
-    agent.cfg.borrow_mut().endpoints.trace_upload_bucket = Some("s3://acme-traces".into());
-    let is_own_bucket = |method: Option<crate::session::repo_changes::UploadMethod>| {
-        matches!(
-            method,
-            Some(crate::session::repo_changes::UploadMethod::S3 { bucket, .. }) if bucket == "acme-traces"
-        )
-    };
-    assert!(is_own_bucket(agent.trace_upload_config_snapshot()));
-    assert!(is_own_bucket(agent.trace_upload_config().await));
-    assert!(
-        agent.is_data_collection_disabled(),
-        "heap profiles, workspace snapshots, and diagnostics still see the opt-out"
-    );
-}
-#[tokio::test]
-async fn zdr_team_uploads_no_traces_to_own_bucket() {
-    let agent = build_agent_with_auth(xai_grok_login::GrokAuth {
-        team_blocked_reasons: vec!["BLOCKED_REASON_NO_LOGS".into()],
-        ..xai_grok_login::GrokAuth::test_default()
-    });
-    enable_trace_upload_config(&agent);
-    agent.cfg.borrow_mut().endpoints.trace_upload_bucket = Some("s3://acme-traces".into());
-    assert!(agent.trace_upload_config_snapshot().is_none());
-}
-/// Auth diagnostics always go to the proxy, so a deployment's own bucket must not open them for an opted-out user.
-#[tokio::test]
-async fn diagnostic_upload_skipped_for_opted_out_user_with_own_bucket() {
-    let (stub_url, count) = spawn_counting_storage_stub().await;
-    let agent = build_agent_with_auth(xai_grok_login::GrokAuth {
-        coding_data_retention_opt_out: true,
-        ..xai_grok_login::GrokAuth::test_default()
-    });
-    enable_trace_upload_config(&agent);
-    {
-        let mut cfg = agent.cfg.borrow_mut();
-        cfg.endpoints.trace_upload_url = Some(stub_url);
-        cfg.endpoints.trace_upload_bucket = Some("s3://acme-traces".into());
-    }
-    let uploader = agent
-        .diagnostic_upload_config()
-        .expect("uploader is wired whenever trace upload config is on");
-    uploader(b"log".to_vec(), "tok".into(), "user-id-1".into()).await;
-    assert_eq!(0, count.load(std::sync::atomic::Ordering::SeqCst));
-}
 /// The diagnostics uploader is wired once (at agent construction), so it must re-check the live trace-upload mirror at invocation time.
 /// A mid-session config-level kill switch stops diagnostics uploads too.
 #[tokio::test]

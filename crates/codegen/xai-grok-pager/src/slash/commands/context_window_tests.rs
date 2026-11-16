@@ -152,7 +152,6 @@ fn app_ctx(models: &ModelState) -> AppCtx<'_> {
         workflows_available: true,
         saved_workflows: &[],
         workflow_runs: &[],
-        screen_mode: crate::app::ScreenMode::Fullscreen,
         current_title: None,
     }
 }

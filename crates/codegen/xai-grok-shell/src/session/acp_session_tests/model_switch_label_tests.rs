@@ -87,6 +87,9 @@ async fn model_switch_mid_turn_reaches_the_next_request() {
                     skip_prompt_rewrite: false,
                     auto_compact_threshold_percent: 85,
                     system_prompt_label: SWITCH_TARGET_LABEL.to_owned(),
+                    context_window_selection:
+                        crate::agent::handlers::model_switch::SwitchContextWindow::Preserve,
+                    supported_context_windows: Vec::new(),
                 })
                 .await
                 .expect("model switch succeeds while a turn runs");
