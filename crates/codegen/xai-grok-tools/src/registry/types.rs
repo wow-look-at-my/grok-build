@@ -4496,7 +4496,6 @@ mod tests {
             tools: vec![
                 bash,
                 ToolConfig::from_id("GrokBuild:get_task_output"),
-                ToolConfig::from_id("GrokBuild:wait_tasks"),
                 ToolConfig::from_id("GrokBuild:kill_task"),
             ],
             behavior_preset: None,
@@ -4506,7 +4505,7 @@ mod tests {
             .finalize(config, test_session_context(&tmp))
             .expect("finalize should succeed");
         let defs = toolset.tool_definitions();
-        for name in ["get_task_output", "wait_tasks"] {
+        for name in ["get_task_output"] {
             let desc = defs
                 .iter()
                 .find(|d| d.function.name == name)

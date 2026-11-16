@@ -12,7 +12,6 @@ macro_rules! own_process {
 }
 
 mod agent_id_prewarm;
-mod crash_envelope;
 mod external_otlp;
 mod external_otlp_collector;
 mod external_otlp_gates_on;
