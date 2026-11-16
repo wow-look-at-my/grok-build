@@ -2104,64 +2104,6 @@ async fn async_main(mut args: PagerArgs) -> Result<()> {
                 .mode;
                 return xai_grok_pager::memory_cmd::run(memory_args, mode);
             }
-<<<<<<< fork
-||||||| base
-            Command::Update {
-                check,
-                json,
-                force_reinstall,
-                version,
-                alpha,
-                stable,
-                enterprise,
-                trigger,
-                auto,
-            } => {
-                init_tracing_simple("cli");
-                let _otel_guard = xai_grok_telemetry::otel_layer::otel_guard();
-                let channel_switch = get_channel_switch(alpha, stable, enterprise);
-                let trigger = resolve_update_trigger(trigger.as_deref(), auto);
-                return run_update_command(
-                    check,
-                    json,
-                    force_reinstall,
-                    version,
-                    channel_switch,
-                    trigger,
-                    &update_config,
-                )
-                .await;
-            }
-=======
-            Command::Update {
-                check,
-                json,
-                force_reinstall,
-                version,
-                alpha,
-                stable,
-                enterprise,
-                trigger,
-                auto,
-            } => {
-                init_tracing_simple("cli");
-                let channel_switch = get_channel_switch(alpha, stable, enterprise);
-                {
-                    let _otel_guard = xai_grok_telemetry::otel_layer::otel_guard();
-                    let trigger = resolve_update_trigger(trigger.as_deref(), auto);
-                    return run_update_command(
-                        check,
-                        json,
-                        force_reinstall,
-                        version,
-                        channel_switch,
-                        trigger,
-                        &update_config,
-                    )
-                    .await;
-                }
-            }
->>>>>>> upstream
             Command::Login {
                 legacy: _,
                 oauth,
@@ -2286,52 +2228,7 @@ async fn async_main(mut args: PagerArgs) -> Result<()> {
         .await;
     }
     let _otel_guard = xai_grok_telemetry::otel_layer::otel_guard();
-<<<<<<< fork
     let result = xai_grok_pager::app::run(args).await;
-||||||| base
-    type UpdateWaitHandle = tokio::task::JoinHandle<std::io::Result<std::process::ExitStatus>>;
-    let bg_update_wait: std::sync::Arc<tokio::sync::Mutex<Option<UpdateWaitHandle>>> =
-        std::sync::Arc::new(tokio::sync::Mutex::new(None));
-    let bg_update_rx: Option<tokio::sync::oneshot::Receiver<Option<auto_update::UpdateAvailable>>> =
-        if should_check_for_updates(args.no_auto_update) {
-            let update_config = update_config.clone();
-            let wait_slot = bg_update_wait.clone();
-            let (tx, rx) = tokio::sync::oneshot::channel();
-            tokio::spawn(async move {
-                let check = auto_update::check_update_background(&update_config).await;
-                if let Some(mut child) = check.download {
-                    *wait_slot.lock().await = Some(tokio::spawn(async move { child.wait().await }));
-                }
-                let _ = tx.send(check.update);
-            });
-            Some(rx)
-        } else {
-            None
-        };
-    let result = xai_grok_pager::app::run(args, bg_update_rx).await;
-=======
-    type UpdateWaitHandle = tokio::task::JoinHandle<std::io::Result<std::process::ExitStatus>>;
-    let bg_update_wait: std::sync::Arc<tokio::sync::Mutex<Option<UpdateWaitHandle>>> =
-        std::sync::Arc::new(tokio::sync::Mutex::new(None));
-    let check_updates = should_check_for_updates(args.no_auto_update);
-    let bg_update_rx: Option<tokio::sync::oneshot::Receiver<Option<auto_update::UpdateAvailable>>> =
-        if check_updates {
-            let update_config = update_config.clone();
-            let wait_slot = bg_update_wait.clone();
-            let (tx, rx) = tokio::sync::oneshot::channel();
-            tokio::spawn(async move {
-                let check = auto_update::check_update_background(&update_config).await;
-                if let Some(mut child) = check.download {
-                    *wait_slot.lock().await = Some(tokio::spawn(async move { child.wait().await }));
-                }
-                let _ = tx.send(check.update);
-            });
-            Some(rx)
-        } else {
-            None
-        };
-    let result = xai_grok_pager::app::run(args, bg_update_rx).await;
->>>>>>> upstream
     xai_grok_sandbox::flush();
 <<<<<<< fork
     result

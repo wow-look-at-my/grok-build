@@ -42,20 +42,13 @@ impl CompactConversationRequest {
         xai_tool_types::Aliases::new("session_id", &["sessionId"]);
 }
 
-/// `CompactConversationRequest` as it arrives over ACP. That
-/// `CompactConversationRequest` is with each key spelling its own field, so a
-/// request naming both folds them instead of tripping serde's duplicate-field
-/// check.
+/// `CompactConversationRequest` as it arrives over ACP.
 #[derive(Debug, Default, serde::Deserialize)]
 struct CompactConversationRequestWire {
     #[serde(default)]
     session_id: Option<String>,
     #[serde(default, rename = "sessionId")]
     session_id_camel: Option<String>,
-    #[serde(default)]
-    user_context: Option<String>,
-    #[serde(default, rename = "userContext")]
-    user_context_camel: Option<String>,
 }
 
 impl TryFrom<CompactConversationRequestWire> for CompactConversationRequest {
@@ -66,8 +59,6 @@ impl TryFrom<CompactConversationRequestWire> for CompactConversationRequest {
             session_id: CompactConversationRequest::SESSION_ID_KEYS
                 .fold(vec![wire.session_id, wire.session_id_camel])?
                 .ok_or(CompactRequestError::MissingSessionId)?,
-            user_context: CompactConversationRequest::USER_CONTEXT_KEYS
-                .fold(vec![wire.user_context, wire.user_context_camel])?,
         })
     }
 }
