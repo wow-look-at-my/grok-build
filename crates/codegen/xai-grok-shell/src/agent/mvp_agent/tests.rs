@@ -1739,7 +1739,7 @@ async fn load_effort_precedence_prefers_meta_hint_over_persisted() {
         Some(ReasoningEffort::Low),
     );
 }
-<<<<<<< HEAD
+<<<<<<< fork
 /// The real restore path never lands an effort-capable session on no effort.
 /// Only an explicit `none` turns reasoning off.
 #[tokio::test]
@@ -1754,6 +1754,7 @@ async fn a_restored_session_with_no_effort_anywhere_still_gets_one() {
         restore_effort_via_load(Some(ReasoningEffort::None), None).await,
         Some(ReasoningEffort::None),
         "an explicit none is kept"
+||||||| base
 =======
 #[tokio::test]
 async fn restore_applies_the_saved_context_window_selection() {
@@ -1850,7 +1851,7 @@ async fn restore_keeps_the_saved_context_window_selection_without_a_catalog() {
     assert_eq!(
         500_000,
         selection.load(std::sync::atomic::Ordering::Relaxed)
->>>>>>> upstream/main
+>>>>>>> upstream
     );
 }
 /// A session persisted under a routing *slug* (not the catalog map key) must still get reasoning modes and a selected model.
@@ -3076,8 +3077,13 @@ fn write_plugin_manifest(dir: &std::path::Path, name: &str) {
     std::fs::create_dir_all(dir).unwrap();
     std::fs::write(dir.join("plugin.json"), format!(r#"{{"name": "{name}"}}"#)).unwrap();
 }
-<<<<<<< HEAD
+<<<<<<< fork
 /// Kill-switch ordering through the production session-less `example.invalid/plugins/reload` path (no resident
+/// session, so the rebuild targets the launch dir). `resolve_effective_plugins_config` consults the
+/// folder-trust gate, whose cold-key backstop resolves WITHOUT remote settings and records a durable
+/// verdict; if the disk read ran before the real-remote resolve, a cold launch dir under an org
+||||||| base
+/// Kill-switch ordering through the production session-less `x.ai/plugins/reload` path (no resident
 /// session, so the rebuild targets the launch dir). `resolve_effective_plugins_config` consults the
 /// folder-trust gate, whose cold-key backstop resolves WITHOUT remote settings and records a durable
 /// verdict; if the disk read ran before the real-remote resolve, a cold launch dir under an org
@@ -3086,7 +3092,7 @@ fn write_plugin_manifest(dir: &std::path::Path, name: &str) {
 /// session, so the rebuild targets the launch dir). The folder-trust gate's cold-key backstop
 /// resolves WITHOUT remote settings and records a durable verdict; if it ran before the real-remote
 /// resolve, a cold launch dir under an org
->>>>>>> upstream/main
+>>>>>>> upstream
 /// kill-switch (`folder_trust_enabled = Some(false)`) would be stamped with a kill-switch-blind deny
 /// that the store-only reconcile can never lift. Mirrors
 /// `kill_switched_cold_cwd_stays_allowed_through_plugins_config_read` for the shared rebuild.

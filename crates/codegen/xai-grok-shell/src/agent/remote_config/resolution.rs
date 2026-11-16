@@ -10,7 +10,6 @@ use crate::agent::model_provider_discovery::pick_by_model_id;
 use agent_client_protocol as acp;
 use xai_grok_sampling_types::ReasoningEffort;
 
-<<<<<<< HEAD
 /// Resolve a model's context window from a `/v1/models` listing, per exact
 /// requested slug. The listing is the parsed provider response (each entry
 /// carrying its own `contextWindow` / `context_window` value read via
@@ -114,7 +113,10 @@ fn fetch_provider_listing(
                 "provider model listing gave no answer"
             );
             Vec::new()
-=======
+        }
+    }
+}
+
 /// Which sources feed the model catalog.
 #[derive(Debug, Clone, Copy, PartialEq, Eq)]
 pub(crate) enum CatalogSource {
@@ -199,7 +201,6 @@ impl CatalogSource {
             CatalogSource::ModelsEndpoint
         } else {
             CatalogSource::Standard
->>>>>>> upstream/main
         }
     }
 }
@@ -390,45 +391,6 @@ pub(crate) fn available_models(
     config::to_acp_model_info(&visible)
 }
 
-<<<<<<< HEAD
-/// Compiled glob matcher shared by `allowed_models`, `disabled_models`, and `hidden_models` (matched against catalog key or model id).
-pub(crate) struct ModelGlobSet(GlobSet);
-
-impl ModelGlobSet {
-    /// Compile a filter list (`Ok(None)` for `None`/empty). Fails **closed**: an invalid pattern returns `Err` listing every bad one.
-    pub(crate) fn compile(patterns: Option<&[String]>) -> Result<Option<Self>, Vec<String>> {
-        let patterns = match patterns {
-            Some(p) if !p.is_empty() => p,
-            _ => return Ok(None),
-        };
-        let mut builder = GlobSetBuilder::new();
-        let mut invalid = Vec::new();
-        for pat in patterns {
-            match Glob::new(pat) {
-                Ok(glob) => {
-                    builder.add(glob);
-                }
-                Err(_) => invalid.push(pat.clone()),
-            }
-        }
-        if !invalid.is_empty() {
-            return Err(invalid);
-        }
-        builder
-            .build()
-            .map(|set| Some(Self(set)))
-            .map_err(|e| vec![e.to_string()])
-    }
-
-    pub(crate) fn matches(&self, key: &str, model: &str) -> bool {
-        self.0.is_match(key) || self.0.is_match(model)
-    }
-
-    fn matches_model(&self, model: &str) -> bool {
-        self.0.is_match(model)
-    }
-}
-
 /// Mark every entry that matches a favorites glob, and clear the mark on
 /// every entry that does not. Lists feed this: `[models].favorite_models`
 /// covers the whole catalog, and `[model_providers.<id>].favorite_models`
@@ -532,8 +494,47 @@ fn unselect_models_without_a_url(catalog: &mut IndexMap<String, ModelEntry>) {
     }
 }
 
+||||||| base
+/// Compiled glob matcher shared by `allowed_models`, `disabled_models`, and `hidden_models` (matched against catalog key or model id).
+pub(crate) struct ModelGlobSet(GlobSet);
+
+impl ModelGlobSet {
+    /// Compile a filter list (`Ok(None)` for `None`/empty). Fails **closed**: an invalid pattern returns `Err` listing every bad one.
+    pub(crate) fn compile(patterns: Option<&[String]>) -> Result<Option<Self>, Vec<String>> {
+        let patterns = match patterns {
+            Some(p) if !p.is_empty() => p,
+            _ => return Ok(None),
+        };
+        let mut builder = GlobSetBuilder::new();
+        let mut invalid = Vec::new();
+        for pat in patterns {
+            match Glob::new(pat) {
+                Ok(glob) => {
+                    builder.add(glob);
+                }
+                Err(_) => invalid.push(pat.clone()),
+            }
+        }
+        if !invalid.is_empty() {
+            return Err(invalid);
+        }
+        builder
+            .build()
+            .map(|set| Some(Self(set)))
+            .map_err(|e| vec![e.to_string()])
+    }
+
+    fn matches(&self, key: &str, model: &str) -> bool {
+        self.0.is_match(key) || self.0.is_match(model)
+    }
+
+    fn matches_model(&self, model: &str) -> bool {
+        self.0.is_match(model)
+    }
+}
+
 =======
->>>>>>> upstream/main
+>>>>>>> upstream
 /// Resolved allowlist: fleet pin, user/project list, or unrestricted.
 enum EffectiveAllowlist<'a> {
     Unrestricted,

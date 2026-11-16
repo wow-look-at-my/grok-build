@@ -1,9 +1,12 @@
-<<<<<<< HEAD
+<<<<<<< fork
 //! Shared cache-aligned side-call plumbing for recap-style auxiliary model calls (recap, turn summary).
+||||||| base
+//! Shared cache-aligned request building for recap-style auxiliary model calls (recap, turn summary).
+//! `/btw` reuses the request skeleton.
 =======
 //! Shared cache-aligned request building for recap-style auxiliary model calls (recap, title refresh).
 //! `/btw` reuses the request skeleton.
->>>>>>> upstream/main
+>>>>>>> upstream
 
 use super::*;
 

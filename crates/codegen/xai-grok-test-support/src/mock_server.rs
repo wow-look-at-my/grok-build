@@ -926,7 +926,7 @@ impl MockInferenceServer {
                                     .map(str::to_owned),
                             );
                             state.stall_startup_fetch().await;
-<<<<<<< HEAD
+<<<<<<< fork
                             let models_delay = {
                                 let mut slot = state.models_delay.write().unwrap();
                                 let delay = slot.map(|(delay, _)| delay);
@@ -939,13 +939,15 @@ impl MockInferenceServer {
                                 tokio::time::sleep(delay).await;
                             }
                             let models_json = state.models.read().unwrap().clone();
+||||||| base
+                            let models_json = state.models.read().unwrap().clone();
 =======
                             let models_json = match &*state.models.read().unwrap() {
                                 ModelCatalog::Boot(entries) | ModelCatalog::Installed(entries) => {
                                     entries.clone()
                                 }
                             };
->>>>>>> upstream/main
+>>>>>>> upstream
                             Json(json!({
                                 "object": "list",
                                 "data": models_json,

@@ -72,14 +72,15 @@ pub use endpoints::{CLI_CHAT_PROXY_BASE_URL_DEFAULT, EndpointsConfig};
 pub use env_overlay::{
     GROK_CONFIG_ENV, GROK_CONFIG_PATH_ENV, OverlaySource, ResolvedOverlay, resolved_env_overlay,
 };
-<<<<<<< HEAD
+<<<<<<< fork
 pub use format::{
     CONFIG_SCHEMA_JSON, SCHEMA_FILENAME, edit_config_tree, ensure_schema_file,
     parse_config_for_edit, read_config_tree, render_config, tree_to_config_json_string,
 };
+||||||| base
 =======
 
->>>>>>> upstream/main
+>>>>>>> upstream
 #[cfg(unix)]
 pub use global_hook_sources::{
     validate_direct_hook_json_file, validated_hook_json_files_for_sources,
@@ -102,12 +103,19 @@ pub use loader::{
 };
 pub use macos_managed::MDM_REQUIREMENTS_SOURCE;
 pub use managed_cache::{
-<<<<<<< HEAD
+<<<<<<< fork
     MANAGED_CONFIG_CACHE_FILE, ServingIdentity, SyncMarker, bump_rollback_floor,
     bump_rollback_floor_with_now, confirmed_team_switch, confirmed_team_switch_at,
     fail_closed_policy_armed_at, is_managed_config_hard_stale_for, is_managed_config_stale_for,
     managed_config_identity_changed_at, managed_config_synced_at, managed_policy_compromised_for,
     mark_managed_config_synced, mark_managed_config_synced_at, normalize_identity,
+||||||| base
+    MANAGED_CONFIG_CACHE_FILE, ServingIdentity, SyncMarker, bump_rollback_floor,
+    bump_rollback_floor_with_now, confirmed_team_switch, confirmed_team_switch_at,
+    fail_closed_policy_armed_at, is_managed_config_hard_stale_for, is_managed_config_stale_for,
+    managed_config_identity_changed_at, managed_config_synced_at, managed_deployment_id,
+    managed_policy_compromised_for, mark_managed_config_synced, mark_managed_config_synced_at,
+    normalize_identity,
 =======
     MANAGED_CONFIG_CACHE_FILE, ManagedPolicyCompromise, ServingIdentity, SyncMarker,
     bump_rollback_floor, bump_rollback_floor_with_now, confirmed_team_switch,
@@ -115,7 +123,7 @@ pub use managed_cache::{
     is_managed_config_stale_for, managed_config_identity_changed_at, managed_config_synced_at,
     managed_deployment_id, managed_policy_compromised_for, mark_managed_config_synced,
     mark_managed_config_synced_at, normalize_identity,
->>>>>>> upstream/main
+>>>>>>> upstream
 };
 pub use managed_policy_trust::ManagedPolicyTrust;
 pub use mcp_bearer_token_file::{BearerTokenPath, BearerTokenPathError};

@@ -907,8 +907,9 @@ pub(crate) async fn spawn_session_actor(
         )
     });
     let mut memory_storage_for_session = None;
-<<<<<<< HEAD
+<<<<<<< fork
     let mut memory_unavailable = None;
+||||||| base
 =======
     if let Some(config) = memory_config.as_ref() {
         xai_grok_memory::set_configured_manifest_budget(if config.v2.compact_index_enabled {
@@ -917,7 +918,7 @@ pub(crate) async fn spawn_session_actor(
             xai_grok_memory::V2ManifestBudget::default()
         });
     }
->>>>>>> upstream/main
+>>>>>>> upstream
     match select_memory_storage(configured_memory_storage.as_ref(), memory_config.as_ref()) {
         MemoryStorageSelection::Enabled => {
             memory_storage_for_session = configured_memory_storage.clone();

@@ -22,12 +22,15 @@ xai-gix-status = { workspace = true }
 libc = { workspace = true }
 notify = { workspace = true }
 parking_lot = { workspace = true }
-<<<<<<< HEAD
+<<<<<<< fork
+||||||| base
+reqwest = { workspace = true }
+reqwest-middleware = { workspace = true }
 =======
 reqwest = { workspace = true }
 regex = { workspace = true }
 reqwest-middleware = { workspace = true }
->>>>>>> upstream/main
+>>>>>>> upstream
 # rusqlite 0.37 + bundled = self-contained SQLite (>= 3.50.2) with FTS5.
 rusqlite = { version = "0.37", features = ["bundled"] }
 serde = { workspace = true }

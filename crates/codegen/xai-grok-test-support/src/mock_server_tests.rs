@@ -1559,13 +1559,17 @@ async fn tls_server_serves_models_only_to_a_client_trusting_the_throwaway_ca() {
     let server = MockInferenceServer::start_tls().await.unwrap();
     let url = format!("{}/models", server.url());
 
-<<<<<<< HEAD
+<<<<<<< fork
     // An ambient HTTPS_PROXY would intercept the loopback handshake and
     // make a proxy failure look like a CA or server bug.
     let untrusting = request::Client::builder()
+||||||| base
+    // An ambient HTTPS_PROXY would intercept the loopback handshake and
+    // make a proxy failure look like a CA or server bug.
+    let untrusting = reqwest::Client::builder()
 =======
     let untrusting = reqwest::Client::builder()
->>>>>>> upstream/main
+>>>>>>> upstream
         .use_rustls_tls()
         .no_proxy()
         .build()

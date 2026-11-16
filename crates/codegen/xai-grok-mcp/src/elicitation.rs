@@ -607,13 +607,9 @@ mod tests {
             url: "https://example.com".into(),
             elicitation_id: "e1".into(),
         };
-<<<<<<< HEAD
-        let task = xai_spawn::spawn(async move { bridge_elicit(&bridge, "srv", params).await });
-=======
-        let task = tokio::spawn(async move {
+        let task = xai_spawn::spawn(async move {
             bridge_elicit(&bridge, "srv", params, AskGuard::unowned()).await
         });
->>>>>>> upstream/main
         let mut job = inbox.recv().await.expect("job");
         task.abort();
         let _ = task.await;

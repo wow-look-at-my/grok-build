@@ -753,11 +753,13 @@ grok
 }
 ```
 
-<<<<<<< HEAD
+<<<<<<< fork
 When you use `endpoints` with partial model overrides, Grok inherits the `base_url` from the endpoints config. You do not need to specify it in each `models.definitions.*` section.
+||||||| base
+When you use `[endpoints]` with partial model overrides, Grok inherits the `base_url` from the endpoints config, so you do not need to specify it in each `[model.*]` section.
 =======
 When you use `[endpoints]` with partial model overrides, Grok inherits the `base_url` from the endpoints config. You do not need to specify it in each `[model.*]` section. `XAI_API_KEY` is still required. A per-model `api_key` or `env_key` authenticates inference requests for that model. The startup model-list fetch always uses `XAI_API_KEY`.
->>>>>>> upstream/main
+>>>>>>> upstream
 
 ### Auth Behavior
 

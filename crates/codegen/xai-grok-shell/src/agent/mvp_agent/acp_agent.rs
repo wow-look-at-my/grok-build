@@ -97,7 +97,7 @@ impl MvpAgent {
         res
     }
 }
-<<<<<<< HEAD
+<<<<<<< fork
 /// True when a text block of `prompt` sets `ENABLE_FIREHOSE_META` to `true`.
 /// `/debug` sets it, so the process that runs the session logs its repro.
 fn prompt_requests_firehose(prompt: &[acp::ContentBlock]) -> bool {
@@ -110,6 +110,7 @@ fn prompt_requests_firehose(prompt: &[acp::ContentBlock]) -> bool {
             .unwrap_or(false),
         _ => false,
     })
+||||||| base
 =======
 /// Rejects a `_meta.contextWindow` that is malformed or that the model does not support.
 fn resolve_switch_window(
@@ -134,7 +135,7 @@ fn resolve_switch_window(
                 )
         })?;
     Ok(SwitchContextWindow::Set(Some(window)))
->>>>>>> upstream/main
+>>>>>>> upstream
 }
 #[async_trait::async_trait(?Send)]
 impl acp::Agent for MvpAgent {
@@ -1001,15 +1002,18 @@ impl acp::Agent for MvpAgent {
                 self.auth_manager.hot_swap(auth.clone());
                 self.enforce_grok_code_access(&auth).await;
                 self.maybe_sync_bundle_in_background(false);
-<<<<<<< HEAD
+<<<<<<< fork
                 xai_spawn::spawn_local(
+                    crate::managed_config::post_login_sync(Some(auth.clone())),
+||||||| base
+                tokio::task::spawn_local(
                     crate::managed_config::post_login_sync(Some(auth.clone())),
 =======
                 tokio::task::spawn_local(
                     xai_grok_cloud_config::managed_config::post_login_sync(
                         Some(auth.clone()),
                     ),
->>>>>>> upstream/main
+>>>>>>> upstream
                 );
                 self.set_auth_method(arguments.method_id.clone());
                 self.models_manager.on_auth_changed().await;
@@ -1118,7 +1122,7 @@ impl acp::Agent for MvpAgent {
             .session_handle_waiting_for_load(&arguments.session_id)
             .await
             .ok_or_else(|| acp::Error::invalid_params().data("unknown session id"))?;
-<<<<<<< HEAD
+<<<<<<< fork
         // A `!` command runs in the local shell and calls no model, so no model gate applies to it.
         let needs_model =
             crate::extensions::prompt_meta::PromptBlockMeta::command_in(&arguments.prompt)
@@ -1127,9 +1131,14 @@ impl acp::Agent for MvpAgent {
             let deny = crate::agent::remote_config::allowlist_excludes_all_message(
                 &self.cfg.borrow(),
             );
+||||||| base
+        if self.models_manager.allowlist_excludes_all() {
+            let deny = crate::agent::remote_config::allowlist_excludes_all_message(
+                &self.cfg.borrow(),
+            );
 =======
         if let Some(deny) = self.models_manager.prompt_block_message().await {
->>>>>>> upstream/main
+>>>>>>> upstream
             self.send_model_auto_switched(
                     &arguments.session_id,
                     &acp::ModelId::new(String::new()),

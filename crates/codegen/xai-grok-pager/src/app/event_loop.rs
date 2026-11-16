@@ -1114,14 +1114,18 @@ pub(crate) async fn run(
         remote_settings.as_ref(),
     );
     app.foreign_session_compat = xai_grok_foreign_sessions::EnabledForeignSessionSources {
-<<<<<<< HEAD
+<<<<<<< fork
         claude: compat.claude.sessions,
+        cursor: compat.cursor.sessions,
+||||||| base
+        claude: compat.claude.sessions,
+        codex: compat.codex.sessions,
         cursor: compat.cursor.sessions,
 =======
         claude: compat.claude,
         codex: compat.codex,
         cursor: compat.cursor,
->>>>>>> upstream/main
+>>>>>>> upstream
     };
     if let Some(raw) = effective_config {
         app.notification_service = crate::notifications::NotificationService::new(
@@ -2236,7 +2240,7 @@ pub(crate) async fn run(
                 }
             }
 
-<<<<<<< HEAD
+<<<<<<< fork
             // Keep the branch's CI dot polling with no frames in flight.
             _ = ci_poll => {
                 ci_poll_at = Some(Instant::now() + crate::ci_status::CI_POLL_INTERVAL);
@@ -2267,8 +2271,25 @@ pub(crate) async fn run(
                 }
             }
 
+||||||| base
+            _ = status_line_refresh => {
+                status_line_refresh_at = None;
+                // Lands in `pending_effects`, drained below like every arm's
+                app.note_status_line_refresh_due();
+                // A run is owed; `status_line_tick_demand` owns the routing
+                schedule_tick(&mut animation_tick_at, &app, tick_interval);
+                if app.status_line.take_changed() {
+                    presenter.request(false);
+                }
+                // Re-armed at fire time, so the cadence is independent of how long a run takes
+                // The owed-run rule above is what keeps a slow script from stacking runs behind the timer
+                if let Some(interval) = status_line_refresh_interval {
+                    status_line_refresh_at = Some(Instant::now() + interval);
+                }
+            }
+
 =======
->>>>>>> upstream/main
+>>>>>>> upstream
             _ = subscription_watch => {
                 subscription_watch_at = None;
                 let effs = app.fire_subscription_check("watch");

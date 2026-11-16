@@ -1482,11 +1482,6 @@ pub fn reasoning_efforts_meta_value(opts: &[ReasoningEffortOption]) -> serde_jso
     serde_json::to_value(opts).unwrap_or_else(|_| serde_json::Value::Array(Vec::new()))
 }
 
-<<<<<<< HEAD
-#[derive(
-    Clone, Debug, Default, PartialEq, Eq, serde::Serialize, serde::Deserialize, schemars::JsonSchema,
-)]
-=======
 /// The `session/set_model` `_meta` key for the context window size, in tokens, that the client selected.
 pub const CONTEXT_WINDOW_META_KEY: &str = "contextWindow";
 /// The model `meta` key that lists the context window sizes a client can select.
@@ -1539,8 +1534,9 @@ pub fn context_window_meta_value(window: NonZeroU64) -> Value {
     Value::Number(window.get().into())
 }
 
-#[derive(Clone, Debug, Default, PartialEq, Eq, serde::Serialize, serde::Deserialize)]
->>>>>>> upstream/main
+#[derive(
+    Clone, Debug, Default, PartialEq, Eq, serde::Serialize, serde::Deserialize, schemars::JsonSchema,
+)]
 #[serde(rename_all = "snake_case")]
 pub enum ApiBackend {
     /// Use the Chat Completions API (/v1/chat/completions)

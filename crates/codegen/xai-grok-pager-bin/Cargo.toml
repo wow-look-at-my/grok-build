@@ -14,24 +14,31 @@ path = "src/main.rs"
 
 [dependencies]
 # The pager library (all application logic + the public API main.rs drives).
-<<<<<<< HEAD
+<<<<<<< fork
 xai-grok-pager = { path = "../xai-grok-pager" }
+||||||| base
+xai-grok-pager = { path = "../xai-grok-pager" }
+# Optional scrollback-native render mode, wired in via the fn-pointer seam.
+xai-grok-pager-minimal = { path = "../xai-grok-pager-minimal" }
 =======
 xai-grok-pager = { path = "../xai-grok-pager", default-features = false }
 # Optional scrollback-native render mode, wired in via the fn-pointer seam.
 xai-grok-pager-minimal = { path = "../xai-grok-pager-minimal", default-features = false }
->>>>>>> upstream/main
+>>>>>>> upstream
 
 # Agent runtime + leader/stdio/headless entry points.
 xai-grok-cloud-config = { workspace = true }
 xai-grok-login = { workspace = true }
-<<<<<<< HEAD
+<<<<<<< fork
 xai-grok-pdf = { workspace = true }
 xai-grok-shell = { workspace = true }
+||||||| base
+xai-grok-shell = { workspace = true }
+xai-grok-update = { path = "../xai-grok-update" }
 =======
 xai-grok-shell = { path = "../xai-grok-shell", default-features = false }
 xai-grok-update = { path = "../xai-grok-update", default-features = false }
->>>>>>> upstream/main
+>>>>>>> upstream
 xai-grok-version = { workspace = true }
 xai-grok-telemetry = { workspace = true }
 xai-grok-workspace = { workspace = true }
@@ -58,8 +65,15 @@ xai-tty-utils = { workspace = true }
 xai-grok-config = { workspace = true }
 xai-grok-sandbox = { path = "../xai-grok-sandbox", default-features = false }
 xai-grok-extra-ca = { workspace = true }
-<<<<<<< HEAD
+<<<<<<< fork
 xai-spawn = { workspace = true }
+||||||| base
+
+# Binary hardening: compile-time string + control-flow obfuscation.
+obfstr = { workspace = true }
+cryptify = { workspace = true }
+
+[target.'cfg(target_os = "linux")'.dependencies]
 =======
 
 # Binary hardening: compile-time string + control-flow obfuscation.
@@ -80,7 +94,7 @@ zstd = { workspace = true, optional = true }
 sha2 = { workspace = true }
 
 [target.'cfg(target_os = "linux")'.dependencies]
->>>>>>> upstream/main
+>>>>>>> upstream
 
 [target.'cfg(unix)'.dependencies]
 libc = { workspace = true }
@@ -93,24 +107,30 @@ clap = { workspace = true, features = ["derive"] }
 
 [features]
 default = [
-<<<<<<< HEAD
-    "sandbox-enforce",
-    ]
-default-bazel = [
-    "sandbox-enforce",
-    "local-workspace",
-    ]
+<<<<<<< fork
+||||||| base
+    "jemalloc",
 =======
     "stock",
     "jemalloc",
+>>>>>>> upstream
     "sandbox-enforce",
     ]
 default-bazel = [
+<<<<<<< fork
+||||||| base
+    "jemalloc",
+=======
     "stock",
     "jemalloc",
+>>>>>>> upstream
     "sandbox-enforce",
     "local-workspace",
     ]
+<<<<<<< fork
+||||||| base
+jemalloc = ["dep:tikv-jemallocator", "dep:tikv-jemalloc-sys", "dep:tikv-jemalloc-ctl"]
+=======
 # The defaults of the crates this binary builds on. `default` and `release-dist` turn them on; a
 # `--no-default-features` build that wants them names this feature.
 stock = [
@@ -120,7 +140,7 @@ stock = [
     "xai-grok-update/default",
 ]
 jemalloc = ["dep:tikv-jemallocator", "dep:tikv-jemalloc-sys", "dep:tikv-jemalloc-ctl"]
->>>>>>> upstream/main
+>>>>>>> upstream
 # xai-grok-workspace no longer enables sandbox-enforce by default, so enable it here.
 sandbox-enforce = ["xai-grok-pager/sandbox-enforce", "xai-grok-workspace/sandbox-enforce"]
 local-workspace = ["xai-grok-pager/local-workspace"]

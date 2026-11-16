@@ -26,12 +26,9 @@
 #![deny(clippy::indexing_slicing)]
 mod allow_path;
 pub mod child_net;
-<<<<<<< HEAD
 pub mod ci_host;
 pub mod ci_state;
-=======
 pub mod command;
->>>>>>> upstream/main
 mod deny;
 #[cfg(unix)]
 pub mod gh_shim;

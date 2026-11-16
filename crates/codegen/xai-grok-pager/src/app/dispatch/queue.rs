@@ -778,7 +778,6 @@ pub(super) fn maybe_drain_queue(agent: &mut AgentView, notices: &mut Vec<String>
                         session_id,
                     },
                 ),
-<<<<<<< HEAD
                 _ => {
                     let user_context = invocation
                         .map(|inv| inv.args.trim())
@@ -794,16 +793,6 @@ pub(super) fn maybe_drain_queue(agent: &mut AgentView, notices: &mut Vec<String>
                         },
                     )
                 }
-=======
-                _ => (
-                    AgentCommand::Compact,
-                    SessionEvent::CompactStarted,
-                    Effect::Compact {
-                        agent_id,
-                        session_id,
-                    },
-                ),
->>>>>>> upstream/main
             };
             agent.session.start_command(command);
             // The command owns the pane; a leftover wake marker must not shadow stop.

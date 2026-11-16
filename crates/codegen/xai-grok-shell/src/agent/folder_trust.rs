@@ -308,9 +308,6 @@ fn compute_from_inputs(
     }
 }
 
-<<<<<<< HEAD
-/// It MUST enumerate every project MCP source the loaders read. Name-based (not `ConfigSource`-based) ON PURPOSE. Sources: project `.grok/config.json` `mcp.servers` (NOT the user-tier global config).
-=======
 fn prompt_for_trust(key: &Path) -> bool {
     use std::io::{BufRead, Write};
 
@@ -339,8 +336,7 @@ fn is_yes_answer(line: &str) -> bool {
     matches!(line.trim().to_ascii_lowercase().as_str(), "y" | "yes")
 }
 
-/// It MUST enumerate every project MCP source the loaders read. Name-based (not `ConfigSource`-based) ON PURPOSE. Sources: project `.grok/config.toml [mcp_servers]` (NOT the user-tier global config).
->>>>>>> upstream/main
+/// It MUST enumerate every project MCP source the loaders read. Name-based (not `ConfigSource`-based) ON PURPOSE. Sources: project `.grok/config.json` `mcp.servers` (NOT the user-tier global config).
 /// Also project `.mcp.json` (`cwd` up to the repo root, never `$HOME`), project `.cursor/mcp.json`, and `~/.claude.json projects.<cwd>.mcpServers`.
 /// Edge case: a name declared in BOTH a project config and the global `~/.grok/config.json` is dropped when untrusted. This is intended — untrusted project content must not influence the command spawned for a shared name.
 pub(crate) fn project_scoped_mcp_names(cwd: &Path) -> HashSet<String> {

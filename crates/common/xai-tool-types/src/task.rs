@@ -1551,17 +1551,28 @@ pub fn build_task_output_description(naming: &TaskOutputToolNaming) -> String {
     format!(
         "Get output and status from a background task{target_suffix}.\n\n\
          Usage notes:\n\
-<<<<<<< HEAD
          - Pass {task_ids_param} with one or more ids from {sources}{monitor_note}; for a single task use a one-element array\n\
          - This tool never waits. It returns the current output, status, and exit code at once\n\
          - To wait for a task, end your turn. A completion message wakes you when the task finishes{read_note}"
-=======
-         - Pass {task_ids_param} with one or more ids from {sources}{monitor_note}; for a single task use a one-element array. Multiple ids with a positive {timeout_ms_param} wait until all complete\n\
-         - Omit {timeout_ms_param} or pass 0 for a non-blocking status snapshot; set a positive {timeout_ms_param} to wait up to that many milliseconds, capped at {wait_cap}\n\
-         - Returns current output, status, and exit code if completed{read_note}"
     )
 }
 
+<<<<<<< fork
+#[cfg(test)]
+mod tests {
+    use super::*;
+||||||| base
+/// Naming/feature inputs for [`build_wait_tasks_description`].
+#[derive(Clone, Copy, Debug)]
+pub struct WaitTasksToolNaming<'a> {
+    /// The preferred retrieval tool name shown in the "Prefer …" line.
+    pub background_retrieval_tool: &'a str,
+    /// The bash `is_background` param name, when a bash/`execute` tool is present.
+    pub bash_background_param: Option<&'a str>,
+    /// The subagent `run_in_background` param name, when a `task` tool is present.
+    pub subagent_background_param: Option<&'a str>,
+}
+=======
 /// Names how the model starts a background command or subagent, for the "ids from …" sentence.
 fn background_sources(
     bash_background_param: Option<&str>,
@@ -1605,7 +1616,22 @@ pub struct WaitTasksToolNaming<'a> {
     /// The subagent `run_in_background` param name, when a `task` tool is present.
     pub subagent_background_param: Option<&'a str>,
 }
+>>>>>>> upstream
 
+<<<<<<< fork
+    #[test]
+    fn agent_usage_frequency_default_is_default_variant() {
+        assert_eq!(AgentUsageFrequency::default(), AgentUsageFrequency::Default);
+    }
+||||||| base
+/// Build the shared `wait_tasks` tool description.
+pub fn build_wait_tasks_description(naming: &WaitTasksToolNaming) -> String {
+    let WaitTasksToolNaming {
+        background_retrieval_tool,
+        bash_background_param,
+        subagent_background_param,
+    } = *naming;
+=======
 /// Build the shared `wait_tasks` tool description.
 pub fn build_wait_tasks_description(naming: &WaitTasksToolNaming) -> String {
     let WaitTasksToolNaming {
@@ -1614,35 +1640,9 @@ pub fn build_wait_tasks_description(naming: &WaitTasksToolNaming) -> String {
         bash_block_param,
         subagent_background_param,
     } = *naming;
+>>>>>>> upstream
 
-    let sources = background_sources(
-        bash_background_param,
-        bash_block_param,
-        subagent_background_param,
-    );
-
-    let wait_cap = MAX_WAIT_MS_PLACEHOLDER;
-
-    format!(
-        "Wait for multiple background tasks or subagents to complete.\n\n\
-         Prefer {background_retrieval_tool} with task_ids and a positive timeout_ms. This tool is kept for compatibility.\n\n\
-         Usage notes:\n\
-         - task_ids: list of task IDs from {sources}\n\
-         - mode: 'wait_all' or 'wait_any'\n\
-         - timeout_ms: optional max wait, default 30s, capped at {wait_cap}"
->>>>>>> upstream/main
-    )
-}
-
-#[cfg(test)]
-mod tests {
-    use super::*;
-
-    #[test]
-    fn agent_usage_frequency_default_is_default_variant() {
-        assert_eq!(AgentUsageFrequency::default(), AgentUsageFrequency::Default);
-    }
-
+<<<<<<< fork
     #[test]
     fn agent_usage_frequency_round_trips_canonical_strings() {
         for level in [
@@ -1656,6 +1656,22 @@ mod tests {
             assert_eq!(AgentUsageFrequency::parse(level.as_str()), Some(level));
         }
     }
+||||||| base
+    let sources = match (bash_background_param, subagent_background_param) {
+        // Both params share one client-facing name: don't repeat it.
+        (Some(b), Some(s)) if b == s => format!("{b}=true commands or subagents"),
+        (Some(b), Some(s)) => format!("{b}=true commands or {s}=true subagents"),
+        (Some(b), None) => format!("{b}=true commands"),
+        (None, Some(s)) => format!("{s}=true subagents"),
+        (None, None) => "background tasks".to_string(),
+    };
+=======
+    let sources = background_sources(
+        bash_background_param,
+        bash_block_param,
+        subagent_background_param,
+    );
+>>>>>>> upstream
 
     #[test]
     fn agent_usage_frequency_parse_is_lenient() {
@@ -2454,8 +2470,41 @@ mod tests {
     }
 
     #[test]
-<<<<<<< HEAD
+<<<<<<< fork
     fn background_spawn_notice_keeps_read_hint_and_open_parent_work() {
+||||||| base
+    fn wait_tasks_matches_cli_default() {
+        let desc = build_wait_tasks_description(&WaitTasksToolNaming {
+            background_retrieval_tool: "get_command_or_subagent_output",
+            bash_background_param: Some("background"),
+            subagent_background_param: Some("background"),
+        });
+        assert_eq!(
+            desc,
+            "Wait for multiple background tasks or subagents to complete.\n\n\
+             Prefer get_command_or_subagent_output with task_ids and a positive timeout_ms. This tool is kept for compatibility.\n\n\
+             Usage notes:\n\
+             - task_ids: list of task IDs from background=true commands or subagents\n\
+             - mode: 'wait_all' or 'wait_any'\n\
+             - timeout_ms: optional max wait, default 30s, capped at {max_wait_ms}"
+        );
+    }
+
+    #[test]
+    fn wait_tasks_subagent_only_toolbox() {
+        let desc = build_wait_tasks_description(&WaitTasksToolNaming {
+            background_retrieval_tool: "get_task_output",
+            bash_background_param: None,
+            subagent_background_param: Some("run_in_background"),
+        });
+        assert!(
+            desc.contains("- task_ids: list of task IDs from run_in_background=true subagents\n")
+        );
+        assert!(desc.contains("Prefer get_task_output with task_ids"));
+    }
+
+    #[test]
+    fn background_spawn_notice_keeps_poll_hint_and_open_parent_work() {
 =======
     fn wait_tasks_matches_cli_default() {
         let desc = build_wait_tasks_description(&WaitTasksToolNaming {
@@ -2534,7 +2583,7 @@ mod tests {
 
     #[test]
     fn background_spawn_notice_keeps_poll_hint_and_open_parent_work() {
->>>>>>> upstream/main
+>>>>>>> upstream
         let naming = BackgroundNoticeNaming {
             task_output_tool: "get_command_or_subagent_output",
             ..BackgroundNoticeNaming::CANONICAL

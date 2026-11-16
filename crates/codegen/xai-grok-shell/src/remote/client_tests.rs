@@ -21,56 +21,6 @@ fn get_env_keys_parses_strings_and_rejects_non_strings() {
     assert_eq!(parse(serde_json::json!(["A", 123])), None);
     assert_eq!(parse(serde_json::json!([])), None);
 }
-<<<<<<< HEAD
-/// Mock cli-chat-proxy serving `GET /settings` with a fixed status and body.
-async fn start_settings_server(
-    status: StatusCode,
-    body: String,
-) -> (String, tokio::task::JoinHandle<()>) {
-    let listener = tokio::net::TcpListener::bind("127.0.0.1:0").await.unwrap();
-    let base = format!("http://127.0.0.1:{}", listener.local_addr().unwrap().port());
-    let app = Router::new().route(
-        "/settings",
-        get(move || {
-            let body = body.clone();
-            async move { (status, body) }
-        }),
-    );
-    let handle = xai_spawn::spawn(async move { axum::serve(listener, app).await.unwrap() });
-    (base, handle)
-}
-/// `fetch_settings_blocking` maps each HTTP outcome to the [`SettingsFetch`] variant the external-OTEL gate relies on.
-/// Only 401 yields `Rejected`; every other non-2xx outcome fails closed as `Retry`.
-#[tokio::test(flavor = "multi_thread", worker_threads = 2)]
-async fn settings_fetch_maps_status_to_outcome() {
-    let auth = GrokAuth::test_default();
-    let cases: [(StatusCode, &str, &str); 6] = [
-        (StatusCode::OK, "{}", "Fetched"),
-        (StatusCode::UNAUTHORIZED, "{}", "Rejected"),
-        (StatusCode::FORBIDDEN, "{}", "Retry"),
-        (StatusCode::TOO_MANY_REQUESTS, "{}", "Retry"),
-        (StatusCode::INTERNAL_SERVER_ERROR, "{}", "Retry"),
-        (StatusCode::OK, "not json", "Retry"),
-    ];
-    for (status, body, expected) in cases {
-        let (base, server) = start_settings_server(status, body.to_string()).await;
-        let a = auth.clone();
-        let outcome = xai_spawn::spawn_blocking(move || {
-            fetch_settings_blocking_with_attempts(&base, &a, None, 1)
-        })
-        .await
-        .unwrap();
-        server.abort();
-        let got = match outcome {
-            SettingsFetch::Fetched(_) => "Fetched",
-            SettingsFetch::Rejected => "Rejected",
-            SettingsFetch::Retry => "Retry",
-        };
-        assert_eq!(got, expected, "status {status}, body {body:?}");
-    }
-}
-=======
->>>>>>> upstream/main
 #[derive(Debug, Default, Clone)]
 struct SeenHeaders {
     authorization: Option<String>,
@@ -884,7 +834,7 @@ fn get_object_returns_some_for_actual_object() {
         &serde_json::json!("two")
     );
 }
-<<<<<<< HEAD
+<<<<<<< fork
 fn endpoints(
     proxy: &str,
     models_base_url: Option<&str>,
@@ -962,9 +912,81 @@ fn list_url_explicit_overrides_derivation() {
     );
 }
 /// REGRESSION: `grok setup` must send the team token to the proxy, never the inference endpoint.
+||||||| base
+fn endpoints(
+    proxy: &str,
+    models_base_url: Option<&str>,
+    models_list_url: Option<&str>,
+) -> crate::agent::config::EndpointsConfig {
+    crate::agent::config::EndpointsConfig {
+        cli_chat_proxy_base_url: Some(proxy.to_owned()),
+        models_base_url: models_base_url.map(|s| s.to_owned()),
+        models_list_url: models_list_url.map(|s| s.to_owned()),
+        ..Default::default()
+    }
+}
+#[test]
+fn inference_url_defaults_to_proxy() {
+    let ep = endpoints("https://proxy.grok.com/v1", None, None);
+    assert_eq!(ep.resolve_inference_base_url(), "https://proxy.grok.com/v1");
+}
+#[test]
+fn inference_url_uses_models_base_url() {
+    let ep = endpoints(
+        "https://proxy.grok.com/v1",
+        Some("https://enterprise.acme.com/v1"),
+        None,
+    );
+    assert_eq!(
+        ep.resolve_inference_base_url(),
+        "https://enterprise.acme.com/v1"
+    );
+}
+#[test]
+fn inference_url_base_url_wins_over_proxy() {
+    let ep = endpoints(
+        "https://proxy.grok.com/v1",
+        Some("https://inference.acme.com/v1"),
+        Some("https://registry.acme.com/api/models"),
+    );
+    assert_eq!(
+        ep.resolve_inference_base_url(),
+        "https://inference.acme.com/v1"
+    );
+}
+#[test]
+fn list_url_defaults_to_proxy_models() {
+    let ep = endpoints("https://proxy.grok.com/v1", None, None);
+    assert_eq!(
+        ep.resolve_models_list_url(),
+        "https://proxy.grok.com/v1/models"
+    );
+}
+#[test]
+fn list_url_derived_from_base_url() {
+    let ep = endpoints(
+        "https://proxy.grok.com/v1",
+        Some("https://api.x.ai/v1"),
+        None,
+    );
+    assert_eq!(ep.resolve_models_list_url(), "https://api.x.ai/v1/models");
+}
+#[test]
+fn list_url_explicit_overrides_derivation() {
+    let ep = endpoints(
+        "https://proxy.grok.com/v1",
+        Some("https://inference.acme.com/v1"),
+        Some("https://registry.acme.com/api/list-models"),
+    );
+    assert_eq!(
+        ep.resolve_models_list_url(),
+        "https://registry.acme.com/api/list-models"
+    );
+}
+/// REGRESSION: `grok setup` must send the deployment key to the proxy, never the inference endpoint.
 =======
 /// REGRESSION: `grok setup` must send the deployment key to the proxy, never the inference endpoint.
->>>>>>> upstream/main
+>>>>>>> upstream
 #[test]
 #[serial_test::serial]
 fn deployment_config_url_uses_cli_chat_proxy_when_not_overridden() {

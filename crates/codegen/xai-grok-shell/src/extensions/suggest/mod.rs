@@ -181,13 +181,16 @@ fn splice_token_into_line(results: &mut [RankedSuggestion], text: &str, range: (
 #[tracing::instrument(skip_all, fields(method = %args.method))]
 pub async fn handle(agent: &MvpAgent, args: &acp::ExtRequest) -> ExtResult {
     match args.method.as_ref() {
-<<<<<<< HEAD
+<<<<<<< fork
         "example.invalid/suggest" => handle_suggest(agent, args).await,
         "example.invalid/suggestPrompt" => handle_suggest_prompt(agent, args).await,
+||||||| base
+        "x.ai/suggest" => handle_suggest(agent, args).await,
+        "x.ai/suggestPrompt" => handle_suggest_prompt(agent, args).await,
 =======
         SUGGEST_METHOD => handle_suggest(agent, args).await,
         "x.ai/suggestPrompt" => handle_suggest_prompt(agent, args).await,
->>>>>>> upstream/main
+>>>>>>> upstream
         _ => Err(acp::Error::method_not_found()),
     }
 }

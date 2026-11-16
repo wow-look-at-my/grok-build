@@ -75,7 +75,7 @@ pub fn messages_api_events(text: &str, model: &str, stop_reason: &str) -> Vec<Ev
     scripted_to_axum(messages_api_script(text, model, stop_reason))
 }
 
-<<<<<<< HEAD
+<<<<<<< fork
 /// Like [`messages_api_events`] but the terminal `message_delta` also prices
 /// the call, the way a gateway speaking this protocol does (Anthropic itself
 /// sends no price).
@@ -94,7 +94,12 @@ pub fn messages_api_events_with_cost(
 }
 
 /// [`messages_api_events`] as [`SseEvent`]s for a [`crate::ScriptedResponse`].
+||||||| base
+/// [`messages_api_events`] as [`SseEvent`]s for a [`crate::ScriptedResponse`].
+=======
+>>>>>>> upstream
 pub fn messages_api_script(text: &str, model: &str, stop_reason: &str) -> Vec<SseEvent> {
+<<<<<<< fork
     messages_api_script_with_cost(text, model, stop_reason, None)
 }
 
@@ -110,8 +115,9 @@ pub fn messages_api_script_with_cost(
         usage.insert("cost_in_usd_ticks".to_string(), json!(ticks));
     }
     vec![
+||||||| base
+    vec![
 =======
-pub fn messages_api_script(text: &str, model: &str, stop_reason: &str) -> Vec<SseEvent> {
     messages_api_script_chunks(&[text], model, stop_reason, None)
 }
 
@@ -122,7 +128,7 @@ pub fn messages_api_script_chunks<S: AsRef<str>>(
     usage: Option<&UsageReport>,
 ) -> Vec<SseEvent> {
     let mut events = vec![
->>>>>>> upstream/main
+>>>>>>> upstream
         SseEvent::data(
             json!({
                 "type": "message_start",
@@ -138,22 +144,30 @@ pub fn messages_api_script_chunks<S: AsRef<str>>(
             json!({"type":"content_block_start","index":0,"content_block":{"type":"text","text":""}})
                 .to_string(),
         ),
+<<<<<<< fork
+        SseEvent::data(
+            json!({"type":"content_block_delta","index":0,"delta":{"type":"text_delta","text":text}})
+                .to_string(),
+        ),
+        SseEvent::data(json!({"type":"content_block_stop","index":0}).to_string()),
+        SseEvent::data(
+            json!({"type":"message_delta","delta":{"stop_reason":stop_reason},"usage":delta_usage})
+||||||| base
+        SseEvent::data(
+            json!({"type":"content_block_delta","index":0,"delta":{"type":"text_delta","text":text}})
+                .to_string(),
+        ),
+        SseEvent::data(json!({"type":"content_block_stop","index":0}).to_string()),
+        SseEvent::data(
+            json!({"type":"message_delta","delta":{"stop_reason":stop_reason},"usage":{"output_tokens":5,"input_tokens":10}})
+=======
     ];
 
     for chunk in chunks {
         events.push(SseEvent::data(
             json!({"type":"content_block_delta","index":0,"delta":{"type":"text_delta","text":chunk.as_ref()}})
+>>>>>>> upstream
                 .to_string(),
-<<<<<<< HEAD
-        ),
-        SseEvent::data(json!({"type":"content_block_stop","index":0}).to_string()),
-        SseEvent::data(
-            json!({"type":"message_delta","delta":{"stop_reason":stop_reason},"usage":delta_usage})
-                .to_string(),
-        ),
-        SseEvent::data(json!({"type":"message_stop"}).to_string()),
-    ]
-=======
         ));
     }
 
@@ -166,7 +180,6 @@ pub fn messages_api_script_chunks<S: AsRef<str>>(
     ));
     events.push(SseEvent::data(json!({"type":"message_stop"}).to_string()));
     events
->>>>>>> upstream/main
 }
 
 /// Messages API turn that streams a `thinking` block before the visible text block, so the sampler
@@ -452,7 +465,7 @@ pub(crate) fn responses_api_deltas(text: &str) -> Vec<String> {
     text.split_inclusive(' ').map(str::to_owned).collect()
 }
 
-<<<<<<< HEAD
+<<<<<<< fork
 // `deltas` and `text` deliberately disagree in echo mode: collapsed deltas, uncollapsed `response.completed` text
 // The shell depends on that mismatch, so do not unify them
 fn responses_api_script_from_deltas(
@@ -465,6 +478,10 @@ fn responses_api_script_from_deltas(
         ResponsesEnd::Completed => ("response.completed", "completed"),
         ResponsesEnd::Incomplete => ("response.incomplete", "incomplete"),
     };
+||||||| base
+// `deltas` and `text` deliberately disagree in echo mode: collapsed deltas, uncollapsed `response.completed` text
+// The shell depends on that mismatch, so do not unify them
+fn responses_api_script_from_deltas(deltas: &[String], text: &str, model: &str) -> Vec<SseEvent> {
 =======
 fn responses_api_script_from_deltas(deltas: &[String], text: &str, model: &str) -> Vec<SseEvent> {
     responses_api_script_from_deltas_with_usage(deltas, text, model, None)
@@ -488,7 +505,7 @@ pub(crate) fn responses_api_script_from_deltas_with_usage(
         },
         responses_usage_block,
     );
->>>>>>> upstream/main
+>>>>>>> upstream
     let mut events = Vec::new();
     let mut seq = 0;
 

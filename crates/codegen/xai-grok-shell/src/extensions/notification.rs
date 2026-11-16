@@ -1285,7 +1285,7 @@ pub enum SessionUpdate {
         #[serde(default, skip_serializing_if = "Option::is_none")]
         session_cost_usd_ticks: Option<i64>,
     },
-<<<<<<< HEAD
+<<<<<<< fork
     /// The model's live output rate while a response streams.
     /// Fire-and-forget, **never persisted**: it describes a stream that is
     /// happening now, and a replayed one would put a stale number. That
@@ -1302,11 +1302,12 @@ pub enum SessionUpdate {
     RequestQueued { ahead: u64, limit: u32 },
     /// The queued request got its slot and is on its way to the model.
     RequestDequeued { waited_ms: u64 },
+||||||| base
 =======
     /// Token counts for a whole turn, summed across every model call.
     /// The streaming-json `usage` line prints them. They are not one response, so the Messages reducer must not copy them onto an assistant message.
     TurnUsage { usage: ResponseUsage },
->>>>>>> upstream/main
+>>>>>>> upstream
     /// Catch-all for unrecognized session update types.
     /// Allows forward/backward compatibility when variants are added or removed.
     /// All fields from the unrecognized variant are discarded during deserialization.
@@ -1314,7 +1315,7 @@ pub enum SessionUpdate {
     Unknown,
 }
 
-<<<<<<< HEAD
+<<<<<<< fork
 /// The keys `SessionUpdate::SubagentSpawned.agent_address` is read under.
 pub(crate) const AGENT_ADDRESS_KEYS: xai_tool_types::Aliases =
     xai_tool_types::Aliases::new("agentAddress", &["agent_address"]);
@@ -1402,6 +1403,7 @@ where
         wire.workflow_run_id,
         agent_address,
     ))
+||||||| base
 =======
 impl SessionUpdate {
     /// Builds the `ModelChanged` update a model switch broadcasts to the session's clients.
@@ -1416,7 +1418,7 @@ impl SessionUpdate {
             context_window_selection,
         }
     }
->>>>>>> upstream/main
+>>>>>>> upstream
 }
 
 fn default_true() -> bool {

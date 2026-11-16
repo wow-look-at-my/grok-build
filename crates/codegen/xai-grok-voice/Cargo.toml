@@ -15,15 +15,7 @@ serde_json = { workspace = true }
 strum = { workspace = true }
 thiserror = { workspace = true }
 tokio = { workspace = true, features = ["sync", "time", "macros", "rt", "rt-multi-thread"] }
-<<<<<<< HEAD
-=======
 tokio-util = { workspace = true }
-# Either feature gates Connector::Rustls; both kept so the default connector stays OS-trusted.
-tokio-tungstenite = { workspace = true, features = [
-    "rustls-tls-native-roots",
-    "rustls-tls-webpki-roots",
-] }
->>>>>>> upstream/main
 toml = { workspace = true }
 tracing = { workspace = true }
 tracing-subscriber = { workspace = true }

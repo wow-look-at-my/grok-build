@@ -1,12 +1,14 @@
 //! Login, logout, account switching, and auth-code submission dispatchers.
 
-<<<<<<< HEAD
+<<<<<<< fork
 use agent_client_protocol as acp;
 
 use super::ctx::{restore_auth_return_view, show_welcome};
+||||||| base
+use super::ctx::{restore_auth_return_view, show_welcome};
 =======
 use super::ctx::{refuse_withheld, restore_auth_return_view, show_welcome};
->>>>>>> upstream/main
+>>>>>>> upstream
 use super::queue::{maybe_drain_queue, note_peek_page_flip};
 use super::router::dispatch;
 use super::session::lifecycle::{clear_startup_actions, drain_startup_actions};

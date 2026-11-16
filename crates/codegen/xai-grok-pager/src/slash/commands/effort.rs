@@ -2,12 +2,14 @@
 //!
 //! Thin wrapper over `Action::SwitchModel` with the session's current model id and the chosen effort (same wire path as `/model <name> <effort>`).
 
-<<<<<<< HEAD
+<<<<<<< fork
 use crate::acp::model_state::EffortTokenError;
+use crate::app::actions::Action;
+||||||| base
 use crate::app::actions::Action;
 =======
 use crate::app::actions::{Action, ModelChoice};
->>>>>>> upstream/main
+>>>>>>> upstream
 use crate::slash::command::{
     AppCtx, ArgItem, CommandExecCtx, CommandResult, SlashCommand, slash_meta,
 };

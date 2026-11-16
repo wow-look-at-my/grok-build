@@ -11,12 +11,13 @@ base64 = { workspace = true }
 blake3 = { workspace = true }
 chrono = { workspace = true, features = ["serde"] }
 dunce = { workspace = true }
-<<<<<<< HEAD
+<<<<<<< fork
 parking_lot = { workspace = true }
+||||||| base
 =======
 fs2 = { workspace = true }
 indexmap = { workspace = true }
->>>>>>> upstream/main
+>>>>>>> upstream
 # Shared signed deployment-config envelope contract with the cli-chat-proxy signer.
 prod-mc-cli-chat-proxy-types = { path = "../../../prod/mc/cli-chat-proxy-types" }
 ring = { workspace = true }

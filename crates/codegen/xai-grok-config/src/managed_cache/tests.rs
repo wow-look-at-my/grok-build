@@ -20,10 +20,19 @@ fn signed_verdict_overrides_marker_both_ways() {
     };
 
     // Signed says NOT compromised, so it proceeds, overriding the marker's tamper signal
-<<<<<<< HEAD
+<<<<<<< fork
     assert!(!managed_policy_compromised_decision(
         SignedVerdict::Trusted,
         || false,
+        Some(&cache),
+        home,
+        &team("team-007")
+    ));
+||||||| base
+    assert!(!managed_policy_compromised_decision(
+        SignedVerdict::Trusted,
+        || false,
+        false,
         Some(&cache),
         home,
         &team("team-007")
@@ -41,14 +50,14 @@ fn signed_verdict_overrides_marker_both_ways() {
         )
     );
 
->>>>>>> upstream/main
+>>>>>>> upstream
     // Signed says compromised, so it refuses, though this intact marker alone would pass
     let intact = ManagedConfigCache {
         principal: Some("team-007".into()),
         fail_closed: true,
         ..Default::default()
     };
-<<<<<<< HEAD
+<<<<<<< fork
     assert!(managed_policy_compromised_decision(
         SignedVerdict::Compromised,
         || false,
@@ -56,8 +65,15 @@ fn signed_verdict_overrides_marker_both_ways() {
         home,
         &team("team-007")
     ));
-}
-
+||||||| base
+    assert!(managed_policy_compromised_decision(
+        SignedVerdict::Compromised,
+        || false,
+        false,
+        Some(&intact),
+        home,
+        &team("team-007")
+    ));
 =======
     assert_eq!(
         Some(ManagedPolicyCompromise::SignatureInvalid),
@@ -70,8 +86,70 @@ fn signed_verdict_overrides_marker_both_ways() {
             &team("team-007")
         )
     );
+>>>>>>> upstream
 }
 
+<<<<<<< fork
+||||||| base
+/// `Trusted` must NOT short-circuit past the deploy-key fingerprint check (the signature can't attest the local key).
+/// A mismatch falls through to the marker decision, while `Compromised` refuses regardless of the fingerprint.
+#[test]
+fn signed_verdict_does_not_skip_deploy_key_fingerprint() {
+    use crate::signed_policy::SignedVerdict;
+    let dir = tempfile::tempdir().unwrap();
+    let home = dir.path();
+    // Marker recorded fingerprint "fp-cache"; the host is now configured with "fp-local".
+    let opted_in = ManagedConfigCache {
+        principal: Some("dep-1".into()),
+        key_fingerprint: Some("fp-cache".into()),
+        fail_closed: true,
+        ..Default::default()
+    };
+    // Trusted with a fingerprint mismatch forces the marker path, which refuses an opted-in cache
+    assert!(managed_policy_compromised_decision(
+        SignedVerdict::Trusted,
+        || false,
+        true, // deploy-key fingerprint mismatch
+        Some(&opted_in),
+        home,
+        &dkey("fp-local")
+    ));
+    // A matching fingerprint trusts the signed verdict as before.
+    assert!(!managed_policy_compromised_decision(
+        SignedVerdict::Trusted,
+        || false,
+        false,
+        Some(&opted_in),
+        home,
+        &dkey("fp-cache")
+    ));
+    // An opted-OUT deploy host with a key change is not refused; it never opted into fail-closed
+    let opted_out = ManagedConfigCache {
+        principal: Some("dep-1".into()),
+        key_fingerprint: Some("fp-cache".into()),
+        fail_closed: false,
+        ..Default::default()
+    };
+    assert!(!managed_policy_compromised_decision(
+        SignedVerdict::Trusted,
+        || false,
+        true,
+        Some(&opted_out),
+        home,
+        &dkey("fp-local")
+    ));
+    // Compromised refuses EVEN with a fingerprint mismatch; it never falls through to this opted-OUT marker
+    assert!(managed_policy_compromised_decision(
+        SignedVerdict::Compromised,
+        || false,
+        true,
+        Some(&opted_out),
+        home,
+        &dkey("fp-local")
+    ));
+}
+
+=======
 /// `Trusted` must NOT short-circuit past the deploy-key fingerprint check (the signature can't attest the local key).
 /// A mismatch falls through to the marker decision, while `Compromised` refuses regardless of the fingerprint.
 #[test]
@@ -177,7 +255,7 @@ fn signed_verdict_does_not_skip_deploy_key_fingerprint() {
     );
 }
 
->>>>>>> upstream/main
+>>>>>>> upstream
 /// A sidecar read BLIP is not absence: unlike NoAuthenticSidecar it never refuses on its own; the marker decision stands.
 #[test]
 fn unreadable_sidecar_falls_back_to_marker() {
@@ -206,10 +284,19 @@ fn unreadable_sidecar_falls_back_to_marker() {
 
     // Marker-grade tamper (served artifact missing on disk) still refuses.
     std::fs::remove_file(home.join("requirements.toml")).unwrap();
-<<<<<<< HEAD
+<<<<<<< fork
     assert!(managed_policy_compromised_decision(
         SignedVerdict::SidecarUnreadable,
         || false,
+        Some(&served_fail_closed),
+        home,
+        &team("team-007")
+    ));
+||||||| base
+    assert!(managed_policy_compromised_decision(
+        SignedVerdict::SidecarUnreadable,
+        || false,
+        false,
         Some(&served_fail_closed),
         home,
         &team("team-007")
@@ -226,7 +313,7 @@ fn unreadable_sidecar_falls_back_to_marker() {
             &team("team-007")
         )
     );
->>>>>>> upstream/main
+>>>>>>> upstream
 }
 
 /// NoAuthenticSidecar under a fail-closed marker that recorded served policy refuses.
@@ -263,10 +350,19 @@ fn missing_sidecar_under_fail_closed_marker_refuses() {
         fail_closed: true,
         ..Default::default()
     };
-<<<<<<< HEAD
+<<<<<<< fork
     assert!(!managed_policy_compromised_decision(
         SignedVerdict::NoAuthenticSidecar,
         || false,
+        Some(&served_nothing),
+        home,
+        &team("team-007")
+    ));
+||||||| base
+    assert!(!managed_policy_compromised_decision(
+        SignedVerdict::NoAuthenticSidecar,
+        || false,
+        false,
         Some(&served_nothing),
         home,
         &team("team-007")
@@ -284,7 +380,7 @@ fn missing_sidecar_under_fail_closed_marker_refuses() {
         )
     );
 
->>>>>>> upstream/main
+>>>>>>> upstream
     // Never opted in, so the marker decision stands
     let opted_out = ManagedConfigCache {
         principal: Some("team-007".into()),
@@ -292,7 +388,7 @@ fn missing_sidecar_under_fail_closed_marker_refuses() {
         fail_closed: false,
         ..Default::default()
     };
-<<<<<<< HEAD
+<<<<<<< fork
     assert!(!managed_policy_compromised_decision(
         SignedVerdict::NoAuthenticSidecar,
         || false,
@@ -300,13 +396,17 @@ fn missing_sidecar_under_fail_closed_marker_refuses() {
         home,
         &team("team-007")
     ));
-    // No marker at all means nothing to enforce
+||||||| base
     assert!(!managed_policy_compromised_decision(
         SignedVerdict::NoAuthenticSidecar,
         || false,
+        false,
+        Some(&opted_out),
+        home,
+        &team("team-007")
+    ));
 =======
     assert_eq!(
->>>>>>> upstream/main
         None,
         managed_policy_compromised_decision(
             SignedVerdict::NoAuthenticSidecar,
@@ -318,8 +418,20 @@ fn missing_sidecar_under_fail_closed_marker_refuses() {
         )
     );
 
+>>>>>>> upstream
     // No marker at all means nothing to enforce
+<<<<<<< fork
+    assert!(!managed_policy_compromised_decision(
+        SignedVerdict::NoAuthenticSidecar,
+        || false,
+||||||| base
+    assert!(!managed_policy_compromised_decision(
+        SignedVerdict::NoAuthenticSidecar,
+        || false,
+        false,
+=======
     assert_eq!(
+>>>>>>> upstream
         None,
         managed_policy_compromised_decision(
             SignedVerdict::NoAuthenticSidecar,
@@ -346,10 +458,19 @@ fn inactive_verdict_falls_through_to_marker() {
         fail_closed: true,
         ..Default::default()
     };
-<<<<<<< HEAD
+<<<<<<< fork
     assert!(managed_policy_compromised_decision(
         SignedVerdict::Inactive,
         || false,
+        Some(&missing),
+        home,
+        &team("team-007")
+    ));
+||||||| base
+    assert!(managed_policy_compromised_decision(
+        SignedVerdict::Inactive,
+        || false,
+        false,
         Some(&missing),
         home,
         &team("team-007")
@@ -367,7 +488,7 @@ fn inactive_verdict_falls_through_to_marker() {
         )
     );
 
->>>>>>> upstream/main
+>>>>>>> upstream
     // An opted-OUT marker never refuses, even with a missing artifact
     let optout = ManagedConfigCache {
         principal: Some("team-007".into()),
@@ -375,7 +496,7 @@ fn inactive_verdict_falls_through_to_marker() {
         fail_closed: false,
         ..Default::default()
     };
-<<<<<<< HEAD
+<<<<<<< fork
     assert!(!managed_policy_compromised_decision(
         SignedVerdict::Inactive,
         || false,
@@ -383,13 +504,17 @@ fn inactive_verdict_falls_through_to_marker() {
         home,
         &team("team-007")
     ));
-    // No marker at all means nothing to enforce
+||||||| base
     assert!(!managed_policy_compromised_decision(
         SignedVerdict::Inactive,
         || false,
+        false,
+        Some(&optout),
+        home,
+        &team("team-007")
+    ));
 =======
     assert_eq!(
->>>>>>> upstream/main
         None,
         managed_policy_compromised_decision(
             SignedVerdict::Inactive,
@@ -401,8 +526,20 @@ fn inactive_verdict_falls_through_to_marker() {
         )
     );
 
+>>>>>>> upstream
     // No marker at all means nothing to enforce
+<<<<<<< fork
+    assert!(!managed_policy_compromised_decision(
+        SignedVerdict::Inactive,
+        || false,
+||||||| base
+    assert!(!managed_policy_compromised_decision(
+        SignedVerdict::Inactive,
+        || false,
+        false,
+=======
     assert_eq!(
+>>>>>>> upstream
         None,
         managed_policy_compromised_decision(
             SignedVerdict::Inactive,
@@ -836,7 +973,7 @@ fn compromised_on_managed_config_deletion_when_fail_closed() {
     let cache = read_managed_config_cache(home);
 
     // With the file present, the marker decision is not compromised
-<<<<<<< HEAD
+<<<<<<< fork
     assert!(!managed_policy_compromised_decision(
         SignedVerdict::Inactive,
         || false,
@@ -844,11 +981,11 @@ fn compromised_on_managed_config_deletion_when_fail_closed() {
         home,
         &team("team-a")
     ));
-    // Served-then-deleted managed_config.toml is compromised by the missing artifact
-    std::fs::remove_file(home.join("managed_config.toml")).unwrap();
-    assert!(managed_policy_compromised_decision(
+||||||| base
+    assert!(!managed_policy_compromised_decision(
         SignedVerdict::Inactive,
         || false,
+        false,
         cache.as_ref(),
         home,
         &team("team-a")
@@ -866,8 +1003,27 @@ fn compromised_on_managed_config_deletion_when_fail_closed() {
         )
     );
 
+>>>>>>> upstream
     // Served-then-deleted managed_config.toml is compromised by the missing artifact
     std::fs::remove_file(home.join("managed_config.toml")).unwrap();
+<<<<<<< fork
+    assert!(managed_policy_compromised_decision(
+        SignedVerdict::Inactive,
+        || false,
+        cache.as_ref(),
+        home,
+        &team("team-a")
+    ));
+||||||| base
+    assert!(managed_policy_compromised_decision(
+        SignedVerdict::Inactive,
+        || false,
+        false,
+        cache.as_ref(),
+        home,
+        &team("team-a")
+    ));
+=======
     assert_eq!(
         Some(ManagedPolicyCompromise::PolicyFileMissing),
         managed_policy_compromised_decision(
@@ -880,18 +1036,78 @@ fn compromised_on_managed_config_deletion_when_fail_closed() {
         )
     );
 
->>>>>>> upstream/main
+>>>>>>> upstream
     // The armed public gate refuses fail-closed with no sidecar
     assert!(managed_policy_compromised_for_at(home, &team("team-a")).is_some());
 
     let _ = std::fs::remove_dir_all(&dir);
 }
 
+<<<<<<< fork
 /// Marker refuses only current-principal tamper, not pure identity mismatch.
+||||||| base
+/// Offline deploy-key switch on opted-in marker is compromised.
 #[test]
-<<<<<<< HEAD
-fn gate_excludes_pure_identity_mismatch_but_keeps_artifact_tamper() {
+fn compromised_on_deployment_key_switch_when_fail_closed() {
+    use crate::signed_policy::SignedVerdict;
+    let dir = std::env::temp_dir().join(format!("grok-compromised-dk-{}", std::process::id()));
+    let home = dir.as_path();
+    std::fs::create_dir_all(home).unwrap();
+
+    // Provisioned with key A (fp-a), opted into fail_closed, artifact present.
+    std::fs::write(home.join("requirements.toml"), "[features]\n").unwrap();
+    mark_managed_config_synced_at(
+        home,
+        SyncMarker {
+            principal: Some("dep-A"),
+            had_managed_config: false,
+            had_requirements: true,
+            key_fingerprint: Some("fp-a"),
+            fail_closed: true,
+        },
+    );
+    let cache = read_managed_config_cache(home);
+
+    // The same key offline allows (marker)
+    assert!(!managed_policy_compromised_decision(
+        SignedVerdict::Inactive,
+        || false,
+        false,
+        cache.as_ref(),
+        home,
+        &dkey("fp-a")
+    ));
+    // A different key offline refuses
+    assert!(managed_policy_compromised_decision(
+        SignedVerdict::Inactive,
+        || false,
+        true,
+        cache.as_ref(),
+        home,
+        &dkey("fp-b")
+    ));
+    // The armed public gate agrees
+    assert!(managed_policy_compromised_for_at(home, &dkey("fp-b")));
+
+    // fail_closed=false: a key switch is not refused
+    mark_managed_config_synced_at(
+        home,
+        SyncMarker {
+            principal: Some("dep-A"),
+            had_managed_config: false,
+            had_requirements: true,
+            key_fingerprint: Some("fp-a"),
+            fail_closed: false,
+        },
+    );
+    assert!(!managed_policy_compromised_for_at(home, &dkey("fp-b")));
+
+    let _ = std::fs::remove_dir_all(&dir);
+}
+
 =======
+/// Offline deploy-key switch on opted-in marker is compromised.
+#[test]
 fn compromised_on_deployment_key_switch_when_fail_closed() {
     use crate::signed_policy::SignedVerdict;
     let dir = std::env::temp_dir().join(format!("grok-compromised-dk-{}", std::process::id()));
@@ -957,9 +1173,9 @@ fn compromised_on_deployment_key_switch_when_fail_closed() {
     let _ = std::fs::remove_dir_all(&dir);
 }
 
+>>>>>>> upstream
 #[test]
-fn gate_excludes_pure_identity_mismatch_but_keeps_artifact_and_key_tamper() {
->>>>>>> upstream/main
+fn gate_excludes_pure_identity_mismatch_but_keeps_artifact_tamper() {
     use crate::signed_policy::SignedVerdict;
     let dir = std::env::temp_dir().join(format!("grok-gate-fix1-{}", std::process::id()));
     let home = dir.as_path();
@@ -1019,7 +1235,34 @@ fn gate_excludes_pure_identity_mismatch_but_keeps_artifact_and_key_tamper() {
     );
     assert!(managed_policy_compromised_for_at(home, &team("team-b")).is_some());
 
-<<<<<<< HEAD
+<<<<<<< fork
+||||||| base
+    // (3) A deploy-key fingerprint mismatch for the current key is still REFUSED
+    std::fs::write(home.join("requirements.toml"), "[features]\n").unwrap();
+    mark_managed_config_synced_at(
+        home,
+        SyncMarker {
+            principal: Some("dep-A"),
+            had_managed_config: false,
+            had_requirements: true,
+            key_fingerprint: Some("fp-a"),
+            fail_closed: true,
+        },
+    );
+    let cache = read_managed_config_cache(home);
+    assert!(
+        managed_policy_compromised_decision(
+            SignedVerdict::Inactive,
+            || false,
+            true,
+            cache.as_ref(),
+            home,
+            &dkey("fp-b")
+        ),
+        "a changed deployment-key fingerprint must fail closed offline"
+    );
+    assert!(managed_policy_compromised_for_at(home, &dkey("fp-b")));
+
 =======
     // (3) A deploy-key fingerprint mismatch for the current key is still REFUSED
     std::fs::write(home.join("requirements.toml"), "[features]\n").unwrap();
@@ -1048,7 +1291,7 @@ fn gate_excludes_pure_identity_mismatch_but_keeps_artifact_and_key_tamper() {
     );
     assert!(managed_policy_compromised_for_at(home, &dkey("fp-b")).is_some());
 
->>>>>>> upstream/main
+>>>>>>> upstream
     let _ = std::fs::remove_dir_all(&dir);
 }
 
@@ -1072,7 +1315,7 @@ fn mark_keeps_fail_closed_armed_without_on_disk_file() {
         },
     );
     let cache = read_managed_config_cache(home);
-<<<<<<< HEAD
+<<<<<<< fork
     assert!(!managed_policy_compromised_decision(
         SignedVerdict::Inactive,
         || false,
@@ -1080,17 +1323,15 @@ fn mark_keeps_fail_closed_armed_without_on_disk_file() {
         home,
         &team("team-1")
     ));
-
-    // Once the served file is deleted, the decision is compromised
-    std::fs::remove_file(home.join("requirements.toml")).unwrap();
-    assert!(managed_policy_compromised_decision(
+||||||| base
+    assert!(!managed_policy_compromised_decision(
         SignedVerdict::Inactive,
         || false,
+        false,
         cache.as_ref(),
         home,
         &team("team-1")
     ));
-    assert!(managed_policy_compromised_for_at(home, &team("team-1")));
 =======
     assert_eq!(
         None,
@@ -1103,9 +1344,30 @@ fn mark_keeps_fail_closed_armed_without_on_disk_file() {
             &team("team-1")
         )
     );
+>>>>>>> upstream
 
     // Once the served file is deleted, the decision is compromised
     std::fs::remove_file(home.join("requirements.toml")).unwrap();
+<<<<<<< fork
+    assert!(managed_policy_compromised_decision(
+        SignedVerdict::Inactive,
+        || false,
+        cache.as_ref(),
+        home,
+        &team("team-1")
+    ));
+    assert!(managed_policy_compromised_for_at(home, &team("team-1")));
+||||||| base
+    assert!(managed_policy_compromised_decision(
+        SignedVerdict::Inactive,
+        || false,
+        false,
+        cache.as_ref(),
+        home,
+        &team("team-1")
+    ));
+    assert!(managed_policy_compromised_for_at(home, &team("team-1")));
+=======
     assert_eq!(
         Some(ManagedPolicyCompromise::PolicyFileMissing),
         managed_policy_compromised_decision(
@@ -1118,7 +1380,7 @@ fn mark_keeps_fail_closed_armed_without_on_disk_file() {
         )
     );
     assert!(managed_policy_compromised_for_at(home, &team("team-1")).is_some());
->>>>>>> upstream/main
+>>>>>>> upstream
 
     // A no-write sync (file still absent) stays armed: opt-in is from the response.
     mark_managed_config_synced_at(

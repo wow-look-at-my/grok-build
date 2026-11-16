@@ -547,15 +547,10 @@ pub fn stream_messages<'a>(
             reasoning_effort: None,
         });
 
-<<<<<<< HEAD
         let mut items: Vec<ConversationItem> = assistant_reasoning
             .into_iter()
             .map(ConversationItem::Reasoning)
             .collect();
-=======
-        let mut items: Vec<ConversationItem> = Vec::new();
-        items.extend(assistant_reasoning.into_iter().map(ConversationItem::Reasoning));
->>>>>>> upstream/main
         items.push(assistant_item);
 
         let stream_end = Instant::now();

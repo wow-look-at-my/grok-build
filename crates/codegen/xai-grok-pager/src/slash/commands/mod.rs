@@ -53,11 +53,14 @@ pub mod remember;
 pub mod rename;
 pub mod resume;
 pub mod rewind;
-<<<<<<< HEAD
+<<<<<<< fork
+pub mod scroll_debug;
+||||||| base
+pub mod screen_mode_switch;
 pub mod scroll_debug;
 =======
 pub mod screen_mode_switch;
->>>>>>> upstream/main
+>>>>>>> upstream
 pub mod session_info;
 pub mod settings_cmd;
 pub mod share;
@@ -164,13 +167,17 @@ pub fn builtin_commands() -> Vec<Arc<dyn SlashCommand>> {
         Arc::new(exit::ExitCommand),
         // Hidden easter egg: never listed, runs on bare `/gboom`.
         Arc::new(gboom::GboomCommand),
-<<<<<<< HEAD
+<<<<<<< fork
         // Hidden diagnostic: never listed, toggles the scroll-debug HUD.
         Arc::new(scroll_debug::ScrollDebugCommand),
         // Self-debugging skill (and the overlay toggles it fronts).
+||||||| base
+        // Hidden diagnostic: never listed, toggles the scroll-debug HUD.
+        Arc::new(scroll_debug::ScrollDebugCommand),
+        // Debug toggles: always registered, listed only on debug binaries.
 =======
         // Debug toggles: always registered, listed only on debug binaries.
->>>>>>> upstream/main
+>>>>>>> upstream
         Arc::new(debug::DebugCommand),
     ]
 }

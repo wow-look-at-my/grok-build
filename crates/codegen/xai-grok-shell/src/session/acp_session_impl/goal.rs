@@ -1611,7 +1611,7 @@ impl SessionActor {
         Some(ctx)
     }
 
-<<<<<<< HEAD
+<<<<<<< fork
     /// The continuation next step read off the live todo list. A missing list gives the reason the goal is open.
     async fn goal_next_step_from_todos(&self) -> String {
         let todos = self.goal_todo_snapshot().await;
@@ -1647,8 +1647,25 @@ impl SessionActor {
         }
     }
 
+||||||| base
+    /// Preserves caller `/compact <text>` when folding in the goal pin.
+    pub(crate) fn merge_goal_compaction_user_context(
+        &self,
+        user_context: Option<String>,
+    ) -> Option<String> {
+        let Some(goal_ctx) = self.goal_compaction_user_context() else {
+            return user_context;
+        };
+        match user_context {
+            Some(existing) if !existing.trim().is_empty() => {
+                Some(format!("{existing}\n\n{goal_ctx}"))
+            }
+            _ => Some(goal_ctx),
+        }
+    }
+
 =======
->>>>>>> upstream/main
+>>>>>>> upstream
     /// Live GoalTracker snapshot for the post-compaction reminder.
     /// `None` when no goal exists or it already completed.
     /// Continuation-style (next step), not create-style `goal_rules`.

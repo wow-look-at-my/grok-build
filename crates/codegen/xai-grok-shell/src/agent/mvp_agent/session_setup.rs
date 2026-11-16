@@ -1745,10 +1745,12 @@ impl MvpAgent {
         initial_reasoning_effort: Option<ReasoningEffort>,
     ) {
         let session_id = session_id.clone();
-<<<<<<< HEAD
+<<<<<<< fork
         let persisted_model = summary.current_model_id.clone();
         // A persisted provider model is absent until its listing lands.
         self.models_manager.wait_for_provider_discovery().await;
+||||||| base
+        let persisted_model = summary.current_model_id.clone();
 =======
         let catalog_ready = summary.context_window.is_none()
             || self
@@ -1802,7 +1804,7 @@ impl MvpAgent {
         session_id: &acp::SessionId,
         persisted_model: acp::ModelId,
     ) -> acp::ModelId {
->>>>>>> upstream/main
+>>>>>>> upstream
         let models = self.models_manager.models();
         let available = self.models_manager.available();
         self.session_registry.take_unavailable_model(session_id);

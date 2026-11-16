@@ -461,13 +461,16 @@ pub async fn serve_with(
                     "failed to restrict diagnostics socket permissions"
                 );
             }
-<<<<<<< HEAD
+<<<<<<< fork
             let task = xai_spawn::spawn(async move {
+                if let Err(e) = axum::serve(listener, router(ctx)).await {
+||||||| base
+            let task = tokio::spawn(async move {
                 if let Err(e) = axum::serve(listener, router(ctx)).await {
 =======
             let task = tokio::spawn(async move {
                 if let Err(e) = axum::serve(listener, app).await {
->>>>>>> upstream/main
+>>>>>>> upstream
                     tracing::warn!(error = %e, "diagnostics server exited");
                 }
             });
@@ -482,13 +485,16 @@ pub async fn serve_with(
                 .await
                 .map_err(|e| anyhow!("bind 127.0.0.1:{port}: {e}"))?;
             let local = listener.local_addr()?;
-<<<<<<< HEAD
+<<<<<<< fork
             let task = xai_spawn::spawn(async move {
+                if let Err(e) = axum::serve(listener, router(ctx)).await {
+||||||| base
+            let task = tokio::spawn(async move {
                 if let Err(e) = axum::serve(listener, router(ctx)).await {
 =======
             let task = tokio::spawn(async move {
                 if let Err(e) = axum::serve(listener, app).await {
->>>>>>> upstream/main
+>>>>>>> upstream
                     tracing::warn!(error = %e, "diagnostics server exited");
                 }
             });

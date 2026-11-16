@@ -25,7 +25,7 @@ pub enum MemoryMode {
     V2,
 }
 
-<<<<<<< HEAD
+<<<<<<< fork
 /// Session-pinned memory-v2 rollout stage.
 #[derive(
     Debug, Clone, Copy, Default, PartialEq, Eq, Serialize, Deserialize, schemars::JsonSchema,
@@ -83,8 +83,64 @@ impl MemoryV2Rollout {
     }
 }
 
+||||||| base
+/// Session-pinned memory-v2 rollout stage.
+#[derive(Debug, Clone, Copy, Default, PartialEq, Eq, Serialize, Deserialize)]
+#[serde(rename_all = "snake_case")]
+pub enum MemoryV2Rollout {
+    /// Disable every v2 read, capture, Dream, and write path.
+    Off,
+    /// Persist extracted observations without exposing them in manifests or Dream.
+    RecordOnly,
+    /// Evaluate capture and Dream plans without committing curated topic changes.
+    Shadow,
+    /// Enable the complete v2 pipeline.
+    #[default]
+    Active,
+}
+
+impl MemoryV2Rollout {
+    /// xai-codegen-lint: allow(manual_strum)
+    pub fn as_str(self) -> &'static str {
+        match self {
+            Self::Off => "off",
+            Self::RecordOnly => "record_only",
+            Self::Shadow => "shadow",
+            Self::Active => "active",
+        }
+    }
+
+    pub fn allows_capture(self) -> bool {
+        self != Self::Off
+    }
+
+    pub fn exposes_memory(self) -> bool {
+        self == Self::Active
+    }
+
+    pub fn commits_topics(self) -> bool {
+        self == Self::Active
+    }
+
+    fn restrict(self, other: Self) -> Self {
+        fn rank(value: MemoryV2Rollout) -> u8 {
+            match value {
+                MemoryV2Rollout::Off => 0,
+                MemoryV2Rollout::RecordOnly => 1,
+                MemoryV2Rollout::Shadow => 2,
+                MemoryV2Rollout::Active => 3,
+            }
+        }
+        if rank(self) <= rank(other) {
+            self
+        } else {
+            other
+        }
+    }
+}
+
 =======
->>>>>>> upstream/main
+>>>>>>> upstream
 impl MemoryMode {
     pub fn is_legacy(self) -> bool {
         self == Self::Legacy
@@ -110,7 +166,7 @@ pub struct MemorySettings {
     pub dream: Option<MemoryDreamSettings>,
 }
 
-<<<<<<< HEAD
+<<<<<<< fork
 /// Raw top-level `[memory_v2]` enablement, rollout, kill-switch, and retention
 /// settings.
 #[derive(Debug, Clone, Default, PartialEq, Serialize, Deserialize, schemars::JsonSchema)]
@@ -131,8 +187,29 @@ pub struct MemoryV2Settings {
     pub job_retention_days: Option<u64>,
 }
 
+||||||| base
+/// Raw top-level `[memory_v2]` enablement, rollout, kill-switch, and retention
+/// settings.
+#[derive(Debug, Clone, Default, PartialEq, Serialize, Deserialize)]
+#[serde(default)]
+pub struct MemoryV2Settings {
+    /// Primary opt-in for the memory-v2 implementation. Absent or false falls
+    /// through to legacy memory enablement.
+    pub enabled: Option<bool>,
+    /// Emit capture lifecycle notifications to the user interface. Intended
+    /// only for debugging; telemetry and tracing are always recorded.
+    pub capture_status_enabled: Option<bool>,
+    pub rollout: Option<MemoryV2Rollout>,
+    pub capture_enabled: Option<bool>,
+    pub automatic_dream_enabled: Option<bool>,
+    pub manual_dream_enabled: Option<bool>,
+    pub file_writes_enabled: Option<bool>,
+    pub archived_retention_days: Option<u64>,
+    pub job_retention_days: Option<u64>,
+}
+
 =======
->>>>>>> upstream/main
+>>>>>>> upstream
 /// Concrete memory-v2 controls pinned when a session is spawned.
 #[derive(Debug, Clone, Copy, PartialEq, Eq, Deserialize)]
 #[serde(default)]

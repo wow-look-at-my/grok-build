@@ -50,11 +50,8 @@ pub mod registry;
 
 pub mod reminders;
 pub mod retry;
-<<<<<<< HEAD
-pub mod session_output_dirs;
-=======
 pub mod sandbox_launch;
->>>>>>> upstream/main
+pub mod session_output_dirs;
 pub mod tool_taxonomy;
 pub mod types;
 pub mod util;

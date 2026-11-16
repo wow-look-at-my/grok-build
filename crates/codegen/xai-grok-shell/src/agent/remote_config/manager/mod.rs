@@ -9,16 +9,21 @@ use parking_lot::RwLock;
 use agent_client_protocol as acp;
 
 use super::{
-<<<<<<< HEAD
+<<<<<<< fork
     HttpModelsEndpoint, ModelFetchAuth, ModelsCacheManager, ModelsCacheScope, ModelsEndpoint,
     allowlist_matches_nothing, available_models, is_campaign_only_flip, merge_additive_catalog,
     resolve_catalog_key, resolve_default_model, resolve_model_catalog, resolve_route_catalog_key,
+||||||| base
+    HttpModelsEndpoint, ModelFetchAuth, ModelsCacheManager, ModelsCacheScope, ModelsEndpoint,
+    allowlist_matches_nothing, available_models, is_campaign_only_flip, resolve_catalog_key,
+    resolve_default_model, resolve_model_catalog, task_model_error_for_catalog,
+    validate_selectable,
 =======
     CatalogSource, HttpModelsEndpoint, ModelFetchAuth, ModelsCacheManager, ModelsCacheScope,
     ModelsEndpoint, allowlist_excludes_all_message, allowlist_matches_nothing, available_models,
     fallback_model_id, is_campaign_only_flip, models_endpoint_empty_message, models_fetch_enabled,
     resolve_catalog_key, resolve_default_model, resolve_model_catalog, resolve_models_cache_scope,
->>>>>>> upstream/main
+>>>>>>> upstream
     task_model_error_for_catalog, validate_selectable,
 };
 use crate::agent::config::{self, ModelEntry, resolve_credentials, sampling_config_for_model};
@@ -524,7 +529,7 @@ impl ModelsManager {
         self.inner.catalog.write().models.insert(id.into(), entry);
     }
 
-<<<<<<< HEAD
+<<<<<<< fork
     /// Replace the models autodetected from the `[model_providers.*]` listings
     /// and notify every connected model selector. The xAI catalog is untouched,
     /// so a provider's listing expands the picker rather than replacing it.
@@ -588,6 +593,7 @@ impl ModelsManager {
         let prefetched = self.inner.catalog.read().prefetched.clone();
         self.rebuild(&cfg, prefetched);
         self.notify_models_updated();
+||||||| base
 =======
     #[cfg(test)]
     pub(crate) fn settle_first_catalog_for_tests(&self, ready: bool) {
@@ -596,7 +602,7 @@ impl ModelsManager {
         } else {
             CatalogProgress::Failed
         });
->>>>>>> upstream/main
+>>>>>>> upstream
     }
 
     pub(crate) fn current_reasoning_effort(&self) -> Option<ReasoningEffort> {
@@ -615,7 +621,7 @@ impl ModelsManager {
         models.get(key.0.as_ref()).map(f)
     }
 
-<<<<<<< HEAD
+<<<<<<< fork
     /// The catalog key of the entry a session sends to. See
     /// [`resolve_route_catalog_key`].
     pub(crate) fn route_catalog_key(&self, model: &str, base_url: &str) -> Option<acp::ModelId> {
@@ -647,6 +653,7 @@ impl ModelsManager {
     ) -> Option<std::num::NonZeroU64> {
         self.route_context_window(model, base_url)
             .and_then(|(cw, pinned)| pinned.then_some(cw))
+||||||| base
 =======
     /// Whether `model_id` is served by the same endpoint, backend, and session auth as a config already built for another model.
     /// Only then can a request swap in `model_id` without rebuilding the client.
@@ -666,7 +673,7 @@ impl ModelsManager {
                         .is_some_and(|u| u.trim_end_matches('/') == base_url))
         })
         .unwrap_or(false)
->>>>>>> upstream/main
+>>>>>>> upstream
     }
 
     pub(crate) fn model_supports_reasoning_effort(&self, model_id: &str) -> bool {
@@ -1179,7 +1186,7 @@ impl ModelsManager {
         let current_model = match all_models.get(current_model_id.0.as_ref()) {
             Some(m) => m,
             None => {
-<<<<<<< HEAD
+<<<<<<< fork
                 // Never swap in another model: its URL is one the user did not pick.
                 tracing::error!(
                     model = %current_model_id.0,
@@ -1187,13 +1194,18 @@ impl ModelsManager {
                 );
                 missing = ModelEntry::unreachable(current_model_id.0.as_ref());
                 &missing
+||||||| base
+                tracing::warn!("no models available in catalog; defaulting to bundled model");
+                let default_id = crate::models::default_model().to_string();
+                fallback = ModelEntry::fallback(&default_id, &config.endpoints);
+                &fallback
 =======
                 let current = Some(current_model_id.0.as_ref()).filter(|id| !id.is_empty());
                 let default_id = fallback_model_id(&config, current);
                 tracing::warn!(model = %default_id, "no models available in catalog; using the fallback model id");
                 fallback = ModelEntry::fallback(&default_id, &config.endpoints);
                 &fallback
->>>>>>> upstream/main
+>>>>>>> upstream
             }
         };
 
@@ -1206,12 +1218,16 @@ impl ModelsManager {
             credentials,
             config.endpoints.alpha_test_key.clone(),
             config.client_version.clone(),
-<<<<<<< HEAD
+<<<<<<< fork
+||||||| base
+            crate::managed_config::resolve_deployment_id(
+                config.endpoints.deployment_key.as_deref(),
+            ),
 =======
             xai_grok_cloud_config::managed_config::resolve_deployment_id(
                 config.endpoints.deployment_key.as_deref(),
             ),
->>>>>>> upstream/main
+>>>>>>> upstream
             None,
         )
     }
@@ -1473,11 +1489,13 @@ impl ModelsManager {
         self.inner.catalog.read().allowlist_excludes_all
     }
 
-<<<<<<< HEAD
+<<<<<<< fork
     /// Re-pick the default when the current model is gone or unselectable;
     /// auth visibility never evicts an explicit user pick. Keeps the picker
     /// and sampler aligned when an additive provider is the only signed-in
     /// provider.
+||||||| base
+    /// Re-pick the default when the current model is gone or unselectable; auth visibility never evicts an explicit user pick.
 =======
     /// The message that stops a prompt because no model can serve it, or `None`.
     pub(crate) async fn prompt_block_message(&self) -> Option<String> {
@@ -1510,7 +1528,7 @@ impl ModelsManager {
     }
 
     /// Re-pick the default when the current model is gone or unselectable; auth visibility never evicts an explicit user pick.
->>>>>>> upstream/main
+>>>>>>> upstream
     fn reselect_current_model_if_missing(&self, config: &config::Config) {
         let current = self.inner.current_model_id.read().clone();
         let user_selected = self.inner.user_selected_model.load(Ordering::Relaxed);

@@ -31,17 +31,25 @@ pub(crate) struct AllSessionOverviewResponse {
 // ── Compaction ──────────────────────────────────────────────────────────
 
 #[derive(Debug, serde::Serialize, serde::Deserialize)]
-<<<<<<< HEAD
+<<<<<<< fork
 #[serde(try_from = "CompactConversationRequestWire")]
 pub(crate) struct CompactConversationRequest {
-    pub session_id: String,
-    #[serde(default)]
-    pub user_context: Option<String>,
+||||||| base
+pub(crate) struct CompactConversationRequest {
+    #[serde(alias = "sessionId")]
 =======
 pub struct CompactConversationRequest {
     #[serde(alias = "sessionId")]
+>>>>>>> upstream
     pub session_id: String,
->>>>>>> upstream/main
+<<<<<<< fork
+    #[serde(default)]
+    pub user_context: Option<String>,
+||||||| base
+    #[serde(default, alias = "userContext")]
+    pub user_context: Option<String>,
+=======
+>>>>>>> upstream
 }
 
 impl CompactConversationRequest {

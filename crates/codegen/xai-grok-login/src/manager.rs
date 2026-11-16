@@ -305,12 +305,16 @@ impl ScopeRemoval {
     }
 }
 impl AuthManager {
-<<<<<<< HEAD
+<<<<<<< fork
     /// Public default cli-chat-proxy base URL, mirroring `agent::config::CLI_CHAT_PROXY_BASE_URL_DEFAULT`.
     #[cfg(any(test, feature = "test-support"))]
     const DEFAULT_PROXY_BASE_URL: &str = "https://cli-chat-proxy.grok.invalid/v1";
+||||||| base
+    /// Public default cli-chat-proxy base URL, mirroring `agent::config::CLI_CHAT_PROXY_BASE_URL_DEFAULT`.
+    #[cfg(any(test, feature = "test-support"))]
+    const DEFAULT_PROXY_BASE_URL: &str = "https://cli-chat-proxy.grok.com/v1";
 =======
->>>>>>> upstream/main
+>>>>>>> upstream
     /// Test/support-only convenience against the public default proxy. Production callers resolve the
     /// configured proxy and pass it via [`Self::new_with_proxy_base_url`], so this boundary never
     /// silently sends enrichment to the public host.
@@ -452,17 +456,18 @@ impl AuthManager {
         proxy_base_url: String,
         disk_state: Option<DiskAuthState>,
     ) -> Self {
-<<<<<<< HEAD
+<<<<<<< fork
         // An inline `GROK_AUTH` token never passes `lookup_auth`.
         if let Some(auth) = inner.as_ref() {
             auth.register_session();
         }
+||||||| base
 =======
         let (login_changes, _) = tokio::sync::watch::channel(LoginSnapshot {
             login: Login::of(Self::served_login(&grok_com_config, &inner)),
             generation: 0,
         });
->>>>>>> upstream/main
+>>>>>>> upstream
         Self {
             inner: RwLock::new(inner),
             path,
@@ -704,12 +709,14 @@ impl AuthManager {
     pub(crate) fn with_inner_write<R>(&self, f: impl FnOnce(&mut Option<GrokAuth>) -> R) -> R {
         let fingerprint = |auth: &GrokAuth| auth.key.clone();
         let mut guard = self.inner.write();
-<<<<<<< HEAD
+<<<<<<< fork
         let out = f(&mut guard);
         if let Some(auth) = guard.as_ref() {
             auth.register_session();
         }
         out
+||||||| base
+        f(&mut guard)
 =======
         let before = Self::served_login(&self.grok_com_config, &guard).map(fingerprint);
         let result = f(&mut guard);
@@ -726,7 +733,7 @@ impl AuthManager {
             Self::publish_login_if_newer(&self.login_changes, snapshot);
         }
         result
->>>>>>> upstream/main
+>>>>>>> upstream
     }
     /// Closure-scoped read counterpart to [`Self::with_inner_write`].
     #[inline]

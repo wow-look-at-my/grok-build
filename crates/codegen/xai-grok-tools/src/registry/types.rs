@@ -1348,14 +1348,15 @@ impl ToolRegistryBuilder {
                 );
                 (Some(scheduler_cmd_rx), Some(cancel_token))
             };
-<<<<<<< HEAD
+<<<<<<< fork
         // Installed before the scheduler actor below can hold the shared lock.
         if !truncation_config.per_tool_max_output_bytes.is_empty() {
             resources.insert(crate::types::resources::TruncationCfg(truncation_config));
         }
+||||||| base
 =======
         resources.insert(crate::types::resources::TruncationCfg(truncation_config));
->>>>>>> upstream/main
+>>>>>>> upstream
         let shared_resources = resources.into_shared();
         if let (Some(cmd_rx), Some(cancel_token)) = (scheduler_cmd_rx, &scheduler_cancel_token) {
             let actor = crate::implementations::grok_build::scheduler::actor::SchedulerActor {
@@ -4460,7 +4461,7 @@ mod tests {
             desc_of("run_terminal_cmd").contains("`block_until_ms`"),
             "bash description must resolve params.execute.block_until_ms"
         );
-<<<<<<< HEAD
+<<<<<<< fork
         let desc = desc_of("get_task_output");
         assert!(
             desc.contains("is_background"),
@@ -4489,6 +4490,35 @@ mod tests {
             .filter(|id| id.rsplit(':').next() == Some("wait_tasks"))
             .collect();
         assert!(wait.is_empty(), "a wait tool is registered: {wait:?}");
+||||||| base
+        for name in ["get_task_output", "wait_tasks"] {
+            let desc = desc_of(name);
+            assert!(
+                desc.contains("is_background"),
+                "`{name}` description must resolve params.execute.is_background"
+            );
+            assert!(
+                desc.contains("run_in_background"),
+                "`{name}` description must resolve params.task.run_in_background"
+            );
+            let timeout = defs
+                .iter()
+                .find(|d| d.function.name == name)
+                .and_then(|d| d.function.parameters.pointer("/properties/timeout_ms"))
+                .unwrap_or_else(|| panic!("`{name}` should expose timeout_ms"));
+            assert!(
+                timeout.get("maximum").is_some(),
+                "`{name}`.timeout_ms must carry the resolved wait ceiling: {timeout}"
+            );
+            assert!(
+                !timeout
+                    .get("description")
+                    .and_then(|v| v.as_str())
+                    .unwrap_or("")
+                    .contains("{max_"),
+                "`{name}`.timeout_ms has an unresolved placeholder: {timeout}"
+            );
+        }
 =======
         for name in ["get_task_output", "wait_tasks"] {
             let desc = desc_of(name);
@@ -4522,7 +4552,7 @@ mod tests {
                 "`{name}`.timeout_ms has an unresolved placeholder: {timeout}"
             );
         }
->>>>>>> upstream/main
+>>>>>>> upstream
     }
     /// With bash at `pre-block-until-ms`, the task tools still say `is_background=true`.
     #[tokio::test]

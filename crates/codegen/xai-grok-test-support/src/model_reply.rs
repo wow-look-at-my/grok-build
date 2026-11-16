@@ -15,17 +15,21 @@ use crate::sse::{
     responses_api_script_from_deltas_with_usage,
 };
 use crate::tool_call_turn::{
-<<<<<<< HEAD
+<<<<<<< fork
     ToolCallTurn, chat_completion_narrated_tool_call_events, chat_completion_tool_call_events,
     content_filter_events, cut_reply_events, looping_reply_events,
     messages_api_narrated_tool_use_events, messages_api_tool_use_events,
     responses_api_tool_call_events, stream_error_events,
+||||||| base
+    ToolCallTurn, chat_completion_tool_call_events, content_filter_events, cut_reply_events,
+    looping_reply_events, messages_api_tool_use_events, responses_api_tool_call_events,
+    stream_error_events,
 =======
     ToolCallTurn, TurnCall, chat_completion_tool_calls_events, content_filter_events,
     cut_reply_events, looping_reply_events, messages_api_tool_uses_events,
     responses_api_tool_call_events, responses_api_tool_calls_events, stream_error_events,
     truncated_reply_events,
->>>>>>> upstream/main
+>>>>>>> upstream
 };
 use crate::tools::PickedToolCall;
 
@@ -35,7 +39,7 @@ pub(crate) enum ModelReply {
         call_id: String,
         call: PickedToolCall,
     },
-<<<<<<< HEAD
+<<<<<<< fork
     /// A tool call the model writes text ahead of, in the same response.
     NarratedToolCall {
         narration: String,
@@ -45,13 +49,16 @@ pub(crate) enum ModelReply {
     },
     Text(String),
     /// A reasoning stream ahead of the visible answer, so the client sees a thought before the reply.
+||||||| base
+    Text(String),
+    /// A reasoning stream ahead of the visible answer, so the client sees a thought before the reply.
 =======
     ToolCalls(Vec<(String, PickedToolCall)>),
     Text {
         text: String,
         usage: Option<UsageReport>,
     },
->>>>>>> upstream/main
+>>>>>>> upstream
     ReasoningReply {
         reasoning: String,
         text: String,
@@ -155,7 +162,7 @@ impl ModelReply {
             ModelReply::Events(events) => {
                 ScriptedResponse::sse(render_model_events(&events, endpoint, model))
             }
-<<<<<<< HEAD
+<<<<<<< fork
             ModelReply::NarratedToolCall {
                 narration,
                 reasoning,
@@ -203,9 +210,26 @@ impl ModelReply {
                     messages_api_script_with_reasoning(&reasoning, &text, model, "end_turn")
                 }
             },
+||||||| base
+            ModelReply::Text(text) => match endpoint {
+                InferenceEndpoint::ChatCompletions => chat_completion_script_exact(&text, model),
+                InferenceEndpoint::Responses => responses_api_script_exact(&text, model),
+                InferenceEndpoint::Messages => messages_api_script(&text, model, "end_turn"),
+            },
+            ModelReply::ReasoningReply { reasoning, text } => match endpoint {
+                InferenceEndpoint::ChatCompletions => {
+                    chat_completion_script_with_reasoning(&reasoning, &text, model)
+                }
+                InferenceEndpoint::Responses => {
+                    responses_api_reasoning_and_text_events(&reasoning, &text, model)
+                }
+                InferenceEndpoint::Messages => {
+                    messages_api_script_with_reasoning(&reasoning, &text, model, "end_turn")
+                }
+            },
 =======
             ModelReply::Scripted(parts) => finish_parts(endpoint, model, parts, true),
->>>>>>> upstream/main
+>>>>>>> upstream
             ModelReply::LoopingReply { reported } => {
                 ScriptedResponse::sse(looping_reply_events(endpoint, model, reported))
             }

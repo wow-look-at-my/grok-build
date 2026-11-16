@@ -206,8 +206,67 @@ pub fn set_follow_up_behavior(value: FollowUpBehavior) {
     FOLLOW_UP_BEHAVIOR_LOADED.with(|l| l.set(true));
 }
 
-<<<<<<< HEAD
+<<<<<<< fork
 // -- Show thinking blocks ----------------------------------------------------
+||||||| base
+// -- Simple mode --------------------------------------------------------------
+
+thread_local! {
+    static SIMPLE_MODE_CURRENT: Cell<bool> = const { Cell::new(SIMPLE_MODE_DEFAULT) };
+    static SIMPLE_MODE_LOADED: Cell<bool> = const { Cell::new(false) };
+}
+
+pub fn load_simple_mode() -> bool {
+    SIMPLE_MODE_LOADED.with(|loaded| {
+        if !loaded.get() {
+            SIMPLE_MODE_CURRENT.with(|c| {
+                c.set(load_bool_from_effective_config(
+                    "simple_mode",
+                    SIMPLE_MODE_DEFAULT,
+                ))
+            });
+            loaded.set(true);
+        }
+    });
+    SIMPLE_MODE_CURRENT.with(|c| c.get())
+}
+
+pub fn set_simple_mode(enabled: bool) {
+    SIMPLE_MODE_CURRENT.with(|c| c.set(enabled));
+    SIMPLE_MODE_LOADED.with(|l| l.set(true));
+}
+
+// -- Vim mode (scrollback) ---------------------------------------------------
+
+thread_local! {
+    static VIM_MODE_CURRENT: Cell<bool> = const { Cell::new(VIM_MODE_DEFAULT) };
+    static VIM_MODE_LOADED: Cell<bool> = const { Cell::new(false) };
+}
+
+/// Ephemeral process-wide source of truth; no Effect writes it back. First read seeds from `[ui].vim_mode`.
+pub fn load_vim_mode() -> bool {
+    VIM_MODE_LOADED.with(|loaded| {
+        if !loaded.get() {
+            VIM_MODE_CURRENT.with(|c| {
+                c.set(load_bool_from_effective_config(
+                    "vim_mode",
+                    VIM_MODE_DEFAULT,
+                ))
+            });
+            loaded.set(true);
+        }
+    });
+    VIM_MODE_CURRENT.with(|c| c.get())
+}
+
+/// Replace cached `vim_mode`.
+pub fn set_vim_mode(enabled: bool) {
+    VIM_MODE_CURRENT.with(|c| c.set(enabled));
+    VIM_MODE_LOADED.with(|l| l.set(true));
+}
+
+// -- Show thinking blocks ----------------------------------------------------
+
 =======
 thread_local! {
     static SIMPLE_MODE_CURRENT: Cell<bool> = const { Cell::new(SIMPLE_MODE_DEFAULT) };
@@ -260,7 +319,7 @@ pub fn set_vim_mode(enabled: bool) {
     VIM_MODE_CURRENT.with(|c| c.set(enabled));
     VIM_MODE_LOADED.with(|l| l.set(true));
 }
->>>>>>> upstream/main
+>>>>>>> upstream
 
 thread_local! {
     static SHOW_THINKING_BLOCKS_CURRENT: Cell<bool> =
@@ -976,10 +1035,12 @@ mod tests {
                 "show_thinking_blocks must NOT toggle when timestamps changed"
             );
 
-<<<<<<< HEAD
+<<<<<<< fork
             // ── show_thinking_blocks independent ──
+||||||| base
+            // ── simple_mode independent ──
 =======
->>>>>>> upstream/main
+>>>>>>> upstream
             set(true);
             set_timestamps(true);
             set_show_thinking_blocks(false);

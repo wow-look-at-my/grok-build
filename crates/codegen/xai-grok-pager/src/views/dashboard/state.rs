@@ -4383,10 +4383,77 @@ pub fn write_persisted_to_path(
             );
             Ok(())
         }
+<<<<<<< fork
         other => other,
+||||||| base
+    };
+    let dash = doc.entry("dashboard").or_insert(toml_edit::table());
+    let Some(t) = dash.as_table_mut() else {
+        return Ok(());
+    };
+    t.insert("enabled", toml_edit::value(p.enabled));
+    t.insert(
+        "grouping",
+        toml_edit::value(match p.grouping {
+            Grouping::State => "state",
+            Grouping::Directory => "directory",
+        }),
+    );
+    let mut pin_arr = toml_edit::Array::new();
+    for id in &p.pinned {
+        pin_arr.push(id.to_key());
     }
-<<<<<<< HEAD
+    t.insert("pinned", toml_edit::value(pin_arr));
+    let mut reorder_arr = toml_edit::Array::new();
+    for id in &p.reorder {
+        reorder_arr.push(id.to_key());
+    }
+    t.insert("reorder", toml_edit::value(reorder_arr));
+    // The onboarding hint was removed; drop the stale table so old configs don't carry a dead `[dashboard.onboarding]` key forever
+    t.remove("onboarding");
+    atomic_write(path, doc.to_string().as_bytes())
+}
+
+/// Atomic write via `<path>.dashboard.tmp.<pid>` then `rename`. Concurrent readers see either the
+/// old file or the new file, never a partial truncated copy that would parse as `None` and trigger
+/// the catastrophic clobber on the next writer.
+fn atomic_write(path: &std::path::Path, bytes: &[u8]) -> std::io::Result<()> {
+    use std::io::Write;
+    let pid = std::process::id();
+    let tmp = path.with_extension(format!("toml.dashboard.tmp.{pid}"));
+    {
+        let mut f = std::fs::File::create(&tmp)?;
+        f.write_all(bytes)?;
+        // Ensure the bytes are physically on disk before the rename.
+        // Without this, the rename can complete and the file system can later observe the renamed inode pointing at zeroed data
+        f.sync_all()?;
+    }
+    std::fs::rename(&tmp, path)?;
+    // Parent directory fsync (defense in depth on unusual filesystems / network mounts)
+    if let Some(parent) = path.parent()
+        && let Ok(dir) = std::fs::File::open(parent)
+    {
+        // sync_all on a directory is allowed on Unix and is a no-op on platforms that don't support it
+        // Swallow errors: the rename succeeded, and the durability question is moot if the OS won't fsync the directory
+        let _ = dir.sync_all();
 =======
+    };
+    let dash = doc.entry("dashboard").or_insert(toml_edit::table());
+    let Some(t) = dash.as_table_mut() else {
+        return Ok(());
+    };
+    t.insert("enabled", toml_edit::value(p.enabled));
+    t.insert(
+        "grouping",
+        toml_edit::value(match p.grouping {
+            Grouping::State => "state",
+            Grouping::Directory => "directory",
+        }),
+    );
+    let mut pin_arr = toml_edit::Array::new();
+    for id in &p.pinned {
+        pin_arr.push(id.to_key());
+    }
     t.insert("pinned", toml_edit::value(pin_arr));
     let mut reorder_arr = toml_edit::Array::new();
     for id in &p.reorder {
@@ -4410,9 +4477,8 @@ fn atomic_write(path: &std::path::Path, contents: &str) -> std::io::Result<()> {
         // sync_all on a directory is allowed on Unix and is a no-op on platforms that don't support it
         // Swallow errors: the rename succeeded, and the durability question is moot if the OS won't fsync the directory
         let _ = dir.sync_all();
+>>>>>>> upstream
     }
-    Ok(())
->>>>>>> upstream/main
 }
 
 fn config_path() -> Option<PathBuf> {

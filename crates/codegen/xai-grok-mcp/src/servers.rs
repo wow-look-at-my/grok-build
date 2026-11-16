@@ -2163,13 +2163,8 @@ impl Drop for CancelOnDrop {
             );
             return;
         };
-<<<<<<< HEAD
-        let peer = self.peer.clone();
-        xai_spawn::spawn_on(&runtime, async move {
-=======
         let service = self.service.clone();
-        runtime.spawn(async move {
->>>>>>> upstream/main
+        xai_spawn::spawn_on(&runtime, async move {
             let params = rmcp::model::CancelledNotificationParam::new(
                 Some(request_id.clone()),
                 Some("client cancelled".to_owned()),
@@ -4214,11 +4209,21 @@ impl McpClient {
         config: &HttpConfig,
         server_name: &str,
         warn_budget: crate::mcp_http_client::WarnBudget,
-<<<<<<< HEAD
+<<<<<<< fork
     ) -> Result<
         crate::mcp_http_client::McpHttpClient<crate::net_http_client::NetHttpClient>,
         McpError,
     > {
+        let mut headers = parse_config_headers(
+            server_name,
+            "transport",
+            config
+                .headers
+                .iter()
+                .map(|(key, value)| (key.as_str(), value.as_str())),
+        );
+||||||| base
+    ) -> Result<crate::mcp_http_client::McpHttpClient<reqwest::Client>, McpError> {
         let mut headers = parse_config_headers(
             server_name,
             "transport",
@@ -4245,7 +4250,7 @@ impl McpClient {
                     .map(|(key, value)| (key.as_str(), value.as_str())),
             )
         };
->>>>>>> upstream/main
+>>>>>>> upstream
         apply_user_agent_policy(&mut headers, server_name, &config.url);
         let mut options =
             xai_grok_net::ClientOptions::default().connect_timeout(HTTP_CONNECT_TIMEOUT);
@@ -4254,8 +4259,19 @@ impl McpClient {
             // through a proxy or follow a redirect off the machine.
             options = options.no_proxy().no_redirects();
         }
-<<<<<<< HEAD
+<<<<<<< fork
         let client = Self::build_net_http_client(headers, options)?;
+        Ok(crate::mcp_http_client::McpHttpClient::new(
+            client,
+            server_name,
+            warn_budget,
+        ))
+||||||| base
+        // rmcp requires reqwest 0.13; the approved xai helper is typed for 0.12.
+        #[allow(clippy::disallowed_methods)]
+        let client = builder
+            .build()
+            .map_err(|e| McpError::ClientError(format!("Failed to build HTTP client: {e}")))?;
         Ok(crate::mcp_http_client::McpHttpClient::new(
             client,
             server_name,
@@ -4271,7 +4287,7 @@ impl McpClient {
             crate::mcp_http_client::McpHttpClient::new(client, server_name, warn_budget)
                 .with_bearer_token_file(config.bearer_token_file.clone()),
         )
->>>>>>> upstream/main
+>>>>>>> upstream
     }
 
     /// The configured credential headers leave `headers` and go on each request as an `Auth`.

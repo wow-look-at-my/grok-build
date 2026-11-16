@@ -504,11 +504,12 @@ impl Reducer for MessagesReducer {
                 | StreamEvent::ResponseStarted { .. }
                 | StreamEvent::ReasoningCompleted { .. }
                 | StreamEvent::ResponseCompleted { .. }
-<<<<<<< HEAD
+<<<<<<< fork
                 | StreamEvent::ThinkingSummary { .. }
+||||||| base
 =======
                 | StreamEvent::TurnUsage { .. }
->>>>>>> upstream/main
+>>>>>>> upstream
         );
         if !is_metadata && let Some(init) = self.ensure_init() {
             out.push(init);

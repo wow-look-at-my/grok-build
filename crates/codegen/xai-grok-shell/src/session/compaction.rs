@@ -1143,11 +1143,13 @@ impl SessionActor {
                 is_subagent: self.startup_hints.is_subagent,
             },
         );
-<<<<<<< HEAD
+<<<<<<< fork
         let user_context = self.merge_goal_compaction_user_context(user_context).await;
+||||||| base
+        let user_context = self.merge_goal_compaction_user_context(user_context);
 =======
         let user_context = self.goal_compaction_user_context();
->>>>>>> upstream/main
+>>>>>>> upstream
         let compact_source = trigger_str;
         self.dispatch_hook(
             xai_grok_hooks::event::HookEventName::PreCompact,
@@ -1895,8 +1897,11 @@ impl SessionActor {
         };
         let v2_memory_context = if self.memory.can_expose_v2() {
             if let Some(storage) = self.memory.storage() {
-<<<<<<< HEAD
+<<<<<<< fork
                 match xai_spawn::spawn_blocking(move || {
+                    crate::session::helpers::memory_context::format_v2_memory_context(&storage)
+||||||| base
+                match tokio::task::spawn_blocking(move || {
                     crate::session::helpers::memory_context::format_v2_memory_context(&storage)
 =======
                 let compact_index = self.memory.v2_config.compact_index_enabled;
@@ -1905,7 +1910,7 @@ impl SessionActor {
                         &storage,
                         compact_index,
                     )
->>>>>>> upstream/main
+>>>>>>> upstream
                 })
                 .await
                 {

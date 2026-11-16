@@ -64,8 +64,11 @@ impl SessionActor {
             return;
         };
 
-<<<<<<< HEAD
+<<<<<<< fork
         let setup = match self.prepare_side_call("turn_summary").await {
+            Ok(s) => s,
+||||||| base
+        let setup = match self.prepare_side_call().await {
             Ok(s) => s,
 =======
         self.refresh_token_if_expired().await;
@@ -103,7 +106,7 @@ impl SessionActor {
         let reasoning_effort = config.reasoning_effort;
         let client = match xai_grok_sampler::SamplingClient::new(config) {
             Ok(c) => c,
->>>>>>> upstream/main
+>>>>>>> upstream
             Err(e) => {
                 tracing::warn!(error = %e, "turn summary: failed to prepare sampling client");
                 return;

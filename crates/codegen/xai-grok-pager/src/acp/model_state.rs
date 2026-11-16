@@ -1,16 +1,19 @@
 use agent_client_protocol as acp;
 use indexmap::IndexMap;
 use xai_grok_shell::sampling::types::{
-<<<<<<< HEAD
+<<<<<<< fork
     REASONING_EFFORTS_META_KEY, ReasoningEffort, ReasoningEffortMetaState, ReasoningEffortOption,
     endpoint_meta, parse_canonical_effort_token, parse_reasoning_effort_meta,
     parse_reasoning_efforts_meta, provider_meta, reasoning_effort_meta_state,
     supports_reasoning_effort_meta,
+||||||| base
+    ReasoningEffort, ReasoningEffortOption, parse_canonical_effort_token,
+    parse_reasoning_effort_meta, parse_reasoning_efforts_meta, supports_reasoning_effort_meta,
 =======
     ModelNotice, ReasoningEffort, ReasoningEffortOption, parse_canonical_effort_token,
     parse_context_window_meta, parse_context_windows_meta, parse_model_notice_meta,
     parse_reasoning_effort_meta, parse_reasoning_efforts_meta, supports_reasoning_effort_meta,
->>>>>>> upstream/main
+>>>>>>> upstream
 };
 
 use crate::slash::commands::effort_levels::legacy_effort_options;
@@ -178,7 +181,7 @@ impl ModelState {
         Some(self.current.as_ref()?.0.as_ref())
     }
 
-<<<<<<< HEAD
+<<<<<<< fork
     /// The `[model_providers.<id>]` the current model routes through, if the
     /// shell tagged it with one.
     pub fn current_model_provider(&self) -> Option<&str> {
@@ -196,8 +199,19 @@ impl ModelState {
             })
     }
 
+||||||| base
+    /// Total context window tokens for the current model (if available).
+    fn current_context_window_tokens(&self) -> Option<u64> {
+        let meta = self.available.get(self.current.as_ref()?)?.meta.as_ref()?;
+        meta.get("totalContextTokens")
+            .and_then(|value| match value {
+                serde_json::Value::Number(number) => number.as_u64(),
+                _ => None,
+            })
+    }
+
 =======
->>>>>>> upstream/main
+>>>>>>> upstream
     /// Whether the current model accepts image input, read from the model's `meta` (the ACP extension point, same
     /// source as `totalContextTokens`). Honors an explicit `acceptsImages` bool, else an `inputModalities` array
     /// containing `"image"`. Once the ACP server populates the key, non-vision models get suppressed.

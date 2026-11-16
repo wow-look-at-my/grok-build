@@ -1692,7 +1692,7 @@ fn lookup_named_color(name: &str) -> Result<Color, String> {
     Ok(color)
 }
 
-<<<<<<< HEAD
+<<<<<<< fork
 // ============================================================================
 // pager.json
 // ============================================================================
@@ -1704,6 +1704,85 @@ pub fn parse_appearance_config(
     text: &str,
 ) -> Result<RawAppearanceConfig, String> {
     use xai_grok_config::format::{ConfigFormat, parse_plain_json_source, parse_toml_source};
+||||||| base
+// ============================================================================
+// TOML Generation with Comments
+// ============================================================================
+
+impl RawAppearanceConfig {
+    pub fn to_toml_with_comments() -> String {
+        let mut config = Self::default();
+        // These two keys default to None (the shell's `[ui] collapsed_edit_blocks` flag decides), which the serializer would omit entirely
+        // Show the flag-off shape as commented lines so the keys stay discoverable; commenting-out below keeps them inert
+        config.scrollback.blocks.edit.expanded_by_default = Some(true);
+        config.scrollback.blocks.edit.line_summary = Some(false);
+        let toml_str = toml_edit::ser::to_string_pretty(&config).expect("serialize default");
+        let mut doc: DocumentMut = toml_str.parse().expect("parse toml");
+
+        let pager_path = crate::util::display_user_grok_path("pager.toml");
+        let header = format!(
+            "\
+# Grok Pager Appearance Configuration ({pager_path})
+# Every value below is a commented-out built-in default: uncomment a line and
+# save to override it. Values left commented track future default changes.
+# Delete the file to regenerate this template.
+#
+# ═══════════════════════════════════════════════════════════════════════════════
+# TOKYO NIGHT STORM COLOR PALETTE
+# ═══════════════════════════════════════════════════════════════════════════════
+#
+# Colors can be specified as:
+#   - Named color: \"BLUE\", \"cyan\", \"Comment\" (case-insensitive)
+#   - Hex string:  \"#7aa2f7\" or \"#f7f\" (3 or 6 digits)
+#   - RGB array:   [122, 162, 247]
+#
+# Background colors:
+#   BG, BG_BASE       #141414  (neutral background)
+#   BG_LIGHT          #1c1c1c  (highlighted background)
+#   BG_DARK           #111111  (darker background)
+#   BG_TERMINAL       #0e0e0e  (terminal background)
+#   BG_VISUAL         #262628  (visual selection background)
+#   BG_SEARCH         #303034  (search highlight background)
+#
+# Primary colors:
+#   BLUE              #7aa2f7
+#   BLUE0             #3d59a1  (dark blue, used for search/visual)
+#   BLUE1             #2ac3de  (bright cyan-blue)
+#   BLUE2             #0db9d7  (teal-blue)
+#   BLUE5             #89ddff  (light cyan)
+#   BLUE6             #b4f9f8  (pale cyan)
+#   BLUE7             #394b70  (dark muted blue)
+#   CYAN              #7dcfff
+#   GREEN             #9ece6a
+#   GREEN1            #73daca  (teal-green)
+#   GREEN2            #41a6b5  (dark teal)
+#   YELLOW            #e0af68
+#   ORANGE            #ff9e64
+#   RED               #f7768e
+#   RED1              #db4b4b  (dark red)
+#   MAGENTA           #bb9af7
+#   PURPLE            #9d7cd8
+#   MAGENTA2          #ff007c  (hot pink)
+#   TEAL, HINT        #1abc9c
+#
+# Text colors:
+#   FG, TEXT          #c8c8c8  (primary text)
+#   FG_DARK           #b2b2b2  (secondary text)
+#   FG_GUTTER         #414141  (line number gutter)
+#   COMMENT, MUTED    #5f5f5f  (muted/comment text)
+#   DARK3             #5a5a5a  (medium gray)
+#   DARK5, TOOL       #787878  (tool accent, system prompt)
+#
+# Semantic colors:
+#   ERROR             #f7768e  (same as RED)
+#   SUCCESS           #9ece6a  (same as GREEN)
+#   WARNING           #e0af68  (same as YELLOW)
+#   INFO              #7dcfff  (same as CYAN)
+#
+# ═══════════════════════════════════════════════════════════════════════════════
+
+"
+        );
 =======
 impl RawAppearanceConfig {
     pub fn to_toml_with_comments() -> String {
@@ -1714,7 +1793,72 @@ impl RawAppearanceConfig {
         config.scrollback.blocks.edit.line_summary = Some(false);
         let toml_str = toml_edit::ser::to_string_pretty(&config).expect("serialize default");
         let mut doc: DocumentMut = toml_str.parse().expect("parse toml");
->>>>>>> upstream/main
+
+        let pager_path = crate::util::display_user_grok_path("pager.toml");
+        let header = format!(
+            "\
+# Grok Pager Appearance Configuration ({pager_path})
+# Every value below is a commented-out built-in default: uncomment a line and
+# save to override it. Values left commented track future default changes.
+# Delete the file to regenerate this template.
+#
+# ═══════════════════════════════════════════════════════════════════════════════
+# TOKYO NIGHT STORM COLOR PALETTE
+# ═══════════════════════════════════════════════════════════════════════════════
+#
+# Colors can be specified as:
+#   - Named color: \"BLUE\", \"cyan\", \"Comment\" (case-insensitive)
+#   - Hex string:  \"#7aa2f7\" or \"#f7f\" (3 or 6 digits)
+#   - RGB array:   [122, 162, 247]
+#
+# Background colors:
+#   BG, BG_BASE       #141414  (neutral background)
+#   BG_LIGHT          #1c1c1c  (highlighted background)
+#   BG_DARK           #111111  (darker background)
+#   BG_TERMINAL       #0e0e0e  (terminal background)
+#   BG_VISUAL         #262628  (visual selection background)
+#   BG_SEARCH         #303034  (search highlight background)
+#
+# Primary colors:
+#   BLUE              #7aa2f7
+#   BLUE0             #3d59a1  (dark blue, used for search/visual)
+#   BLUE1             #2ac3de  (bright cyan-blue)
+#   BLUE2             #0db9d7  (teal-blue)
+#   BLUE5             #89ddff  (light cyan)
+#   BLUE6             #b4f9f8  (pale cyan)
+#   BLUE7             #394b70  (dark muted blue)
+#   CYAN              #7dcfff
+#   GREEN             #9ece6a
+#   GREEN1            #73daca  (teal-green)
+#   GREEN2            #41a6b5  (dark teal)
+#   YELLOW            #e0af68
+#   ORANGE            #ff9e64
+#   RED               #f7768e
+#   RED1              #db4b4b  (dark red)
+#   MAGENTA           #bb9af7
+#   PURPLE            #9d7cd8
+#   MAGENTA2          #ff007c  (hot pink)
+#   TEAL, HINT        #1abc9c
+#
+# Text colors:
+#   FG, TEXT          #c8c8c8  (primary text)
+#   FG_DARK           #b2b2b2  (secondary text)
+#   FG_GUTTER         #414141  (line number gutter)
+#   COMMENT, MUTED    #5f5f5f  (muted/comment text)
+#   DARK3             #5a5a5a  (medium gray)
+#   DARK5, TOOL       #787878  (tool accent, system prompt)
+#
+# Semantic colors:
+#   ERROR             #f7768e  (same as RED)
+#   SUCCESS           #9ece6a  (same as GREEN)
+#   WARNING           #e0af68  (same as YELLOW)
+#   INFO              #7dcfff  (same as CYAN)
+#
+# ═══════════════════════════════════════════════════════════════════════════════
+
+"
+        );
+>>>>>>> upstream
 
     let tree = match ConfigFormat::of(path) {
         ConfigFormat::Json => parse_plain_json_source(path, text),
@@ -1753,7 +1897,7 @@ fn persist_respect_manual_folds_in(home: &std::path::Path, enabled: bool) -> std
         .lock()
         .unwrap_or_else(|poisoned| poisoned.into_inner());
 
-<<<<<<< HEAD
+<<<<<<< fork
     let path = writable_pager_config(home)?;
     xai_grok_config::format::edit_json_document_keeping_schema(
         &path,
@@ -1774,14 +1918,14 @@ fn persist_respect_manual_folds_in(home: &std::path::Path, enabled: bool) -> std
 fn writable_pager_config(home: &std::path::Path) -> std::io::Result<std::path::PathBuf> {
     use xai_grok_config::format::{
         ConfigFormat, PAGER_SCHEMA_REF, PAGER_STEM, migrate_legacy_plain_config,
-    };
-
-    let path = migrate_legacy_plain_config(home, PAGER_STEM, Some(PAGER_SCHEMA_REF))?;
-    if ConfigFormat::of(&path) != ConfigFormat::Json {
-        return Err(std::io::Error::other(format!(
-            "could not convert {} to pager.json; convert or delete it, then try again",
-            path.display()
-        )));
+||||||| base
+    let path = crate::util::pager_toml_path();
+    // Bind read + publish to one follow destination (path + inode).
+    let dest = xai_grok_config::fs_atomic::bind_follow_destination(&path)?;
+    let content = match std::fs::read_to_string(dest.as_path()) {
+        Ok(c) => c,
+        Err(e) if e.kind() == ErrorKind::NotFound => String::new(),
+        Err(e) => return Err(e),
 =======
     persist_respect_manual_folds_to(&crate::util::pager_toml_path(), enabled)
 }
@@ -1796,13 +1940,16 @@ fn persist_respect_manual_folds_to(path: &std::path::Path, enabled: bool) -> std
         Ok(c) => c,
         Err(e) if e.kind() == ErrorKind::NotFound => String::new(),
         Err(e) => return Err(e),
+>>>>>>> upstream
     };
-    let dest = xai_grok_config::fs_atomic::require_same_bound_destination(path, &dest)?;
-    let updated = upsert_respect_manual_folds(&content, enabled)
-        .map_err(|e| Error::new(ErrorKind::InvalidData, e))?;
-    if let Some(dir) = dest.as_path().parent() {
-        std::fs::create_dir_all(dir)?;
->>>>>>> upstream/main
+<<<<<<< fork
+
+    let path = migrate_legacy_plain_config(home, PAGER_STEM, Some(PAGER_SCHEMA_REF))?;
+    if ConfigFormat::of(&path) != ConfigFormat::Json {
+        return Err(std::io::Error::other(format!(
+            "could not convert {} to pager.json; convert or delete it, then try again",
+            path.display()
+        )));
     }
     Ok(path)
 }
@@ -1830,6 +1977,111 @@ fn set_json_member(
                 keys.get(..=depth).unwrap_or(keys).join(".")
             )
         })?;
+||||||| base
+    let dest = xai_grok_config::fs_atomic::require_same_bound_destination(&path, &dest)?;
+    let updated = upsert_respect_manual_folds(&content, enabled)
+        .map_err(|e| Error::new(ErrorKind::InvalidData, e))?;
+    if let Some(dir) = dest.as_path().parent() {
+        std::fs::create_dir_all(dir)?;
+    }
+    xai_grok_config::fs_atomic::write_atomically_bound(&dest, &updated, None)
+}
+
+fn upsert_respect_manual_folds(content: &str, enabled: bool) -> Result<String, String> {
+    let mut doc: DocumentMut = content
+        .parse()
+        .map_err(|e: toml_edit::TomlError| e.to_string())?;
+    let scrollback = doc
+        .entry("scrollback")
+        .or_insert_with(implicit_table)
+        .as_table_mut()
+        .ok_or_else(|| "pager.toml `scrollback` is not a table".to_string())?;
+    let scroll = scrollback
+        .entry("scroll")
+        .or_insert(toml_edit::Item::Table(toml_edit::Table::new()))
+        .as_table_mut()
+        .ok_or_else(|| "pager.toml `scrollback.scroll` is not a table".to_string())?;
+    scroll.insert("respect_manual_folds", toml_edit::value(enabled));
+    Ok(doc.to_string())
+}
+
+fn implicit_table() -> Item {
+    let mut table = toml_edit::Table::new();
+    table.set_implicit(true);
+    Item::Table(table)
+}
+
+fn annotate_table<T: DocumentedFields>(table: &mut toml_edit::Table) {
+    for (mut key, _value) in table.iter_mut() {
+        let field_name = key.get();
+        if let Ok(docs) = T::get_field_docs(field_name) {
+            let comment: String = docs
+                .lines()
+                .map(|l| {
+                    if l.is_empty() {
+                        "#\n".to_string()
+                    } else {
+                        format!("# {l}\n")
+                    }
+                })
+                .collect();
+            let decor = key.leaf_decor_mut();
+            let prefix = decor.prefix().and_then(RawString::as_str).unwrap_or("");
+            decor.set_prefix(format!("{prefix}{comment}"));
+        }
+=======
+    let dest = xai_grok_config::fs_atomic::require_same_bound_destination(path, &dest)?;
+    let updated = upsert_respect_manual_folds(&content, enabled)
+        .map_err(|e| Error::new(ErrorKind::InvalidData, e))?;
+    if let Some(dir) = dest.as_path().parent() {
+        std::fs::create_dir_all(dir)?;
+    }
+    xai_grok_config::fs_atomic::write_atomically_bound(&dest, &updated, None)
+}
+
+fn upsert_respect_manual_folds(content: &str, enabled: bool) -> Result<String, String> {
+    let mut doc: DocumentMut = content
+        .parse()
+        .map_err(|e: toml_edit::TomlError| e.to_string())?;
+    let scrollback = doc
+        .entry("scrollback")
+        .or_insert_with(implicit_table)
+        .as_table_mut()
+        .ok_or_else(|| "pager.toml `scrollback` is not a table".to_string())?;
+    let scroll = scrollback
+        .entry("scroll")
+        .or_insert(toml_edit::Item::Table(toml_edit::Table::new()))
+        .as_table_mut()
+        .ok_or_else(|| "pager.toml `scrollback.scroll` is not a table".to_string())?;
+    scroll.insert("respect_manual_folds", toml_edit::value(enabled));
+    Ok(doc.to_string())
+}
+
+fn implicit_table() -> Item {
+    let mut table = toml_edit::Table::new();
+    table.set_implicit(true);
+    Item::Table(table)
+}
+
+fn annotate_table<T: DocumentedFields>(table: &mut toml_edit::Table) {
+    for (mut key, _value) in table.iter_mut() {
+        let field_name = key.get();
+        if let Ok(docs) = T::get_field_docs(field_name) {
+            let comment: String = docs
+                .lines()
+                .map(|l| {
+                    if l.is_empty() {
+                        "#\n".to_string()
+                    } else {
+                        format!("# {l}\n")
+                    }
+                })
+                .collect();
+            let decor = key.leaf_decor_mut();
+            let prefix = decor.prefix().and_then(RawString::as_str).unwrap_or("");
+            decor.set_prefix(format!("{prefix}{comment}"));
+        }
+>>>>>>> upstream
     }
     node.insert((*last).to_string(), value);
     Ok(())
@@ -2148,8 +2400,44 @@ mod tests {
         );
     }
 
-<<<<<<< HEAD
+<<<<<<< fork
     // ── Terminal config (alt_screen) parsing ─────────────────────
+||||||| base
+    /// The two flag-deferred edit keys default to `None` (omitted by the serializer).
+    /// The template must still document them as commented lines showing the flag-off shape.
+    #[test]
+    fn template_documents_flag_deferred_edit_keys() {
+        let template = RawAppearanceConfig::to_toml_with_comments();
+        assert!(
+            template.contains("# expanded_by_default = true"),
+            "expanded_by_default missing from template:\n{template}"
+        );
+        assert!(
+            template.contains("# line_summary = false"),
+            "line_summary missing from template:\n{template}"
+        );
+        assert!(
+            template.contains("collapsed_edit_blocks"),
+            "doc comments must point at the [ui] flag:\n{template}"
+        );
+    }
+
+    /// The `/settings` writer must insert an ACTIVE key into the inert template (whose keys are all comments).
+    /// It must not edit a commented line or fail.
+    #[test]
+    fn upsert_into_inert_template_inserts_active_key() {
+        let template = RawAppearanceConfig::to_toml_with_comments();
+        let updated = upsert_respect_manual_folds(&template, true).expect("upsert");
+        let parsed: RawAppearanceConfig =
+            toml::from_str(&updated).expect("updated template must parse");
+        assert!(
+            parsed.scrollback.scroll.respect_manual_folds,
+            "inserted key must be active:\n{updated}"
+        );
+    }
+
+    // ── Terminal config (alt_screen) parsing ─────────────────────
+
 =======
     /// The two flag-deferred edit keys default to `None` (omitted by the serializer).
     /// The template must still document them as commented lines showing the flag-off shape.
@@ -2183,7 +2471,7 @@ mod tests {
             "inserted key must be active:\n{updated}"
         );
     }
->>>>>>> upstream/main
+>>>>>>> upstream
 
     #[test]
     fn terminal_alt_screen_auto_default() {

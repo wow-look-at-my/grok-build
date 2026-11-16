@@ -683,7 +683,7 @@ impl AgentView {
         let appearance = self.scrollback.appearance().clone();
         let layout_cfg = &appearance.scrollback.layout;
         let scrollbar_cfg = &appearance.scrollback.scrollbar;
-<<<<<<< HEAD
+<<<<<<< fork
         let model_id = self
             .session
             .models
@@ -695,6 +695,12 @@ impl AgentView {
             Some(provider) => format!("{model_id} [{provider}]"),
             None => model_id,
         };
+||||||| base
+        let model_id = self
+            .session
+            .models
+            .current_model_name()
+            .unwrap_or_else(|| "unknown".to_string());
 =======
         let model_label = self.session.models.footer_label().unwrap_or_else(|| {
             if self.session_starting_since.is_some() {
@@ -703,7 +709,7 @@ impl AgentView {
                 "unknown".to_owned()
             }
         });
->>>>>>> upstream/main
+>>>>>>> upstream
         let effective_plan = self.plan_mode_pending.unwrap_or(self.plan_mode_active);
         let casual_commenting = self.is_casual_commenting();
         let mode_accent = if effective_plan || casual_commenting {
@@ -2164,7 +2170,7 @@ impl AgentView {
                         .tracker
                         .running_execute_tool_call_id()
                         .is_some();
-<<<<<<< HEAD
+<<<<<<< fork
                 let is_pending_user_input = matches!(
                     self.blocking_card(),
                     Some(
@@ -2174,10 +2180,20 @@ impl AgentView {
                     )
                 );
                 let goal_harness = self
+||||||| base
+                let is_pending_user_input = matches!(
+                    self.blocking_card(),
+                    Some(
+                        BlockingCard::Permission
+                            | BlockingCard::Question
+                            | BlockingCard::McpElicitation
+                    )
+                );
+                let goal_verifying = self
 =======
                 let is_pending_user_input = self.is_awaiting_user_answer();
                 let goal_verifying = self
->>>>>>> upstream/main
+>>>>>>> upstream
                     .goal_state
                     .as_ref()
                     .and_then(turn_status::GoalHarnessActivity::from_goal);
@@ -2427,7 +2443,7 @@ impl AgentView {
         } else {
             self.published_mode_label()
         };
-<<<<<<< HEAD
+<<<<<<< fork
         let mut flags: Vec<PromptFlag> =
             mode_flags(plan_label, self.session.permission_label(), &theme);
         // Shift+Tab agent-identity ring stop (Orchestrator/Explore): the
@@ -2448,10 +2464,13 @@ impl AgentView {
                 });
             }
         }
+||||||| base
+        let flags: Vec<PromptFlag> =
+            mode_flags(plan_label, self.session.permission_label(), &theme);
 =======
         let flags: Vec<PromptFlag> =
             mode_flags(mode_label, self.session.permission_label(), &theme);
->>>>>>> upstream/main
+>>>>>>> upstream
         let multiline = self.multiline_mode;
         let warning = self.credit_balance.as_ref().and_then(|bal| {
             crate::views::credit_bar::usage_warning_for_session(

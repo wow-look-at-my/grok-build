@@ -50,15 +50,18 @@ fn utc_ms_to_local(ms: i64) -> DateTime<Local> {
 pub enum WaitingReason {
     /// Waiting for the model to (re)start streaming.
     Model,
-<<<<<<< HEAD
+<<<<<<< fork
     /// The model request waits for a slot under the agent's request cap.
     Queued(RequestQueued),
+    /// Blocked on a running foreground subagent (`task` / `spawn_subagent`). The view fills it in; the tracker always
+    /// leaves it `None`.
+||||||| base
     /// Blocked on a running foreground subagent (`task` / `spawn_subagent`). The view fills it in; the tracker always
     /// leaves it `None`.
 =======
     /// Blocked on a running foreground subagent (`task` / `spawn_subagent`).
     /// Only the view sets `display`, to `Waiting for subagent` or `Waiting for N subagents`.
->>>>>>> upstream/main
+>>>>>>> upstream
     Subagent { display: Option<String> },
     /// Blocked polling/awaiting a background task's output (`get_command_or_subagent_output` / `get_task_output`). The
     /// tracker itself always leaves it `None`.
@@ -133,13 +136,18 @@ impl WaitingReason {
     pub fn label(&self) -> String {
         match self {
             Self::Model => "Waiting for response…".to_string(),
-<<<<<<< HEAD
+<<<<<<< fork
             Self::Queued(RequestQueued { ahead: 0, limit }) => {
                 format!("Queued: {limit} model requests already running…")
             }
             Self::Queued(RequestQueued { ahead, limit }) => {
                 format!("Queued behind {ahead} more: {limit} model requests already running…")
             }
+            Self::Subagent { display } => match display.as_deref().map(clamp_activity_subject) {
+                Some(display) if !display.is_empty() => format!("{display}…"),
+                _ => "Waiting on subagent…".to_string(),
+            },
+||||||| base
             Self::Subagent { display } => match display.as_deref().map(clamp_activity_subject) {
                 Some(display) if !display.is_empty() => format!("{display}…"),
                 _ => "Waiting on subagent…".to_string(),
@@ -153,7 +161,7 @@ impl WaitingReason {
                     .unwrap_or_else(|| waiting_on_subagents_subject(1));
                 format!("{subject}…")
             }
->>>>>>> upstream/main
+>>>>>>> upstream
             Self::TaskOutput {
                 subject: Some(subject),
                 ..
@@ -3218,14 +3226,18 @@ fn task_ids_from_raw_input(raw: &serde_json::Value) -> Vec<String> {
     }
     out
 }
-<<<<<<< HEAD
+<<<<<<< fork
 /// Check if a tool call is a background execute (`is_background=true`). These are deferred from scrollback; the
 /// `example.invalid/task_backgrounded` notification creates a `BgTask` block instead of an `Execute` block. Still treat those
+/// as execute tools when `raw_input` requests background so we don't flash the function name.
+||||||| base
+/// Check if a tool call is a background execute (`is_background=true`). These are deferred from scrollback; the
+/// `x.ai/task_backgrounded` notification creates a `BgTask` block instead of an `Execute` block. Still treat those
 /// as execute tools when `raw_input` requests background so we don't flash the function name.
 =======
 /// True when an execute tool call asked to run in the background.
 /// Scrollback skips these; the `x.ai/task_backgrounded` notification adds a `BgTask` block for them.
->>>>>>> upstream/main
+>>>>>>> upstream
 fn is_bg_tool(tc: &acp::ToolCall) -> bool {
     let looks_like_execute =
         tc.kind == acp::ToolKind::Execute || is_execute_tool_function_name(&tc.title);

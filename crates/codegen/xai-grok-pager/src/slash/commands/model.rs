@@ -41,9 +41,13 @@ impl SlashCommand for ModelCommand {
             return None;
         }
 
-<<<<<<< HEAD
+<<<<<<< fork
         if let Some(items) = sub_phase_items(ctx.models, args_query) {
             return Some(items);
+||||||| base
+        // Effort phase if input is "<reasoning-model> ", else model phase.
+        if let Some((model_id, prefix)) = matched_reasoning_prefix(ctx.models, args_query) {
+            return Some(build_effort_items(ctx.models, &model_id, &prefix));
 =======
         match chained_phase(ctx.models, args_query) {
             Some(ChainedPhase::Window { model_id, prefix }) => {
@@ -54,7 +58,7 @@ impl SlashCommand for ModelCommand {
             }
             Some(ChainedPhase::Done) => None,
             None => Some(build_model_items(ctx.models)),
->>>>>>> upstream/main
+>>>>>>> upstream
         }
     }
 
@@ -102,7 +106,7 @@ impl SlashCommand for ModelCommand {
             return CommandResult::Action(Action::SetDefaultModel(id));
         }
 
-<<<<<<< HEAD
+<<<<<<< fork
         // `/model <name> <provider>` picks one of several providers serving a
         // name. It sits before the effort phase, so a name the catalog shares
         // reaches the provider split instead of the ambiguity error.
@@ -126,6 +130,11 @@ impl SlashCommand for ModelCommand {
             return CommandResult::Error(message);
         }
         // The effort token keeps its spaces, so a multi-word label resolves.
+        if let Some((id, token)) = split_model_effort(ctx.models, trimmed) {
+            return match ctx.models.resolve_effort_for_model(&id, token) {
+                Ok(effort) => CommandResult::Action(Action::SwitchModel {
+||||||| base
+        // Trailing effort on a reasoning model is a session switch. The token keeps its spaces.
         if let Some((id, token)) = split_model_effort(ctx.models, trimmed) {
             return match ctx.models.resolve_effort_for_model(&id, token) {
                 Ok(effort) => CommandResult::Action(Action::SwitchModel {
@@ -154,7 +163,7 @@ impl SlashCommand for ModelCommand {
             }
             return match ctx.models.resolve_effort_for_model(&id, effort_token) {
                 Ok(effort) => CommandResult::Action(Action::SwitchModel(ModelChoice {
->>>>>>> upstream/main
+>>>>>>> upstream
                     model_id: id,
                     effort: Some(effort),
                     context_window_selection: window,
@@ -171,7 +180,7 @@ fn supports_reasoning_effort(info: &acp::ModelInfo) -> bool {
     supports_reasoning_effort_meta(info.meta.as_ref())
 }
 
-<<<<<<< HEAD
+<<<<<<< fork
 /// The reasoning model `args` leads with, and the effort text after it.
 fn split_model_effort<'a>(models: &ModelState, args: &'a str) -> Option<(acp::ModelId, &'a str)> {
     let (id, len) = detect_effort_phase(models, args)?;
@@ -195,205 +204,17 @@ fn leads_with(query: &str, token: &str) -> bool {
         // The `is_char_boundary` clause above runs first and short-circuits.
         let (head, tail) = query.split_at(token.len());
         head.eq_ignore_ascii_case(token) && tail.starts_with(char::is_whitespace)
-    }
-}
-
-/// The effort or route rows `args_query` leads into, if any. The longer typed
-/// token wins. On a tie the route phase wins: a shared name can equal another
-/// model's id, and the group row inserts that name.
-fn sub_phase_items(models: &ModelState, args_query: &str) -> Option<Vec<ArgItem>> {
-    let effort = detect_effort_phase(models, args_query);
-    let route = detect_route_phase(models, args_query);
-    match (effort, route) {
-        (Some((_, effort_len)), Some((group, route_len))) if route_len >= effort_len => {
-            Some(build_route_items(models, &group))
-        }
-        (Some((id, len)), _) => Some(build_effort_items(models, &id, &args_query[..len])),
-        (None, Some((group, _))) => Some(build_route_items(models, &group)),
-        (None, None) => None,
-    }
-}
-
-/// The model and the matched length when `args_query` is `"<reasoning-model>
-/// ..."`. Longest-name-first to disambiguate names that share a prefix.
-fn detect_effort_phase(models: &ModelState, args_query: &str) -> Option<(acp::ModelId, usize)> {
-    // A model is typed by its id, or by its name when no other model has it. A
-    // shared name leads to the route phase instead.
-    let mut candidates: Vec<(&acp::ModelId, &str)> = models
-        .available
-        .iter()
-        .filter(|(_, info)| supports_reasoning_effort(info))
-        .flat_map(|(id, info)| {
-            let name = (!name_is_shared(models, id)).then_some((id, info.name.as_str()));
-            std::iter::once((id, id.0.as_ref())).chain(name)
-        })
-        .collect();
-    candidates.sort_by_key(|(_, name)| std::cmp::Reverse(name.len()));
-
-    candidates
-        .into_iter()
-        .find(|(_, name)| leads_with(args_query, name))
-        .map(|(id, name)| (id.clone(), name.len()))
-}
-
-fn is_favorite(info: &acp::ModelInfo) -> bool {
-    favorite_meta(info.meta.as_ref())
-}
-
-/// Where a model routes: its provider, else its endpoint host.
-fn route_label(info: &acp::ModelInfo) -> Option<String> {
-    let meta = info.meta.as_ref();
-    match (provider_meta(meta), endpoint_meta(meta)) {
-        (Some(provider), Some(host)) => Some(format!("{provider} ({host})")),
-        (Some(provider), None) => Some(provider.to_owned()),
-        (None, Some(host)) => Some(host.to_owned()),
-        (None, None) => None,
-    }
-}
-
-/// Whether another model in the catalog has this model's display name.
-fn name_is_shared(models: &ModelState, id: &acp::ModelId) -> bool {
-    let Some(info) = models.available.get(id) else {
-        return false;
-    };
-    models
-        .available
-        .iter()
-        .any(|(other, o)| other != id && o.name.eq_ignore_ascii_case(&info.name))
-}
-
-/// The text that selects this model on the command line: the name when the
-/// name resolves back to this model, else the unique id. A name that another
-/// model shares, or that is another model's id, resolves elsewhere.
-fn pick_token(models: &ModelState, id: &acp::ModelId) -> String {
-    match models.available.get(id) {
-        Some(info) if models.resolve_by_name_or_id(&info.name).as_ref() == Some(id) => {
-            info.name.clone()
-        }
-        _ => id.0.to_string(),
-    }
-}
-
-/// Every model whose display name is `name`, in catalog order.
-fn models_named<'a>(models: &'a ModelState, name: &str) -> Vec<&'a acp::ModelId> {
-    models
-        .available
-        .iter()
-        .filter(|(_, info)| info.name.eq_ignore_ascii_case(name))
-        .map(|(id, _)| id)
-        .collect()
-}
-
-/// An error when `query` is a name several models share and no model's id.
-/// The name alone cannot say which route to take.
-fn ambiguous_name(models: &ModelState, query: &str) -> Option<String> {
-    if models
-        .available
-        .keys()
-        .any(|id| id.0.as_ref().eq_ignore_ascii_case(query))
+||||||| base
+fn split_on_model_key<'a>(args: &'a str, key: &str) -> Option<&'a str> {
+    let rest = args.get(key.len()..)?;
+    if args
+        .get(..key.len())
+        .is_some_and(|prefix| prefix.eq_ignore_ascii_case(key))
+        && rest.starts_with(char::is_whitespace)
     {
-        return None;
-    }
-    let group = models_named(models, query);
-    if group.len() < 2 {
-        return None;
-    }
-    let ids: Vec<&str> = group.iter().map(|id| id.0.as_ref()).collect();
-    Some(format!(
-        "Several providers serve '{query}'. Pick one: {}",
-        ids.join(", ")
-    ))
-}
-
-/// The models behind a shared name, and the name's length, when `args_query`
-/// is `"<shared name> ..."`. Longest name first, so a name that is a prefix of
-/// another does not win.
-fn detect_route_phase<'a>(
-    models: &'a ModelState,
-    args_query: &str,
-) -> Option<(Vec<&'a acp::ModelId>, usize)> {
-    let mut names: Vec<&str> = models
-        .available
-        .iter()
-        .filter(|(id, _)| name_is_shared(models, id))
-        .map(|(_, info)| info.name.as_str())
-        .collect();
-    names.sort_by_key(|name| std::cmp::Reverse(name.len()));
-    names
-        .into_iter()
-        .find(|name| leads_with(args_query, name))
-        .map(|name| (models_named(models, name), name.len()))
-}
-
-/// Trailing space on reasoning models: it signals "more input expected" to
-/// the prompt widget, so Enter advances to the effort phase instead of
-/// submitting.
-fn chained_insert(token: &str, info: &acp::ModelInfo) -> String {
-    if supports_reasoning_effort(info) {
-        format!("{token} ")
+        Some(rest)
     } else {
-        token.to_owned()
-    }
-}
-
-/// The row description: the model's own, else where it routes.
-fn row_description(info: &acp::ModelInfo) -> String {
-    match info.description.as_deref() {
-        Some(d) if !d.trim().is_empty() => d.to_owned(),
-        _ => route_label(info)
-            .map(|route| format!("via {route}"))
-            .unwrap_or_default(),
-    }
-}
-
-/// One row per route for the `/model` route phase. A route that differs from
-/// the others only in its id shows its id.
-fn build_route_items(models: &ModelState, group: &[&acp::ModelId]) -> Vec<ArgItem> {
-    let labels: Vec<String> = group
-        .iter()
-        .map(|id| {
-            models
-                .available
-                .get(*id)
-                .and_then(route_label)
-                .unwrap_or_else(|| id.0.to_string())
-        })
-        .collect();
-    let mut items = Vec::with_capacity(group.len());
-    for (idx, id) in group.iter().enumerate() {
-        let Some(info) = models.available.get(*id) else {
-            continue;
-        };
-        let Some(label) = labels.get(idx) else {
-            continue;
-        };
-        let shared_label = labels.iter().filter(|l| *l == label).count() > 1;
-        let mut display = if shared_label {
-            id.0.to_string()
-        } else {
-            label.clone()
-        };
-        if models.current.as_ref() == Some(*id) {
-            display.push_str(" (current)");
-        }
-        items.push(ArgItem {
-            display,
-            match_text: format!("{} {}", label, id.0),
-            insert_text: chained_insert(id.0.as_ref(), info),
-            description: info.description.clone().unwrap_or_default(),
-            loaded_in_vram: loaded_in_vram_meta(info.meta.as_ref()),
-            favorite: is_favorite(info),
-        });
-    }
-    items
-}
-
-/// One row per model name. Reasoning models get a trailing space in
-/// `insert_text` so the prompt widget chains into the effort sub-menu. A name
-/// that several models share is one row. It inserts the name and a space,
-/// which opens the route phase: one row per provider serving it.
-/// Every model is listed, except a batch route the session is not running.
-/// The ones the config marked come first, then the newest of each family.
+        None
 =======
 /// The arg picker title for the `/model` sub-menu that `args_query` has reached.
 pub(crate) fn picker_title(models: &ModelState, args_query: &str) -> &'static str {
@@ -503,9 +324,42 @@ fn split_on_model_key<'a>(args: &'a str, key: &str) -> Option<&'a str> {
         Some(rest)
     } else {
         None
+>>>>>>> upstream
     }
 }
 
+<<<<<<< fork
+/// The effort or route rows `args_query` leads into, if any. The longer typed
+/// token wins. On a tie the route phase wins: a shared name can equal another
+/// model's id, and the group row inserts that name.
+fn sub_phase_items(models: &ModelState, args_query: &str) -> Option<Vec<ArgItem>> {
+    let effort = detect_effort_phase(models, args_query);
+    let route = detect_route_phase(models, args_query);
+    match (effort, route) {
+        (Some((_, effort_len)), Some((group, route_len))) if route_len >= effort_len => {
+            Some(build_route_items(models, &group))
+        }
+        (Some((id, len)), _) => Some(build_effort_items(models, &id, &args_query[..len])),
+        (None, Some((group, _))) => Some(build_route_items(models, &group)),
+        (None, None) => None,
+    }
+}
+
+/// The model and the matched length when `args_query` is `"<reasoning-model>
+/// ..."`. Longest-name-first to disambiguate names that share a prefix.
+fn detect_effort_phase(models: &ModelState, args_query: &str) -> Option<(acp::ModelId, usize)> {
+    // A model is typed by its id, or by its name when no other model has it. A
+    // shared name leads to the route phase instead.
+    let mut candidates: Vec<(&acp::ModelId, &str)> = models
+||||||| base
+/// Longest reasoning-model name or id that prefixes `args`, and the text after it.
+fn longest_reasoning_prefix<'a>(
+    models: &'a ModelState,
+    args: &'a str,
+) -> Option<(&'a acp::ModelId, &'a str, &'a str)> {
+    let mut best: Option<(&acp::ModelId, &str, &str)> = None;
+    for (id, info) in models
+=======
 /// Whether picking this model chains into a sub-menu (windows or effort).
 fn has_chained_args(models: &ModelState, id: &acp::ModelId, info: &acp::ModelInfo) -> bool {
     supports_reasoning_effort(info) || models.context_window_options_for(id).len() > 1
@@ -518,8 +372,70 @@ fn longest_chained_prefix<'a>(
 ) -> Option<(&'a acp::ModelId, &'a str, &'a str)> {
     let mut best: Option<(&acp::ModelId, &str, &str)> = None;
     for (id, info) in models
+>>>>>>> upstream
         .available
         .iter()
+<<<<<<< fork
+        .filter(|(_, info)| supports_reasoning_effort(info))
+        .flat_map(|(id, info)| {
+            let name = (!name_is_shared(models, id)).then_some((id, info.name.as_str()));
+            std::iter::once((id, id.0.as_ref())).chain(name)
+        })
+        .collect();
+    candidates.sort_by_key(|(_, name)| std::cmp::Reverse(name.len()));
+
+    candidates
+        .into_iter()
+        .find(|(_, name)| leads_with(args_query, name))
+        .map(|(id, name)| (id.clone(), name.len()))
+}
+
+fn is_favorite(info: &acp::ModelInfo) -> bool {
+    favorite_meta(info.meta.as_ref())
+}
+
+/// Where a model routes: its provider, else its endpoint host.
+fn route_label(info: &acp::ModelInfo) -> Option<String> {
+    let meta = info.meta.as_ref();
+    match (provider_meta(meta), endpoint_meta(meta)) {
+        (Some(provider), Some(host)) => Some(format!("{provider} ({host})")),
+        (Some(provider), None) => Some(provider.to_owned()),
+        (None, Some(host)) => Some(host.to_owned()),
+        (None, None) => None,
+    }
+}
+
+/// Whether another model in the catalog has this model's display name.
+fn name_is_shared(models: &ModelState, id: &acp::ModelId) -> bool {
+    let Some(info) = models.available.get(id) else {
+        return false;
+    };
+    models
+        .available
+        .iter()
+        .any(|(other, o)| other != id && o.name.eq_ignore_ascii_case(&info.name))
+}
+
+/// The text that selects this model on the command line: the name when the
+/// name resolves back to this model, else the unique id. A name that another
+/// model shares, or that is another model's id, resolves elsewhere.
+fn pick_token(models: &ModelState, id: &acp::ModelId) -> String {
+    match models.available.get(id) {
+        Some(info) if models.resolve_by_name_or_id(&info.name).as_ref() == Some(id) => {
+            info.name.clone()
+||||||| base
+        .filter(|(_, info)| supports_reasoning_effort(info))
+    {
+        let name = info.name.as_str();
+        let id_str = id.0.as_ref();
+        for key in [name, id_str] {
+            if best.is_some_and(|(_, prev, _)| prev.len() >= key.len()) {
+                continue;
+            }
+            if let Some(rest) = split_on_model_key(args, key) {
+                best = Some((id, key, rest));
+            }
+=======
         .filter(|(id, info)| has_chained_args(models, id, info))
     {
         let name = info.name.as_str();
@@ -531,21 +447,156 @@ fn longest_chained_prefix<'a>(
             if let Some(rest) = split_on_model_key(args, key) {
                 best = Some((id, key, rest));
             }
+>>>>>>> upstream
         }
+        _ => id.0.to_string(),
     }
-    best
 }
 
+<<<<<<< fork
+/// Every model whose display name is `name`, in catalog order.
+fn models_named<'a>(models: &'a ModelState, name: &str) -> Vec<&'a acp::ModelId> {
+    models
+        .available
+        .iter()
+        .filter(|(_, info)| info.name.eq_ignore_ascii_case(name))
+        .map(|(id, _)| id)
+        .collect()
+}
+
+/// An error when `query` is a name several models share and no model's id.
+/// The name alone cannot say which route to take.
+fn ambiguous_name(models: &ModelState, query: &str) -> Option<String> {
+    if models
+        .available
+        .keys()
+        .any(|id| id.0.as_ref().eq_ignore_ascii_case(query))
+    {
+        return None;
+    }
+    let group = models_named(models, query);
+    if group.len() < 2 {
+        return None;
+    }
+    let ids: Vec<&str> = group.iter().map(|id| id.0.as_ref()).collect();
+    Some(format!(
+        "Several providers serve '{query}'. Pick one: {}",
+        ids.join(", ")
+    ))
+}
+
+/// The models behind a shared name, and the name's length, when `args_query`
+/// is `"<shared name> ..."`. Longest name first, so a name that is a prefix of
+/// another does not win.
+fn detect_route_phase<'a>(
+    models: &'a ModelState,
+    args_query: &str,
+) -> Option<(Vec<&'a acp::ModelId>, usize)> {
+    let mut names: Vec<&str> = models
+        .available
+        .iter()
+        .filter(|(id, _)| name_is_shared(models, id))
+        .map(|(_, info)| info.name.as_str())
+        .collect();
+    names.sort_by_key(|name| std::cmp::Reverse(name.len()));
+    names
+        .into_iter()
+        .find(|name| leads_with(args_query, name))
+        .map(|name| (models_named(models, name), name.len()))
+}
+
+/// Trailing space on reasoning models: it signals "more input expected" to
+/// the prompt widget, so Enter advances to the effort phase instead of
+/// submitting.
+fn chained_insert(token: &str, info: &acp::ModelInfo) -> String {
+    if supports_reasoning_effort(info) {
+        format!("{token} ")
+||||||| base
+fn split_model_effort<'a>(
+    models: &'a ModelState,
+    args: &'a str,
+) -> Option<(acp::ModelId, &'a str)> {
+    let (id, _, rest) = longest_reasoning_prefix(models, args)?;
+    let token = rest.trim();
+    if token.is_empty() {
+        None
+=======
 fn split_model_rest<'a>(models: &'a ModelState, args: &'a str) -> Option<(acp::ModelId, &'a str)> {
     let (id, _, rest) = longest_chained_prefix(models, args)?;
     let rest = rest.trim();
     if rest.is_empty() {
         None
+>>>>>>> upstream
     } else {
+<<<<<<< fork
+        token.to_owned()
+||||||| base
+        Some((id.clone(), token))
+=======
         Some((id.clone(), rest))
+>>>>>>> upstream
     }
 }
 
+<<<<<<< fork
+/// The row description: the model's own, else where it routes.
+fn row_description(info: &acp::ModelInfo) -> String {
+    match info.description.as_deref() {
+        Some(d) if !d.trim().is_empty() => d.to_owned(),
+        _ => route_label(info)
+            .map(|route| format!("via {route}"))
+            .unwrap_or_default(),
+    }
+}
+
+/// One row per route for the `/model` route phase. A route that differs from
+/// the others only in its id shows its id.
+fn build_route_items(models: &ModelState, group: &[&acp::ModelId]) -> Vec<ArgItem> {
+    let labels: Vec<String> = group
+        .iter()
+        .map(|id| {
+            models
+                .available
+                .get(*id)
+                .and_then(route_label)
+                .unwrap_or_else(|| id.0.to_string())
+        })
+        .collect();
+    let mut items = Vec::with_capacity(group.len());
+    for (idx, id) in group.iter().enumerate() {
+        let Some(info) = models.available.get(*id) else {
+            continue;
+        };
+        let Some(label) = labels.get(idx) else {
+            continue;
+        };
+        let shared_label = labels.iter().filter(|l| *l == label).count() > 1;
+        let mut display = if shared_label {
+            id.0.to_string()
+        } else {
+            label.clone()
+        };
+        if models.current.as_ref() == Some(*id) {
+            display.push_str(" (current)");
+        }
+        items.push(ArgItem {
+            display,
+            match_text: format!("{} {}", label, id.0),
+            insert_text: chained_insert(id.0.as_ref(), info),
+            description: info.description.clone().unwrap_or_default(),
+            loaded_in_vram: loaded_in_vram_meta(info.meta.as_ref()),
+            favorite: is_favorite(info),
+        });
+    }
+    items
+||||||| base
+fn matched_reasoning_prefix(
+    models: &ModelState,
+    args_query: &str,
+) -> Option<(acp::ModelId, String)> {
+    let (id, key, _) = longest_reasoning_prefix(models, args_query)?;
+    Some((id.clone(), key.to_string()))
+=======
 /// A window is always the first token, and the remaining words are the effort.
 fn split_window_effort<'a>(
     rest: &'a str,
@@ -562,15 +613,28 @@ fn split_window_effort<'a>(
         Some(window) => Ok((Some(window), tail)),
         None => Err(unknown_window_error(first, windows)),
     }
+>>>>>>> upstream
 }
 
+<<<<<<< fork
+/// One row per model name. Reasoning models get a trailing space in
+/// `insert_text` so the prompt widget chains into the effort sub-menu. A name
+/// that several models share is one row. It inserts the name and a space,
+/// which opens the route phase: one row per provider serving it.
+/// Every model is listed, except a batch route the session is not running.
+/// The ones the config marked come first, then the newest of each family.
+||||||| base
 /// One row per logical model.
->>>>>>> upstream/main
+/// Reasoning models get a trailing space in `insert_text` so the prompt widget chains into the effort sub-menu.
+=======
+/// One row per logical model.
+>>>>>>> upstream
 fn build_model_items(models: &ModelState) -> Vec<ArgItem> {
     let current_id = models.current.as_ref();
     let mut items: Vec<ArgItem> = Vec::with_capacity(models.available.len());
     let mut grouped: Vec<String> = Vec::new();
     for (id, info) in &models.available {
+<<<<<<< fork
         if is_batch_model(id.0.as_ref()) && current_id != Some(id) {
             continue;
         }
@@ -614,14 +678,17 @@ fn build_model_items(models: &ModelState) -> Vec<ArgItem> {
             });
             continue;
         }
-
+||||||| base
         let is_current = current_id == Some(id);
-<<<<<<< HEAD
-        let mut display = info.name.clone();
-        if is_current {
-            display.push_str(" (current)");
-        }
+        let supports = supports_reasoning_effort(info);
+
+        let display = if is_current {
+            format!("{} (current)", info.name)
+        } else {
+            info.name.clone()
+        };
 =======
+        let is_current = current_id == Some(id);
         let chains = has_chained_args(models, id, info);
 
         let display = if is_current {
@@ -629,14 +696,30 @@ fn build_model_items(models: &ModelState) -> Vec<ArgItem> {
         } else {
             info.name.clone()
         };
+>>>>>>> upstream
 
+<<<<<<< fork
+        let is_current = current_id == Some(id);
+        let mut display = info.name.clone();
+        if is_current {
+            display.push_str(" (current)");
+        }
+||||||| base
+        // A trailing space on reasoning models signals "more input expected" to the prompt widget
+        // Enter then advances to the effort phase instead of submitting
+        let insert_text = if supports {
+            format!("{} ", info.name)
+        } else {
+            info.name.clone()
+        };
+=======
         // The trailing space makes Enter advance to the window or effort phase instead of submitting
         let insert_text = if chains {
             format!("{} ", info.name)
         } else {
             info.name.clone()
         };
->>>>>>> upstream/main
+>>>>>>> upstream
 
         let token = pick_token(models, id);
         items.push(ArgItem {

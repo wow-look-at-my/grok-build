@@ -12,24 +12,30 @@ use std::pin::Pin;
 use std::sync::Arc;
 use xai_grok_tools::types::SharedApiKeyProvider;
 use xai_grok_tools::types::api_key_provider::SideCallBearerError;
-<<<<<<< HEAD
+<<<<<<< fork
 use xai_grok_voice::{Auth, KeyScheme, SharedVoiceAuth, VoiceAuthError, VoiceAuthProvider};
 
+||||||| base
+use xai_grok_voice::{SharedVoiceAuth, VoiceAuthError, VoiceAuthProvider};
+
+=======
+use xai_grok_voice::{SharedVoiceAuth, SttRoutes, VoiceAuthError, VoiceAuthProvider};
+>>>>>>> upstream
 /// Adapts the shell's `ApiKeyProvider` onto [`VoiceAuthProvider`].
 ///
 /// Resolves a token per request (never a static snapshot), so a long session follows the `AuthManager` instead of pinning a token that 401s.
+<<<<<<< fork
 struct AuthManagerVoiceAuth {
     provider: SharedApiKeyProvider,
     auth_manager: Arc<xai_grok_login::AuthManager>,
 }
 
-=======
-use xai_grok_voice::{SharedVoiceAuth, SttRoutes, VoiceAuthError, VoiceAuthProvider};
-/// Adapts the shell's `ApiKeyProvider` onto [`VoiceAuthProvider`].
-///
-/// Resolves a token per request (never a static snapshot), so a long session follows the `AuthManager` instead of pinning a token that 401s.
+||||||| base
 struct AuthManagerVoiceAuth(SharedApiKeyProvider);
->>>>>>> upstream/main
+
+=======
+struct AuthManagerVoiceAuth(SharedApiKeyProvider);
+>>>>>>> upstream
 impl std::fmt::Debug for AuthManagerVoiceAuth {
     fn fmt(&self, f: &mut std::fmt::Formatter<'_>) -> std::fmt::Result {
         f.write_str("AuthManagerVoiceAuth")
@@ -41,7 +47,7 @@ fn voice_auth_error(error: SideCallBearerError) -> VoiceAuthError {
         SideCallBearerError::Missing => VoiceAuthError::NotSignedIn,
     }
 }
-<<<<<<< HEAD
+<<<<<<< fork
 
 /// The side-call bearer is the login token only when it equals the manager's xAI session.
 /// Any other bearer is a static xAI API key.
@@ -59,8 +65,10 @@ fn wire_auth(bearer: String, auth_manager: &xai_grok_login::AuthManager) -> Auth
     }
 }
 
+||||||| base
+
 =======
->>>>>>> upstream/main
+>>>>>>> upstream
 impl VoiceAuthProvider for AuthManagerVoiceAuth {
     fn auth(&self) -> Pin<Box<dyn Future<Output = Result<Auth, VoiceAuthError>> + Send + '_>> {
         let provider = self.provider.clone();
@@ -77,18 +85,23 @@ impl VoiceAuthProvider for AuthManagerVoiceAuth {
 ///
 /// Serves xAI logins and `XAI_API_KEY` / per-model BYOK keys. A foreign-issuer login resolves to
 /// [`VoiceAuthError::ForeignSession`] instead of a bearer.
-<<<<<<< HEAD
+<<<<<<< fork
 pub fn build_voice_auth(auth_manager: Arc<xai_grok_login::AuthManager>) -> SharedVoiceAuth {
     Arc::new(AuthManagerVoiceAuth {
         provider: xai_grok_login::shared_api_key_provider(auth_manager.clone()),
         auth_manager,
     })
+||||||| base
+pub fn build_voice_auth(auth_manager: Arc<xai_grok_login::AuthManager>) -> SharedVoiceAuth {
+    Arc::new(AuthManagerVoiceAuth(
+        xai_grok_login::shared_api_key_provider(auth_manager),
+    ))
 =======
 fn build_voice_auth(auth_manager: Arc<xai_grok_login::AuthManager>) -> SharedVoiceAuth {
     Arc::new(AuthManagerVoiceAuth(
         xai_grok_login::shared_api_key_provider(auth_manager),
     ))
->>>>>>> upstream/main
+>>>>>>> upstream
 }
 /// Streaming bearer, plus the clip transcriber on builds that can transcribe for the signed-in login. The pipeline
 /// consults it only after [`VoiceAuthError::ForeignSession`], so an xAI credential always keeps streaming.

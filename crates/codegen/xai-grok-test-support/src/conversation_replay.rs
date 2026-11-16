@@ -210,12 +210,16 @@ enum NextStep {
     },
     Call {
         entry_index: usize,
-<<<<<<< HEAD
+<<<<<<< fork
         call_id: String,
         pending_check: Option<TextCheck>,
         picked: PickedToolCall,
         narration: Option<String>,
         reasoning: Option<String>,
+||||||| base
+        call_id: String,
+        pending_check: Option<TextCheck>,
+        picked: PickedToolCall,
 =======
         call: ServedCall,
     },
@@ -223,7 +227,7 @@ enum NextStep {
     ParallelCalls {
         entry_index: usize,
         calls: Vec<ServedCall>,
->>>>>>> upstream/main
+>>>>>>> upstream
     },
     Reply {
         entry_index: usize,
@@ -296,7 +300,7 @@ fn render(
             };
             (reply, Some(observed), violation.into_iter().collect())
         }
-<<<<<<< HEAD
+<<<<<<< fork
         NextStep::Call {
             call_id,
             picked,
@@ -318,12 +322,19 @@ fn render(
                     call_id,
                     call: picked,
                 },
+||||||| base
+        NextStep::Call {
+            call_id, picked, ..
+        } => (
+            ModelReply::ToolCall {
+                call_id,
+                call: picked,
 =======
         NextStep::Call { call, .. } => (
             ModelReply::ToolCall {
                 call_id: call.call_id,
                 call: call.picked,
->>>>>>> upstream/main
+>>>>>>> upstream
             },
             held,
             Vec::new(),
@@ -583,7 +594,7 @@ impl ReplayingScript {
             text: entry.reply.clone(),
             usage: entry.usage,
         };
-<<<<<<< HEAD
+<<<<<<< fork
         let arguments = call.resolved_arguments(&request.results);
         Some(match call.tool.pick(&request.offered, &arguments) {
             Some(picked) => NextStep::Call {
@@ -593,6 +604,17 @@ impl ReplayingScript {
                 picked,
                 narration: call.narration.clone(),
                 reasoning: call.reasoning.clone(),
+            },
+            None => NextStep::NotOffered {
+                entry_index: index,
+                violation: ScriptViolation::ToolNotOffered {
+||||||| base
+        Some(match call.tool.pick(&request.offered, &call.arguments) {
+            Some(picked) => NextStep::Call {
+                entry_index: index,
+                call_id,
+                pending_check: call.result_check.clone(),
+                picked,
             },
             None => NextStep::NotOffered {
                 entry_index: index,
@@ -607,7 +629,7 @@ impl ReplayingScript {
                     picked,
                 }),
                 None => Err(ScriptViolation::ToolNotOffered {
->>>>>>> upstream/main
+>>>>>>> upstream
                     conversation: request.conversation.number(),
                     call_id,
                     tool: call.tool.clone(),

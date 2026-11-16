@@ -1517,8 +1517,10 @@ fn prompt_response_resets_turn_state() {
     assert_eq!(agent_ref(&app, id).scrollback.len(), 1);
 }
 
-<<<<<<< HEAD
+<<<<<<< fork
 /// Turn end with prompt suggestions enabled fires the `example.invalid/suggestPrompt` fetch (before the billing refresh).
+||||||| base
+/// Turn end with prompt suggestions enabled fires the `x.ai/suggestPrompt` fetch (before the billing refresh).
 =======
 /// A turn that ends through its prompt response returns freed pages exactly once, counted on the dispatching thread.
 #[test]
@@ -1543,7 +1545,7 @@ fn prompt_response_releases_retained_memory_once() {
 }
 
 /// Turn end with prompt suggestions enabled fires the `x.ai/suggestPrompt` fetch (before the billing refresh).
->>>>>>> upstream/main
+>>>>>>> upstream
 /// The loaded suggestion routes back into the agent's controller by id and generation.
 #[test]
 fn turn_end_fetches_prompt_suggestion_when_enabled() {

@@ -38,13 +38,15 @@ pub(in crate::app) use auth::scrollback_has_recent_error_banner;
 pub(crate) use billing::{
     CREDIT_LIMIT_RETRY_OPTION_ID, UPSELL_URL_PAYG, UPSELL_URL_UPGRADE, is_credit_limit_error,
 };
-<<<<<<< HEAD
+<<<<<<< fork
 pub(crate) use dashboard::{DashboardStopReadiness, dashboard_stop_readiness, overlay_cycle_ids};
+||||||| base
+pub(crate) use dashboard::{DashboardStopReadiness, dashboard_stop_readiness};
 =======
 #[cfg(test)]
 pub(crate) use ctx::{SwitchCause, switch_to_agent};
 pub(crate) use dashboard::{DashboardStopReadiness, dashboard_stop_readiness};
->>>>>>> upstream/main
+>>>>>>> upstream
 pub(crate) use modes::{downgrade_displayed_auto_if_gated, effective_auto};
 pub(crate) use notes::FEEDBACK_TRACE_UPLOAD_TIMEOUT_MS;
 pub(crate) use notes::{
@@ -65,14 +67,21 @@ pub(in crate::app) use rewind::find_user_prompt_entry_for_shell_index;
 pub(crate) use router::{dispatch, flush_image_notices};
 pub(crate) use session::lifecycle::{abandon_unused_home_session, maybe_create_home_session};
 pub(crate) use settings::ui::refresh_open_settings_modals;
-<<<<<<< HEAD
+<<<<<<< fork
+pub(crate) use turn::{reconcile_overdue_cancels, reconcile_overdue_turn_ends};
+
+// Test-only consumers (cfg(test) mods elsewhere in the crate); a plain re-export trips -D unused-imports in the lib build
+#[cfg(test)]
+pub(crate) use ctx::{SwitchCause, switch_to_agent};
+||||||| base
+pub(crate) use status::commit_minimal_update_notice;
 pub(crate) use turn::{reconcile_overdue_cancels, reconcile_overdue_turn_ends};
 
 // Test-only consumers (cfg(test) mods elsewhere in the crate); a plain re-export trips -D unused-imports in the lib build
 #[cfg(test)]
 pub(crate) use ctx::{SwitchCause, switch_to_agent};
 =======
->>>>>>> upstream/main
+>>>>>>> upstream
 #[cfg(test)]
 pub(crate) use settings::ui::{ROLLBACK_NO_ARM_TOAST, build_pager_snapshot};
 pub(crate) use status::commit_minimal_update_notice;

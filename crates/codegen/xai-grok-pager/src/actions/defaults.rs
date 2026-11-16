@@ -312,11 +312,13 @@ pub(super) fn default_actions(mouse_reporting_toggle_enabled: bool) -> Vec<Actio
             hint_key_display: Some("Shift+Tab"),
             requires_confirmation: false,
             long_help: Some(
-<<<<<<< HEAD
+<<<<<<< fork
                 "Steps the session mode: Plan -> Auto -> Always-Approve -> Orchestrator -> Explore -> Plan.\nPlan keeps the agent planning first and writes no files; Always-Approve runs every tool call without asking; Orchestrator and Explore live-switch the active agent.\nCtrl+O toggles auto-approve directly.",
+||||||| base
+                "Steps the session mode: Normal -> Plan -> Always-Approve -> Normal.\nPlan keeps the agent planning first and writes no files; Always-Approve runs every tool call without asking.\nCtrl+O toggles auto-approve directly.",
 =======
                 "Steps the session mode: Normal -> Plan -> Auto-review (when enabled) -> Always-Approve -> Normal.\nPlan keeps the agent planning first and writes no files; Auto-review has a classifier approve safe tool calls; Always-Approve runs every tool call without asking.\nCtrl+O toggles auto-approve directly.",
->>>>>>> upstream/main
+>>>>>>> upstream
             ),
         },
         // ── Panes (agent-level: toggle side panes) ─────────────────

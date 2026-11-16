@@ -10,7 +10,7 @@ use xai_grok_config::effective_config::{
     CampaignOverlay, CampaignSources, cached_remote_campaigns, dismiss_campaign_ids,
     remote_campaigns_from_settings, resolve_dismissable_campaigns, set_remote_campaigns,
 };
-<<<<<<< HEAD
+<<<<<<< fork
 use xai_grok_config_types::{CampaignOverride, RemoteSettings};
 
 /// FIFO cap on persisted dismissed ids.
@@ -368,8 +368,234 @@ mod config_url_tests {
         );
     }
 }
+||||||| base
+use xai_grok_config_types::{CampaignOverride, RemoteSettings};
+
+/// FIFO cap on persisted dismissed ids.
+/// Evicting the oldest can re-nudge for a still-live campaign after a user dismisses more than this over the CLI's life.
+const MAX_DISMISSED_IDS: usize = 32;
+
+static DISMISS_LOCK: std::sync::Mutex<()> = std::sync::Mutex::new(());
+static DISMISS_TMP_NONCE: AtomicU64 = AtomicU64::new(0);
+
+static REMOTE_CAMPAIGN_CACHE: RwLock<Vec<CampaignEntry>> = RwLock::new(Vec::new());
+
+/// Seed the process-global remote campaign cache.
+/// A `None` settings value (e.g. a failed fetch) is a no-op so it can't clobber a previously-seeded cache.
+/// `Some` with zero campaigns legitimately clears it (campaigns withdrawn).
+pub fn set_remote_campaigns_from_settings(remote: Option<&RemoteSettings>) {
+    let Some(remote) = remote else {
+        return;
+    };
+    set_remote_campaigns(remote_campaigns_from_settings(Some(remote)));
+}
+
+fn set_remote_campaigns(entries: Vec<CampaignEntry>) {
+    if let Ok(mut g) = REMOTE_CAMPAIGN_CACHE.write() {
+        *g = entries;
+    }
+}
+
+fn cached_remote_campaigns() -> Vec<CampaignEntry> {
+    REMOTE_CAMPAIGN_CACHE
+        .read()
+        .map(|g| g.clone())
+        .unwrap_or_default()
+}
+
+/// Fail-open dismissed campaign ids from `campaigns_state.json`.
+pub(crate) fn load_dismissed_ids() -> HashSet<String> {
+    load_dismissed_ids_from_home()
+}
+
+pub(crate) fn dismiss_campaign_ids(ids: impl IntoIterator<Item = String>) {
+    let Some(home) = user_grok_home() else {
+        return;
+    };
+    if let Err(e) = dismiss_campaign_ids_at(&home, ids) {
+        tracing::warn!(error = %e, "campaigns: failed to persist dismiss state");
+    }
+}
+
+/// Append `ids` to the dismissed set and write `campaigns_state.json` atomically (write to a temp file, then rename).
+/// Corrupt prior state is renamed aside, not discarded.
+fn dismiss_campaign_ids_at(
+    home: &Path,
+    ids: impl IntoIterator<Item = String>,
+) -> std::io::Result<()> {
+    use fs2::FileExt as _;
+    let _guard = DISMISS_LOCK.lock().unwrap_or_else(|p| p.into_inner());
+    let path = campaigns_state_path(home);
+    // Cross-process advisory lock over the read-modify-write: in leader mode several grok processes share `$GROK_HOME`
+    // The in-process mutex alone would let one process overwrite another's update
+    // The lock is best-effort; a lock failure still proceeds
+    let lock = std::fs::OpenOptions::new()
+        .create(true)
+        .truncate(false)
+        .write(true)
+        .open(path.with_extension("json.lock"));
+    if let Ok(ref f) = lock {
+        let _ = f.lock_exclusive();
+    }
+    let mut ordered = match std::fs::read_to_string(&path) {
+        Ok(contents) => match serde_json::from_str::<CampaignsState>(&contents) {
+            Ok(s) => s.dismissed_ids,
+            Err(e) => {
+                let _ = std::fs::rename(&path, path.with_extension("json.corrupt"));
+                tracing::warn!(error = %e, "campaigns: corrupt dismiss state; renamed aside");
+                Vec::new()
+            }
+        },
+        Err(e) if e.kind() == std::io::ErrorKind::NotFound => Vec::new(),
+        Err(e) => return Err(e),
+    };
+    let mut seen: HashSet<String> = ordered.iter().cloned().collect();
+    for id in ids {
+        if id.is_empty() || !seen.insert(id.clone()) {
+            continue;
+        }
+        ordered.push(id);
+    }
+    if ordered.len() > MAX_DISMISSED_IDS {
+        let drop_n = ordered.len() - MAX_DISMISSED_IDS;
+        ordered.drain(..drop_n);
+    }
+    let json = serde_json::to_string(&CampaignsState {
+        dismissed_ids: ordered,
+    })
+    .map_err(std::io::Error::other)?;
+    let nonce = DISMISS_TMP_NONCE.fetch_add(1, Ordering::Relaxed);
+    let tmp = path.with_extension(format!("json.{}.{}.tmp", std::process::id(), nonce));
+    std::fs::write(&tmp, &json)?;
+    std::fs::rename(&tmp, &path).inspect_err(|_| {
+        let _ = std::fs::remove_file(&tmp);
+    })
+}
+
+/// `GROK_CAMPAIGNS_OVERRIDE` JSON array replaces all sources (`[]` means none; it beats the kill switch).
+/// Invalid JSON also resolves to none: the var's intent is "replace campaigns with exactly this".
+/// A typo must not silently fall back to the real sources it was meant to replace.
+pub(crate) fn campaigns_override() -> Option<Vec<CampaignEntry>> {
+    let json = std::env::var("GROK_CAMPAIGNS_OVERRIDE").ok()?;
+    match serde_json::from_str::<Vec<CampaignOverride>>(&json) {
+        Ok(list) => Some(
+            list.into_iter()
+                .filter_map(remote_campaign_to_entry)
+                .collect(),
+        ),
+        Err(e) => {
+            tracing::warn!(error = %e, "invalid GROK_CAMPAIGNS_OVERRIDE JSON; suppressing all campaigns");
+            Some(Vec::new())
+        }
+    }
+}
+
+fn remote_campaign_to_entry(c: CampaignOverride) -> Option<CampaignEntry> {
+    let id = c.id.as_deref()?.trim();
+    if id.is_empty() {
+        return None;
+    }
+    let id = id.to_owned();
+    // The patch may set any field with no allowlist filtering; `ConfigLayers::apply_campaign_overrides` restores requirements precedence
+    let patch = match toml::Value::try_from(serde_json::Value::Object(c.patch)) {
+        Ok(toml::Value::Table(t)) => t,
+        Ok(_) => return None,
+        Err(e) => {
+            tracing::warn!(error = %e, %id, "campaigns: invalid remote patch; ignoring");
+            return None;
+        }
+    };
+    if patch.is_empty() {
+        return None;
+    }
+    Some(CampaignEntry { id, patch })
+}
+
+pub fn remote_campaigns_from_settings(remote: Option<&RemoteSettings>) -> Vec<CampaignEntry> {
+    remote
+        .map(|rs| {
+            rs.campaigns
+                .iter()
+                .cloned()
+                .filter_map(remote_campaign_to_entry)
+                .collect()
+        })
+        .unwrap_or_default()
+}
+
+/// The single campaign-resolution path: `GROK_CAMPAIGNS_OVERRIDE` first (it replaces all sources and beats the kill switch).
+/// After the override come the kill switch, then the layer and remote merge, then the dismiss filter.
+/// `base` is the pre-campaign effective config, used only for the kill-switch check.
+pub(crate) fn resolve_active_campaigns_from_layers(
+    layers: &ConfigLayers,
+    base: &toml::Value,
+    remote_entries: &[CampaignEntry],
+    dismissed: &HashSet<String>,
+) -> Vec<CampaignEntry> {
+    if let Some(over) = campaigns_override() {
+        return filter_active_campaigns(over, dismissed);
+    }
+    layers.resolve_campaigns(base, remote_entries, dismissed)
+}
+
+/// Campaigns eligible for dismissal when the user persists a choice (loads the layers, the remote cache, and the dismiss state).
+/// Unlike the apply path this deliberately **ignores the kill switch**: dismissing a suppressed campaign is harmless.
+/// Skipping the dismissal lets a later re-enabled campaign override a choice the user already made ("user pick wins, forever"). A layer-load failure likewise falls back to the remote cache instead of failing closed: remote campaigns still get dismissed on that path. Disk-layer campaigns can be missed until the transient failure clears (they re-dismiss on the next pick).
+fn resolve_dismissable_campaigns() -> Vec<CampaignEntry> {
+    let dismissed = load_dismissed_ids();
+    if let Some(over) = campaigns_override() {
+        return filter_active_campaigns(over, &dismissed);
+    }
+    let remote_entries = cached_remote_campaigns();
+    match ConfigLayers::load() {
+        Ok(layers) => filter_active_campaigns(
+            merge_campaign_entries(&layers.campaign_source_slices(&remote_entries)),
+            &dismissed,
+        ),
+        Err(e) => {
+            tracing::warn!(error = %e, "campaigns: layer load failed; dismiss bookkeeping using remote cache only");
+            filter_active_campaigns(remote_entries, &dismissed)
+        }
+    }
+}
+
+/// Effective config with the remote/override-aware campaign overlay, from one `ConfigLayers::load`.
+pub fn load_effective_config() -> std::io::Result<toml::Value> {
+    load_effective_config_with_layers().map(|(_, effective)| effective)
+}
+
+/// What [`load_effective_config`] merged: the layers and the campaign patches it applied, highest priority first.
+pub struct EffectiveConfigLayers {
+    pub layers: ConfigLayers,
+    pub active_campaigns: Vec<CampaignEntry>,
+}
+
+/// [`load_effective_config`] plus its inputs, for a caller that also reads the layers one by one.
+pub fn load_effective_config_with_layers() -> std::io::Result<(EffectiveConfigLayers, toml::Value)>
+{
+    let layers = ConfigLayers::load()?;
+    let dismissed = load_dismissed_ids();
+    let remote = cached_remote_campaigns();
+    let mut effective = layers.effective_config_base();
+    let active = resolve_active_campaigns_from_layers(&layers, &effective, &remote, &dismissed);
+    layers.apply_campaign_overrides(&mut effective, &active);
+    Ok((
+        EffectiveConfigLayers {
+            layers,
+            active_campaigns: active,
+        },
+        effective,
+    ))
+}
+
+/// Effective config with **disk campaigns only**: no remote cache, no `GROK_CAMPAIGNS_OVERRIDE`.
+/// One-shot CLI entrypoints that never fetch remote settings use this.
+/// Calling [`load_effective_config`] there would silently resolve against a never-seeded cache.
+pub fn load_effective_config_disk_only() -> std::io::Result<toml::Value> {
+    Ok(ConfigLayers::load()?.effective_config_disk_only())
+}
 =======
->>>>>>> upstream/main
+>>>>>>> upstream
 
 /// The effective `models.default` while an **active** campaign drives it, plus the pre-campaign base value it overrode.
 pub struct CampaignModelsDefault {

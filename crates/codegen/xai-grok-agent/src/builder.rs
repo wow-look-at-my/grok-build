@@ -950,11 +950,7 @@ impl AgentBuilder {
             tool_config.tools.retain(|tc| tc.id != task_tool_id);
             task_stripped = true;
         } else {
-<<<<<<< HEAD
-            let mut subagents = {
-=======
             subagents = {
->>>>>>> upstream/main
                 let _subagent_timer = build_step_timer!("subagent_discovery");
                 crate::discovery::all_subagents_with_plugins(
                     &self.working_directory,
@@ -1044,7 +1040,7 @@ impl AgentBuilder {
             tool_config.tools = listed.tools.into_iter().cloned().collect();
         }
         if !definition.tools.is_empty() {
-<<<<<<< HEAD
+<<<<<<< fork
             let has_agent_entry = definition
                 .tools
                 .iter()
@@ -1090,17 +1086,71 @@ impl AgentBuilder {
                 }
             }
             if !recognized_but_unavailable.is_empty() {
+||||||| base
+            let has_agent_entry = definition
+                .tools
+                .iter()
+                .any(|t| AGENT_TASK_CLASSIFIER_RE.is_match(t));
+            let task_deps = ["task", "get_task_output", "kill_task", "wait_tasks"];
+            let registered_tool_ids = tool_bridge_builder.known_tool_ids();
+            let present_kinds: std::collections::HashSet<ToolKind> =
+                tool_config.tools.iter().filter_map(|tc| tc.kind).collect();
+            let mut allow_kinds: std::collections::HashSet<ToolKind> =
+                std::collections::HashSet::new();
+            let mut unresolved: Vec<&str> = Vec::new();
+            let mut recognized_but_unavailable: Vec<&str> = Vec::new();
+            for t in &definition.tools {
+                if AGENT_TASK_CLASSIFIER_RE.is_match(t) {
+                    continue;
+                }
+                if t.starts_with("mcp__") {
+                    continue;
+                }
+                if tool_config.tools.iter().any(|tc| tool_id_eq(t, &tc.id)) {
+                    continue;
+                }
+                match claude_tool_kind(t) {
+                    Some(kind) => {
+                        if present_kinds.contains(&kind) {
+                            allow_kinds.insert(kind);
+                        } else {
+                            recognized_but_unavailable.push(t);
+                        }
+                    }
+                    None if registered_tool_ids.iter().any(|id| tool_id_eq(t, id)) => {
+                        recognized_but_unavailable.push(t);
+                    }
+                    None => unresolved.push(t),
+                }
+            }
+            if !recognized_but_unavailable.is_empty() {
 =======
+            let entries: Vec<String> = definition
+                .tools
+                .iter()
+                .filter(|t| {
+                    let removed = names_removed_wait_tool(t);
+                    if removed {
+                        tracing::warn!(
+                            agent = %definition.name,
+                            tool = %t,
+                            "tools allowlist names the wait tool, which does not exist; ignoring it"
+                        );
+                    }
+                    !removed
+                })
+                .cloned()
+                .collect();
             let known_tool_ids = tool_bridge_builder.known_tool_ids();
             let listed = listed_tools(
                 ToolList::Allowlist {
                     known_tool_ids: &known_tool_ids,
                 },
-                &definition.tools,
+                &entries,
                 &tool_config.tools,
             );
             if !listed.unmatched.is_empty() {
->>>>>>> upstream/main
+>>>>>>> upstream
                 tracing::debug!(
                     agent = %definition.name,
                     recognized_but_unavailable = ?listed.unmatched,

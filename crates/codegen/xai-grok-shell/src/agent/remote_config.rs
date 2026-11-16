@@ -7,11 +7,16 @@ mod model_fetch_auth;
 mod prefetch;
 mod resolution;
 pub mod settings_get;
-<<<<<<< HEAD
+<<<<<<< fork
 mod settings_refresh;
 mod synthetic;
+||||||| base
+mod settings_refresh;
+=======
+>>>>>>> upstream
 pub(crate) mod task_model_policy;
 
+<<<<<<< fork
 pub(in crate::agent::remote_config) use cache::ModelsCacheManager;
 pub(crate) use endpoint::{HttpModelsEndpoint, ModelsEndpoint};
 pub(in crate::agent::remote_config) use fetch::{ModelsPrefetch, fetch_models_uncommitted};
@@ -20,31 +25,43 @@ pub(crate) use manager::ModelsManager;
 pub(crate) use metrics::{DegradedStartCause, record_degraded_start};
 pub(in crate::agent::remote_config) use model_fetch_auth::ModelsCacheScope;
 pub(crate) use model_fetch_auth::{CacheAuthMethod, ModelFetchAuth, task_model_error_for_catalog};
+||||||| base
+pub(in crate::agent::remote_config) use cache::ModelsCacheManager;
+pub(crate) use endpoint::{HttpModelsEndpoint, ModelsEndpoint};
+pub(crate) use fetch::prefetch_models_blocking;
+pub(in crate::agent::remote_config) use fetch::{ModelsPrefetch, fetch_models_uncommitted};
+pub(crate) use manager::ModelsManager;
+pub(crate) use metrics::{DegradedStartCause, record_degraded_start};
+pub(in crate::agent::remote_config) use model_fetch_auth::ModelsCacheScope;
+pub(crate) use model_fetch_auth::{CacheAuthMethod, ModelFetchAuth, task_model_error_for_catalog};
 =======
-pub(crate) mod task_model_policy;
-
 pub(crate) use model_fetch_auth::{
     ModelFetchAuth, external_provider_auth, models_fetch_enabled, task_model_error_for_catalog,
 };
 pub(in crate::agent::remote_config) use model_fetch_auth::{
     resolve_live_models_cache_scope, resolve_models_cache_scope,
 };
->>>>>>> upstream/main
+>>>>>>> upstream
 pub(in crate::agent::remote_config) use prefetch::resolve_startup_endpoints;
 pub(crate) use prefetch::{
     ResolvedModels, fetch_initial_models_blocking, start_initial_models_load,
 };
 pub(crate) use resolution::{
-<<<<<<< HEAD
+<<<<<<< fork
     ModelGlobSet, allowlist_denied_message, allowlist_excludes_all_message,
     allowlist_matches_nothing, available_models, is_campaign_only_flip, merge_additive_catalog,
     resolve_catalog_key, resolve_context_window, resolve_context_window_from_provider,
     resolve_default_model, resolve_model_catalog, resolve_route_catalog_key,
+||||||| base
+    ModelGlobSet, allowlist_denied_message, allowlist_excludes_all_message,
+    allowlist_matches_nothing, available_models, is_campaign_only_flip, resolve_catalog_key,
+    resolve_default_model, resolve_model_catalog, selectable_catalog_key_for_persisted,
+    validate_selectable,
 =======
     CatalogSource, allowlist_denied_message, allowlist_excludes_all_message,
     allowlist_matches_nothing, available_models, fallback_model_id, models_endpoint_empty_message,
     resolve_catalog_key, resolve_default_model, resolve_model_catalog,
->>>>>>> upstream/main
+>>>>>>> upstream
     selectable_catalog_key_for_persisted, validate_selectable,
 };
 #[cfg(test)]
@@ -54,13 +71,18 @@ pub(crate) use xai_grok_cloud_config::remote_settings::{
     DegradedStartCause, ModelGlobSet, ModelsCacheScope, is_campaign_only_flip,
     record_degraded_start,
 };
-<<<<<<< HEAD
+<<<<<<< fork
 pub(crate) use settings_cache::SettingsCacheManager;
 pub(in crate::agent::remote_config) use settings_cache::settings_cache_disabled;
 pub(in crate::agent) use settings_refresh::SettingsRefresh;
 pub(crate) use synthetic::{is_synthetic_listing, parse_synthetic_model_entry};
+||||||| base
+pub(crate) use settings_cache::SettingsCacheManager;
+pub(in crate::agent::remote_config) use settings_cache::settings_cache_disabled;
+pub(in crate::agent) use settings_refresh::SettingsRefresh;
 =======
 pub(in crate::agent::remote_config) use xai_grok_cloud_config::resolve_disk_auth;
+>>>>>>> upstream
 
 pub(in crate::agent::remote_config) type ModelsCacheManager =
     xai_grok_cloud_config::remote_settings::ModelsCacheManager<crate::agent::config::ModelEntry>;
@@ -73,7 +95,6 @@ pub(crate) use manager::ModelsManager;
 pub(in crate::agent::remote_config) use xai_grok_cloud_config::remote_settings::ModelsPrefetch;
 #[cfg(test)]
 pub(in crate::agent::remote_config) use xai_grok_cloud_config::remote_settings::evaluate_models_commit;
->>>>>>> upstream/main
 
 // Re-exports reached only through the manager test module.
 #[cfg(test)]

@@ -174,9 +174,13 @@ async fn refresh_plugins_for_cwd(
     if CAPTURE_TRUST_ONLY.load(std::sync::atomic::Ordering::SeqCst) {
         return Some(Arc::new(xai_grok_agent::plugins::PluginRegistry::empty()));
     }
-<<<<<<< HEAD
+<<<<<<< fork
     let disk_cfg = crate::config::resolve_effective_plugins_config(&cwd).to_discovery_config();
     match xai_spawn::spawn_blocking(move || {
+        handle.refresh_and_build_for_cwd(&cwd, &disk_cfg, &session_plugin_dirs, project_trusted)
+||||||| base
+    let disk_cfg = crate::config::resolve_effective_plugins_config(&cwd).to_discovery_config();
+    match tokio::task::spawn_blocking(move || {
         handle.refresh_and_build_for_cwd(&cwd, &disk_cfg, &session_plugin_dirs, project_trusted)
 =======
     match tokio::task::spawn_blocking(move || {
@@ -193,7 +197,7 @@ async fn refresh_plugins_for_cwd(
                 claude_import: crate::claude_import::import_marker(),
             },
         )
->>>>>>> upstream/main
+>>>>>>> upstream
     })
     .await
     {

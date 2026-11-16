@@ -293,8 +293,11 @@ impl SessionActor {
         // Advance the watermark only on success or suppress (not on failure, empty, or cancel) so auto can retry later for this turn
         let clear_in_flight = || self.recap_in_flight.set(false);
 
-<<<<<<< HEAD
+<<<<<<< fork
         let setup = match self.prepare_side_call("recap").await {
+            Ok(s) => s,
+||||||| base
+        let setup = match self.prepare_side_call().await {
             Ok(s) => s,
 =======
         let settings = crate::util::config::resolve_session_recap_settings_from_disk();
@@ -313,7 +316,7 @@ impl SessionActor {
         };
         let (client, model, reasoning_effort) = match self.recap_sampling_client(&settings).await {
             Ok(c) => c,
->>>>>>> upstream/main
+>>>>>>> upstream
             Err(e) => {
                 tracing::warn!(error = %e, "recap: failed to prepare sampling client");
                 clear_in_flight();

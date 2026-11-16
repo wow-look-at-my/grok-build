@@ -104,10 +104,10 @@ impl<S> RouteChoice<S> {
 /// [`VoiceError::Auth`] with the bearer error's own text when the streaming socket has no bearer and no clip
 /// transcriber can stand in; a foreign login without a transcriber keeps its "needs an xAI credential" message.
 #[cfg(any(test, feature = "audio"))]
-fn choose_route(
-    bearer: Result<String, VoiceAuthError>,
+fn choose_route<S>(
+    bearer: Result<S, VoiceAuthError>,
     clip_transcriber: Option<&SharedClipTranscriber>,
-) -> Result<RouteChoice<String>, VoiceError> {
+) -> Result<RouteChoice<S>, VoiceError> {
     match (bearer, clip_transcriber) {
         (Ok(bearer), _) => Ok(RouteChoice::Streaming(bearer)),
         (Err(VoiceAuthError::ForeignSession), Some(transcriber)) => {
@@ -334,17 +334,12 @@ async fn start_capture_session(
     let _drain = xai_spawn::spawn(forward_pcm(mic_rx, audio_tx_rx));
 
     let connect = async {
-<<<<<<< HEAD
-        let auth = crate::auth::require_auth(auth).await?;
-        StreamingSttSession::connect(config, auth).await
-=======
-        match choose_route(routes.auth.bearer().await, routes.clip_transcriber.as_ref())? {
-            RouteChoice::Streaming(bearer) => StreamingSttSession::connect(config, &bearer)
+        match choose_route(routes.auth.auth().await, routes.clip_transcriber.as_ref())? {
+            RouteChoice::Streaming(auth) => StreamingSttSession::connect(config, auth)
                 .await
                 .map(RouteChoice::Streaming),
             RouteChoice::Clip(transcriber) => Ok(RouteChoice::Clip(transcriber)),
         }
->>>>>>> upstream/main
     };
     let (connect_res, capture_res) = tokio::join!(connect, capture_task);
 
@@ -387,16 +382,11 @@ async fn start_capture_session(
     let (finish_tx, mut finish_rx) = mpsc::channel::<()>(1);
 
     let mut capture = Some(capture);
-<<<<<<< HEAD
-    let out = event_tx.clone();
+    let out = events.clone();
     // The handle is kept in `ActivePtt.reader`: the pipeline aborts it on the next
     // press and at shutdown. The task's lifetime is owned rather than dropped.
     #[allow(clippy::disallowed_methods)]
     let reader = xai_spawn::spawn(async move {
-=======
-    let out = events.clone();
-    let reader = tokio::spawn(async move {
->>>>>>> upstream/main
         // Stop the mic before signalling end-of-utterance so no stray PCM is queued after `audio.done`
         // Stopping releases the device and drops the capture thread's clone of the audio sender. `Option::take` makes it idempotent.
         let stop_capture = |capture: &mut Option<crate::audio::CaptureHandle>| {

@@ -69,7 +69,7 @@ fn fetched_model_map(
     fetch_auth: ModelFetchAuth,
 ) -> Option<(IndexMap<String, ModelEntry>, Option<String>)> {
     let _timer = crate::instrumentation_timer!("startup.fetch_models_blocking");
-<<<<<<< HEAD
+<<<<<<< fork
     let fetched_at = Utc::now();
     let result = source.fetch(auth);
     prefetch_from_result(result, endpoints, fetch_auth, scope, fetched_at)
@@ -103,9 +103,12 @@ fn prefetch_from_result(
     fetched_at: DateTime<Utc>,
 ) -> ModelsPrefetch {
     match result {
+||||||| base
+    let fetched_at = Utc::now();
+    match source.fetch(auth) {
 =======
     match source.fetch(auth) {
->>>>>>> upstream/main
+>>>>>>> upstream
         Ok(FetchModelsResult { models, etag }) if !models.is_empty() => {
             let api_base_url_override = match fetch_auth {
                 ModelFetchAuth::ApiKey => Some(endpoints.xai_api_base_url.clone()),
@@ -118,7 +121,7 @@ fn prefetch_from_result(
             Some((map, etag))
         }
         Ok(FetchModelsResult { .. }) => {
-<<<<<<< HEAD
+<<<<<<< fork
             tracing::error!(
                 url = %scope.origin,
                 "models listing is empty: nothing to fall back on if a custom \
@@ -130,7 +133,15 @@ fn prefetch_from_result(
                 Some(serde_json::json!({ "url": scope.origin })),
             );
             ModelsPrefetch::Unavailable
+||||||| base
+            tracing::warn!("Models endpoint returned empty list");
+            ModelsPrefetch::Unavailable
+=======
+            tracing::warn!("Models endpoint returned empty list");
+            None
+>>>>>>> upstream
         }
+<<<<<<< fork
         Err(e) => {
             tracing::error!(
                 url = %scope.origin,
@@ -148,14 +159,15 @@ fn prefetch_from_result(
                 })),
             );
             ModelsPrefetch::Unavailable
+||||||| base
+        Err(e) => {
+            tracing::warn!(error = ?e, "Failed to fetch models");
+            ModelsPrefetch::Unavailable
 =======
-            tracing::warn!("Models endpoint returned empty list");
-            None
-        }
         Err(error) => {
             tracing::warn!(error = ?error, "Failed to fetch models");
             None
->>>>>>> upstream/main
+>>>>>>> upstream
         }
     }
 }

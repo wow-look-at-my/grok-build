@@ -29,7 +29,7 @@ pub fn push_owned_lines(src: &[Line<'_>], out: &mut Vec<Line<'static>>) {
     }
 }
 
-<<<<<<< HEAD
+<<<<<<< fork
 /// True for a character unsafe to render from untrusted or server-supplied text.
 /// C0/C1 controls can inject terminal escapes; the bidi-control and zero-width format characters enable Trojan-Source spoofing.
 /// Every place that scrubs untrusted text (chip labels, toast error scrub, the settings editor input) calls this so the set never drifts.
@@ -47,6 +47,32 @@ pub fn is_unsafe_display_char(c: char) -> bool {
 
 /// Largest byte index `<= index` that is a char boundary in `s`.
 pub use xai_grok_tools::util::floor_char_boundary;
+||||||| base
+/// True for a character unsafe to render from untrusted or server-supplied text.
+/// C0/C1 controls can inject terminal escapes; the bidi-control and zero-width format characters enable Trojan-Source spoofing.
+/// Every place that scrubs untrusted text (chip labels, toast error scrub, the settings editor input) calls this so the set never drifts.
+pub fn is_unsafe_display_char(c: char) -> bool {
+    c.is_control()
+        || matches!(
+            c,
+            '\u{061C}'
+            | '\u{200B}'..='\u{200F}'
+            | '\u{202A}'..='\u{202E}'
+            | '\u{2060}'..='\u{206F}'
+            | '\u{FEFF}'
+        )
+}
+
+/// Polyfill for nightly-only [`str::floor_char_boundary`].
+/// Snaps a byte index down to the nearest char boundary.
+pub fn floor_char_boundary(s: &str, index: usize) -> usize {
+    let index = index.min(s.len());
+    let mut i = index;
+    while i > 0 && !s.is_char_boundary(i) {
+        i -= 1;
+    }
+    i
+}
 =======
 /// Polyfill for nightly-only [`str::floor_char_boundary`].
 /// Snaps a byte index down to the nearest char boundary.
@@ -58,7 +84,7 @@ pub fn floor_char_boundary(s: &str, index: usize) -> usize {
     }
     i
 }
->>>>>>> upstream/main
+>>>>>>> upstream
 
 /// Like [`crate::util::truncate_to_width`] but returns an owned `String`.
 pub fn truncate_str(s: &str, max_width: usize) -> String {

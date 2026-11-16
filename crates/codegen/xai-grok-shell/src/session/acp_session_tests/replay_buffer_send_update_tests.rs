@@ -44,12 +44,14 @@ pub(super) async fn make_replay_send_update_fixture() -> ReplaySendUpdateFixture
     ));
     let sent_ext = Arc::new(tokio::sync::Mutex::new(Vec::<acp::ExtNotification>::new()));
     let sent_for_task = sent.clone();
-<<<<<<< HEAD
+<<<<<<< fork
     xai_spawn::spawn_local(async move {
+||||||| base
+    tokio::task::spawn_local(async move {
 =======
     let sent_ext_for_task = sent_ext.clone();
     tokio::task::spawn_local(async move {
->>>>>>> upstream/main
+>>>>>>> upstream
         while let Some(msg) = gateway_rx.recv().await {
             match msg {
                 xai_acp_lib::AcpClientMessage::SessionNotification(args) => {
@@ -141,7 +143,7 @@ pub(super) async fn make_replay_send_update_fixture() -> ReplaySendUpdateFixture
         rewind_pending_prompt: std::sync::Mutex::new(None),
         startup_hints: StartupHints::default(),
         forked_tool_override: None,
-<<<<<<< HEAD
+<<<<<<< fork
         compaction: crate::session::compaction_config::CompactionConfig {
             threshold_percent: std::cell::Cell::new(85),
             pending_manual_compact: std::cell::Cell::new(None),
@@ -158,9 +160,24 @@ pub(super) async fn make_replay_send_update_fixture() -> ReplaySendUpdateFixture
             cancel: Default::default(),
             context_overflow_recovery: Default::default(),
         },
+||||||| base
+        compaction: crate::session::compaction_config::CompactionConfig {
+            threshold_percent: std::cell::Cell::new(85),
+            force_compact: std::sync::Arc::new(std::sync::atomic::AtomicBool::new(false)),
+            context_window_override: None,
+            count: std::sync::atomic::AtomicU64::new(0),
+            auto_compact_suppressed: std::sync::atomic::AtomicU8::new(0),
+            previous_model: std::cell::Cell::new(None),
+            compaction_mode: xai_chat_state::CompactionMode::Transcript,
+            verbatim_input: true,
+            tool_choice: crate::util::config::CompactionToolChoice::Auto,
+            prefire: crate::session::compaction_config::PrefireState::default(),
+            prefix_released: std::sync::atomic::AtomicBool::new(false),
+            cancel: Default::default(),
+        },
 =======
         compaction: test_compaction_config(85),
->>>>>>> upstream/main
+>>>>>>> upstream
         long_reasoning_reminder: crate::session::long_reasoning_reminder::LongReasoningReminder {
             enabled: false,
             tokens: crate::session::long_reasoning_reminder::DEFAULT_TOKENS,
@@ -556,7 +573,7 @@ async fn available_commands_update_is_forwarded_but_not_persisted() {
         })
         .await;
 }
-<<<<<<< HEAD
+<<<<<<< fork
 
 /// A call is named from the arguments it has so far, not from the arguments
 /// it ends with. Before this the row wore the wire name (`read_file`) for the
@@ -655,6 +672,55 @@ async fn an_unreadable_streaming_call_is_left_unnamed() {
                     streaming_title(&actor, index),
                     None,
                     "index {index} must stay unnamed rather than guess"
+                );
+            }
+        })
+        .await;
+}
+/// A fixture whose registry knows `read_file`, so a streaming call can be
+/// parsed into a typed input and named. The whole fixture comes back: its
+/// gateway and persistence ends have to outlive the actor that sends to them.
+async fn read_file_streaming_fixture() -> ReplaySendUpdateFixture {
+    use xai_grok_tools::implementations::grok_build::read_file::ReadFileTool;
+    use xai_grok_tools::registry::types::ToolConfig;
+    let fixture = make_replay_send_update_fixture().await;
+    *fixture.actor.agent.borrow_mut() =
+        test_agent_with_tools(vec![ToolConfig::for_tool::<ReadFileTool>()]).await;
+    fixture
+}
+/// The actor drops sampler events for a request no turn owns.
+fn own_request(actor: &SessionActor, request_id: &xai_grok_sampler::RequestId) {
+    let (tx, _rx) = tokio::sync::oneshot::channel();
+    actor.turn_stream_drained.lock().insert(
+        request_id.clone(),
+        crate::session::acp_session::StreamOwnership::with_waiter(Some(tx)),
+    );
+}
+/// The title the actor has resolved for the call at `tool_index`, if any.
+fn streaming_title(actor: &SessionActor, tool_index: u32) -> Option<String> {
+    actor
+        .streaming_tool_titles
+        .lock()
+        .get(&tool_index)
+        .and_then(|call| call.title.clone())
+}
+async fn deliver_tool_delta(
+    actor: &Arc<SessionActor>,
+    request_id: &xai_grok_sampler::RequestId,
+    tool_index: u32,
+    name: Option<&str>,
+    arguments_delta: Option<&str>,
+) {
+    actor
+        .handle_sampling_event(xai_grok_sampler::SamplingEvent::ToolCallDelta {
+            request_id: request_id.clone(),
+            tool_index,
+            id: name.map(|_| format!("call-{tool_index}")),
+            name: name.map(str::to_string),
+            arguments_delta: arguments_delta.map(str::to_string),
+        })
+        .await;
+||||||| base
 =======
 #[tokio::test]
 async fn server_overflow_clears_a_larger_context_window_selection() {
@@ -780,57 +846,11 @@ async fn preserve_switch_applies_the_live_selection_while_supported() {
                             .context_window_selection
                             .load(std::sync::atomic::Ordering::Relaxed)
                     )
->>>>>>> upstream/main
                 );
             }
         })
         .await;
 }
-<<<<<<< HEAD
-/// A fixture whose registry knows `read_file`, so a streaming call can be
-/// parsed into a typed input and named. The whole fixture comes back: its
-/// gateway and persistence ends have to outlive the actor that sends to them.
-async fn read_file_streaming_fixture() -> ReplaySendUpdateFixture {
-    use xai_grok_tools::implementations::grok_build::read_file::ReadFileTool;
-    use xai_grok_tools::registry::types::ToolConfig;
-    let fixture = make_replay_send_update_fixture().await;
-    *fixture.actor.agent.borrow_mut() =
-        test_agent_with_tools(vec![ToolConfig::for_tool::<ReadFileTool>()]).await;
-    fixture
-}
-/// The actor drops sampler events for a request no turn owns.
-fn own_request(actor: &SessionActor, request_id: &xai_grok_sampler::RequestId) {
-    let (tx, _rx) = tokio::sync::oneshot::channel();
-    actor.turn_stream_drained.lock().insert(
-        request_id.clone(),
-        crate::session::acp_session::StreamOwnership::with_waiter(Some(tx)),
-    );
-}
-/// The title the actor has resolved for the call at `tool_index`, if any.
-fn streaming_title(actor: &SessionActor, tool_index: u32) -> Option<String> {
-    actor
-        .streaming_tool_titles
-        .lock()
-        .get(&tool_index)
-        .and_then(|call| call.title.clone())
-}
-async fn deliver_tool_delta(
-    actor: &Arc<SessionActor>,
-    request_id: &xai_grok_sampler::RequestId,
-    tool_index: u32,
-    name: Option<&str>,
-    arguments_delta: Option<&str>,
-) {
-    actor
-        .handle_sampling_event(xai_grok_sampler::SamplingEvent::ToolCallDelta {
-            request_id: request_id.clone(),
-            tool_index,
-            id: name.map(|_| format!("call-{tool_index}")),
-            name: name.map(str::to_string),
-            arguments_delta: arguments_delta.map(str::to_string),
-        })
-        .await;
-=======
 /// Stores `window` as the selection and returns a config that uses it.
 fn selected_window_config(
     actor: &SessionActor,
@@ -846,5 +866,5 @@ fn selected_window_config(
         context_window: std::num::NonZeroU64::new(window).unwrap(),
         ..Default::default()
     }
->>>>>>> upstream/main
+>>>>>>> upstream
 }

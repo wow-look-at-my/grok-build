@@ -2272,8 +2272,10 @@ fn render_welcome_done(
             usage_warning_critical,
         };
 
-<<<<<<< HEAD
+<<<<<<< fork
         let (cp, pf, hash_rect) = render_prompt_and_version(
+||||||| base
+        render_prompt_and_version(
 =======
         if let Some(notice) = p.model_notice {
             crate::views::model_notice_banner::render(
@@ -2283,7 +2285,7 @@ fn render_welcome_done(
             );
         }
         render_prompt_and_version(
->>>>>>> upstream/main
+>>>>>>> upstream
             &layout,
             content_area.width,
             buf,

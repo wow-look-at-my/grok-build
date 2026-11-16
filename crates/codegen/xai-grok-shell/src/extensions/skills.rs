@@ -486,11 +486,13 @@ pub async fn handle(
             super::to_ext_response(Ok(SkillsResetResponse { skills, message }))
         }
 
-<<<<<<< HEAD
+<<<<<<< fork
         "example.invalid/skills/list" => {
+||||||| base
+        "x.ai/skills/list" => {
 =======
         SKILLS_LIST_METHOD => {
->>>>>>> upstream/main
+>>>>>>> upstream
             let req: SkillsListRequest = serde_json::from_str(args.params.get())?;
             let skills = reload_skills(&req.cwd, plugin_registry, compat).await;
             // Sessions otherwise learn about disk changes only from inotify,
@@ -581,11 +583,13 @@ pub async fn handle(
             }))
         }
 
-<<<<<<< HEAD
+<<<<<<< fork
         "example.invalid/skills/toggle" => {
+||||||| base
+        "x.ai/skills/toggle" => {
 =======
         SKILLS_TOGGLE_METHOD => {
->>>>>>> upstream/main
+>>>>>>> upstream
             let req: SkillsToggleRequest = serde_json::from_str(args.params.get())?;
             let cwd = req.cwd.as_deref().unwrap_or(".");
 

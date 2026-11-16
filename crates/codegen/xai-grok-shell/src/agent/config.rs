@@ -18,17 +18,21 @@ use xai_grok_config::{Capability, Distribution};
 use xai_grok_login::{AuthManager, GrokComConfig};
 use xai_grok_sampler::{AuthScheme, SamplerConfig};
 use xai_grok_sampling_types::{
-<<<<<<< HEAD
+<<<<<<< fork
     CompactionAtTokens, CompactionsRemaining, ENDPOINT_META_KEY, FAVORITE_META_KEY,
     LOADED_IN_VRAM_META_KEY, PROVIDER_META_KEY, REASONING_EFFORT_META_KEY,
     REASONING_EFFORTS_META_KEY, ReasoningEffort, ReasoningEffortOption, ReasoningSummary,
     endpoint_host, reasoning_effort_meta_value, reasoning_efforts_meta_value,
+||||||| base
+    CompactionAtTokens, CompactionsRemaining, REASONING_EFFORT_META_KEY,
+    REASONING_EFFORTS_META_KEY, ReasoningEffort, ReasoningEffortOption, ReasoningSummary,
+    reasoning_effort_meta_value, reasoning_efforts_meta_value,
 =======
     CONTEXT_WINDOWS_META_KEY, CompactionAtTokens, CompactionsRemaining, MODEL_NOTICE_META_KEY,
     ModelNotice, REASONING_EFFORT_META_KEY, REASONING_EFFORTS_META_KEY, ReasoningEffort,
     ReasoningEffortOption, ReasoningSummary, context_windows_meta_value,
     reasoning_effort_meta_value, reasoning_efforts_meta_value,
->>>>>>> upstream/main
+>>>>>>> upstream
 };
 use xai_grok_tools::types::compat::{CompatConfig, CompatConfigToml};
 /// Determines behavior like relay sync enablement.
@@ -54,14 +58,17 @@ pub const DEFAULT_AGENT_TYPE: &str = "grok-build-plan";
 pub(crate) fn default_agent_type() -> String {
     DEFAULT_AGENT_TYPE.to_owned()
 }
-<<<<<<< HEAD
+<<<<<<< fork
 /// Default base URL for the asset server (profile images, etc.).
 pub const ASSET_SERVER_URL_DEFAULT: &str = "https://assets.grok.invalid";
 pub const CLI_CHAT_PROXY_BASE_URL_DEFAULT: &str = "https://cli-chat-proxy.grok.invalid/v1";
 pub const XAI_API_BASE_URL_DEFAULT: &str = "https://api.example.invalid/v1";
+||||||| base
+pub const CLI_CHAT_PROXY_BASE_URL_DEFAULT: &str = "https://cli-chat-proxy.grok.com/v1";
+pub const XAI_API_BASE_URL_DEFAULT: &str = "https://api.x.ai/v1";
 =======
 pub use xai_grok_config::{CLI_CHAT_PROXY_BASE_URL_DEFAULT, EndpointsConfig};
->>>>>>> upstream/main
+>>>>>>> upstream
 const NO_INLINE_CITATIONS_RESPONSE_INCLUDE: &str = "no_inline_citations";
 /// One or more environment variable names that may hold a model API key.
 /// Serde `untagged`: accepts a string or an array in TOML/JSON.
@@ -141,7 +148,7 @@ impl std::fmt::Display for EnvKeys {
         f.write_str(&self.names().join(", "))
     }
 }
-<<<<<<< HEAD
+<<<<<<< fork
 /// Configuration for API endpoints.
 #[derive(Debug, Clone, Serialize, schemars::JsonSchema)]
 #[serde(default)]
@@ -638,6 +645,317 @@ impl EndpointsConfig {
     }
     /// The proxy upload method for `auth_token`. Without a token there is no upload method.
     pub fn resolve_upload_method(
+||||||| base
+#[derive(Debug, Clone, Serialize, Deserialize)]
+#[serde(default)]
+pub struct EndpointsConfig {
+    /// cli chat proxy base URL.
+    /// `None` means unset (resolvers apply the default); `Some` means explicitly configured.
+    /// Tracking explicitness (vs comparing to the default value) lets an org pin the proxy to the default on purpose.
+    #[serde(skip_serializing_if = "Option::is_none")]
+    pub cli_chat_proxy_base_url: Option<String>,
+    /// Base URL for the public xAI API.
+    pub xai_api_base_url: String,
+    /// Optional extra access-header value (applied only with the optional non-production feature, and only for matching first-party hosts).
+    #[serde(skip_serializing_if = "Option::is_none")]
+    pub alpha_test_key: Option<String>,
+    /// Env: `GROK_MODELS_BASE_URL`. Enables custom endpoint mode.
+    /// List URL defaults to `{models_base_url}/models`.
+    #[serde(skip_serializing_if = "Option::is_none")]
+    pub models_base_url: Option<String>,
+    /// Env: `GROK_MODELS_LIST_URL`. Overrides the default `{base}/models` list URL.
+    #[serde(alias = "models_endpoint", skip_serializing_if = "Option::is_none")]
+    pub models_list_url: Option<String>,
+    /// Env: `GROK_FEEDBACK_BASE_URL`. Where feedback submissions go.
+    #[serde(skip_serializing_if = "Option::is_none")]
+    pub feedback_base_url: Option<String>,
+    /// Env: `GROK_TRACE_UPLOAD_URL`. Where trace uploads go.
+    #[serde(skip_serializing_if = "Option::is_none")]
+    pub trace_upload_url: Option<String>,
+    /// Env: `GROK_TRACE_UPLOAD_BUCKET`. Direct bucket (`gs://` or `s3://`), bypasses proxy.
+    #[serde(skip_serializing_if = "Option::is_none")]
+    pub trace_upload_bucket: Option<String>,
+    /// Env: `GROK_TRACE_UPLOAD_REGION`. AWS region (S3 only).
+    #[serde(skip_serializing_if = "Option::is_none")]
+    pub trace_upload_region: Option<String>,
+    /// Env: `GROK_TRACE_UPLOAD_CREDENTIALS_FILE`. Path to GCS SA key or AWS credentials file.
+    #[serde(skip_serializing_if = "Option::is_none")]
+    pub trace_upload_credentials_file: Option<String>,
+    /// Inline credentials (JSON/INI). Takes precedence over `credentials_file`.
+    #[serde(skip_serializing_if = "Option::is_none")]
+    pub trace_upload_credentials: Option<String>,
+    /// Env: `GROK_TRACE_UPLOAD_ENDPOINT_URL`. Custom S3-compatible endpoint.
+    #[serde(skip_serializing_if = "Option::is_none")]
+    pub trace_upload_endpoint_url: Option<String>,
+    /// Env: `GROK_DEPLOYMENT_KEY`. Management API key for enterprise deployments.
+    /// Sent on telemetry and service requests for deployment-level attribution.
+    #[serde(skip_serializing_if = "Option::is_none")]
+    pub deployment_key: Option<String>,
+    /// Env: `GROK_MANAGED_CONFIG_URL`. Override the managed config endpoint.
+    /// Defaults to `{proxy_url()}/deployment/config`.
+    #[serde(skip_serializing_if = "Option::is_none")]
+    pub managed_config_url: Option<String>,
+    /// Env: `OTEL_EXPORTER_OTLP_ENDPOINT`. OTLP collector base; `/v1/traces` is appended.
+    /// Legacy repoint of the INTERNAL trace pipeline, deprecated in favor of `GROK_INTERNAL_OTLP_TRACES_ENDPOINT`.
+    /// Ignored by the internal pipeline when `GROK_EXTERNAL_OTEL` is set (the standard `OTEL_*` vars then route the external stream only).
+    #[serde(skip_serializing_if = "Option::is_none")]
+    pub otel_exporter_otlp_endpoint: Option<String>,
+    /// Env: `OTEL_EXPORTER_OTLP_TRACES_ENDPOINT`.
+    /// Full traces endpoint, used verbatim; overrides `otel_exporter_otlp_endpoint`.
+    /// Same legacy/deprecation semantics as `otel_exporter_otlp_endpoint`.
+    #[serde(skip_serializing_if = "Option::is_none")]
+    pub otel_exporter_otlp_traces_endpoint: Option<String>,
+    /// Env: `OTEL_EXPORTER_OTLP_HEADERS`. `k=v,k2=v2`; merged onto export headers.
+    /// Same legacy/deprecation semantics as `otel_exporter_otlp_endpoint`.
+    #[serde(skip_serializing_if = "Option::is_none")]
+    pub otel_exporter_otlp_headers: Option<String>,
+    /// Env: `GROK_INTERNAL_OTLP_TRACES_ENDPOINT`. Full INTERNAL traces endpoint, used verbatim.
+    /// Dev/debug repoint of the internal span firehose (replaces the legacy `OTEL_EXPORTER_OTLP_TRACES_ENDPOINT` behavior).
+    /// Used by local-ic-testing / internal dev flows. Wins over the legacy `OTEL_*` vars.
+    #[serde(skip_serializing_if = "Option::is_none")]
+    pub grok_internal_otlp_traces_endpoint: Option<String>,
+    /// Env: `GROK_INTERNAL_OTLP_HEADERS`.
+    /// `k=v,k2=v2` extra headers for the internal export (debug).
+    /// Wins over the legacy `OTEL_EXPORTER_OTLP_HEADERS`.
+    #[serde(skip_serializing_if = "Option::is_none")]
+    pub grok_internal_otlp_headers: Option<String>,
+    /// External-OTEL master switch, captured at construction via [`external_otel_master_switch_resolved`].
+    /// That resolver applies requirement pin > `GROK_EXTERNAL_OTEL` env > `[telemetry].otel_enabled` config, managed layers included. Those are the same layers that activate the external stream.
+    /// When set, the standard `OTEL_EXPORTER_OTLP_*` vars are reserved for the external OTEL stream. The internal trace pipeline then ignores them entirely. An admin who opts in by *any* layer never receives the internally-authed firehose. Held as a field (not re-read in the resolvers) so the resolvers stay pure and testable without env races.
+    #[serde(skip)]
+    pub external_otel_master_switch: bool,
+    /// Env: `OTEL_TRACES_EXPORTER`. `otlp` (default) or `none` to disable spans.
+    #[serde(skip_serializing_if = "Option::is_none")]
+    pub otel_traces_exporter: Option<String>,
+    /// Env: `OTEL_BSP_SCHEDULE_DELAY` (OTel) or `OTEL_TRACES_EXPORT_INTERVAL` (Claude alias).
+    /// Batch flush interval (ms).
+    #[serde(skip_serializing_if = "Option::is_none")]
+    pub otel_traces_export_interval: Option<u64>,
+    /// Env: `OTEL_EXPORTER_OTLP_TIMEOUT`. Export HTTP timeout (ms).
+    #[serde(skip_serializing_if = "Option::is_none")]
+    pub otel_exporter_otlp_timeout: Option<u64>,
+    /// Read by `load_management_api_key_sync()`. Declared for `serde_ignored`.
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    pub management_api_key: Option<String>,
+    /// Read by `load_gcs_service_account_key_sync()`. Declared for `serde_ignored`.
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    pub gcs_service_account_key: Option<String>,
+}
+/// A blank or whitespace-only override counts as unset.
+/// Single source of truth for the "an empty value means not configured" rule shared by the endpoint resolvers.
+fn blank_as_unset(opt: &Option<String>) -> Option<String> {
+    opt.as_deref()
+        .filter(|s| !s.trim().is_empty())
+        .map(str::to_owned)
+}
+/// Parse a `k=v,k2=v2` OTLP header list (the `OTEL_EXPORTER_OTLP_HEADERS` format, shared with `GROK_INTERNAL_OTLP_HEADERS`).
+/// Split on `,`, then `split_once('=')`, trim key/value, skip blank keys, keep empty values.
+fn parse_otlp_header_list(raw: &str) -> Vec<(String, String)> {
+    raw.split(',')
+        .filter_map(|kv| {
+            let (k, v) = kv.split_once('=')?;
+            let k = k.trim();
+            (!k.is_empty()).then(|| (k.to_string(), v.trim().to_string()))
+        })
+        .collect()
+}
+impl EndpointsConfig {
+    pub fn has_custom_endpoint(&self) -> bool {
+        self.models_base_url.is_some() || self.models_list_url.is_some()
+    }
+    /// `default()` plus merged managed/requirements endpoint overrides, so startup fetches use the configured (not public) endpoints.
+    /// Only merges layers; never derives one endpoint from another.
+    /// Falls back to `default()` on load failure.
+    pub(crate) fn from_effective_config() -> Self {
+        match crate::config::load_effective_config() {
+            Ok(cfg) => Self::from_config_value(&cfg),
+            Err(_) => Self::default(),
+        }
+    }
+    /// Layer the `[endpoints]` table from `config` over the env/default base.
+    /// No field is derived from another; defaulting is done by the resolvers.
+    /// `pub`: the pager resolves the voice STT base through this same path.
+    pub fn from_config_value(config: &toml::Value) -> Self {
+        let default = Self::default();
+        let external_otel_master_switch = default.external_otel_master_switch;
+        let mut base = match toml::Value::try_from(default) {
+            Ok(v) => v,
+            Err(_) => return Self::default(),
+        };
+        if let Some(endpoints) = config.get("endpoints") {
+            crate::config::deep_merge_toml(&mut base, endpoints);
+        }
+        let mut resolved: Self = base.try_into().unwrap_or_default();
+        resolved.external_otel_master_switch = external_otel_master_switch;
+        resolved
+    }
+    /// The cli-chat-proxy base URL through which all auxiliary services (and OAuth/session inference) resolve.
+    /// Explicit `cli_chat_proxy_base_url`, else the public default.
+    /// NEVER falls back to `xai_api_base_url`: that is the inference endpoint (API-key auth) only.
+    pub fn proxy_url(&self) -> String {
+        blank_as_unset(&self.cli_chat_proxy_base_url)
+            .unwrap_or_else(|| CLI_CHAT_PROXY_BASE_URL_DEFAULT.to_owned())
+    }
+    pub(crate) fn resolve_inference_base_url(&self) -> String {
+        self.models_base_url
+            .clone()
+            .unwrap_or_else(|| self.proxy_url())
+    }
+    /// Feedback endpoint, an auxiliary service, so it defaults to the cli-chat-proxy, never `xai_api_base_url`.
+    pub(crate) fn resolve_feedback_base_url(&self) -> String {
+        blank_as_unset(&self.feedback_base_url).unwrap_or_else(|| self.proxy_url())
+    }
+    /// Trace upload endpoint, an auxiliary service, so it defaults to the cli-chat-proxy, never `xai_api_base_url`.
+    pub(crate) fn resolve_trace_upload_url(&self) -> String {
+        blank_as_unset(&self.trace_upload_url).unwrap_or_else(|| self.proxy_url())
+    }
+    /// Managed deployment-config URL (`grok setup`): explicit `managed_config_url`, else `proxy_url` + `/deployment/config`.
+    /// Never `xai_api_base_url`, so the deployment key reaches the proxy, not the inference host.
+    pub(crate) fn resolve_managed_config_url(&self) -> String {
+        blank_as_unset(&self.managed_config_url).unwrap_or_else(|| {
+            format!(
+                "{}/deployment/config",
+                self.proxy_url().trim_end_matches('/')
+            )
+        })
+    }
+    /// INTERNAL OTLP traces endpoint. Precedence: `grok_internal_otlp_traces_endpoint` (verbatim) legacy `otel_exporter_otlp_traces_endpoint` (verbatim) > `otel_exporter_otlp_endpoint` + `/v1/traces` (back-compat; deprecated) `proxy_url` + `/traces`.
+    /// The legacy tier applies ONLY when the external-OTEL master switch is unset, keeping the internally-authed firehose off external collectors.
+    /// Uses the proxy default (not the `xai_api_base_url` fallback) so telemetry reports to xAI even when inference is overridden.
+    pub(crate) fn resolve_otlp_traces_endpoint(&self) -> String {
+        if let Some(full) = blank_as_unset(&self.grok_internal_otlp_traces_endpoint) {
+            return full.trim_end_matches('/').to_string();
+        }
+        if !self.external_otel_master_switch
+            && let Some(legacy) = self.legacy_internal_otlp_traces_endpoint()
+        {
+            tracing::warn!(
+                "Repointing the internal trace pipeline via OTEL_EXPORTER_OTLP_ENDPOINT / \
+                 OTEL_EXPORTER_OTLP_TRACES_ENDPOINT is deprecated; use \
+                 GROK_INTERNAL_OTLP_TRACES_ENDPOINT instead — the standard OTEL_* vars will \
+                 route the external OTEL stream only in a future release"
+            );
+            return legacy;
+        }
+        format!("{}/traces", self.proxy_url().trim_end_matches('/'))
+    }
+    /// Legacy (standard-OTEL-var) internal traces endpoint, if any.
+    /// `otel_exporter_otlp_traces_endpoint` verbatim, else `otel_exporter_otlp_endpoint` + `/v1/traces`.
+    /// Ignores the master switch.
+    fn legacy_internal_otlp_traces_endpoint(&self) -> Option<String> {
+        if let Some(full) = blank_as_unset(&self.otel_exporter_otlp_traces_endpoint) {
+            return Some(full.trim_end_matches('/').to_string());
+        }
+        blank_as_unset(&self.otel_exporter_otlp_endpoint)
+            .map(|base| format!("{}/v1/traces", base.trim_end_matches('/')))
+    }
+    /// Extra headers for the INTERNAL export: `grok_internal_otlp_headers` first.
+    /// Legacy fallback to `otel_exporter_otlp_headers` ONLY when the external-OTEL master switch is unset (back-compat for existing users).
+    pub(crate) fn resolve_otlp_headers(&self) -> Vec<(String, String)> {
+        if let Some(headers) = blank_as_unset(&self.grok_internal_otlp_headers) {
+            return parse_otlp_header_list(&headers);
+        }
+        if !self.external_otel_master_switch {
+            return parse_otlp_header_list(
+                self.otel_exporter_otlp_headers.as_deref().unwrap_or(""),
+            );
+        }
+        Vec::new()
+    }
+    /// Whether the legacy fallback actually supplied the internal endpoint OR internal headers from the standard `OTEL_EXPORTER_OTLP_*` vars.
+    /// True when the master switch is unset, the standard var for that half is non-blank, and no `grok_internal_otlp_*` override shadowed it.
+    /// CONTRACT: this flag is passed to the external OTEL stream's init, which MUST refuse to activate when it is true. The same standard vars cannot feed both pipelines (no-double-send invariant, enforced in code).
+    pub(crate) fn internal_otlp_consumed_standard_vars(&self) -> bool {
+        if self.external_otel_master_switch {
+            return false;
+        }
+        let endpoint_consumed = blank_as_unset(&self.grok_internal_otlp_traces_endpoint).is_none()
+            && self.legacy_internal_otlp_traces_endpoint().is_some();
+        let headers_consumed = blank_as_unset(&self.grok_internal_otlp_headers).is_none()
+            && blank_as_unset(&self.otel_exporter_otlp_headers).is_some();
+        endpoint_consumed || headers_consumed
+    }
+    /// Trace export enabled unless `OTEL_TRACES_EXPORTER=none`.
+    /// Deliberately still honored by the internal pipeline even with `GROK_EXTERNAL_OTEL` set: disabling internal span export is the safe direction.
+    pub(crate) fn resolve_traces_export_enabled(&self) -> bool {
+        !matches!(
+            self.otel_traces_exporter.as_deref().map(str::trim),
+            Some("none")
+        )
+    }
+    /// `OTEL_BSP_SCHEDULE_DELAY` / `OTEL_TRACES_EXPORT_INTERVAL`: tuning-only, deliberately shared between the internal and external pipelines.
+    pub(crate) fn resolve_otlp_export_interval(&self) -> Option<std::time::Duration> {
+        self.otel_traces_export_interval
+            .map(std::time::Duration::from_millis)
+    }
+    /// `OTEL_EXPORTER_OTLP_TIMEOUT`: tuning-only, deliberately shared between the internal and external pipelines.
+    pub(crate) fn resolve_otlp_timeout(&self) -> Option<std::time::Duration> {
+        self.otel_exporter_otlp_timeout
+            .map(std::time::Duration::from_millis)
+    }
+    /// Resolve trace upload credentials: inline > file > `None` (ambient).
+    pub(crate) fn resolve_trace_credentials(&self) -> Option<String> {
+        if let Some(ref inline) = self.trace_upload_credentials {
+            let trimmed = inline.trim();
+            if !trimmed.is_empty() {
+                return Some(trimmed.to_owned());
+            }
+        }
+        self.trace_upload_credentials_file
+            .as_deref()
+            .and_then(|path| {
+                std::fs::read_to_string(path)
+                    .inspect_err(|e| {
+                        tracing::warn!(
+                            path = %path,
+                            error = %e,
+                            "Failed to read trace upload credentials file"
+                        );
+                    })
+                    .ok()
+            })
+    }
+    /// Resolve direct-to-bucket upload method from `trace_upload_bucket`.
+    /// Returns `None` if no bucket is configured or scheme is unrecognized.
+    pub fn resolve_direct_upload_method(
+        &self,
+    ) -> Option<crate::session::repo_changes::UploadMethod> {
+        let bucket_url = self.trace_upload_bucket.as_deref()?.trim();
+        if bucket_url.is_empty() {
+            return None;
+        }
+        if let Some(bucket_name) = bucket_url
+            .strip_prefix("s3://")
+            .map(|s| s.trim_end_matches('/'))
+        {
+            let region = self
+                .trace_upload_region
+                .clone()
+                .unwrap_or_else(|| "us-east-1".to_owned());
+            return Some(crate::session::repo_changes::UploadMethod::S3 {
+                bucket: bucket_name.to_owned(),
+                region,
+                credentials_file: None,
+                credentials_content: self.resolve_trace_credentials(),
+                endpoint_url: self.trace_upload_endpoint_url.clone(),
+            });
+        }
+        if bucket_url.starts_with("gs://") {
+            return Some(crate::session::repo_changes::UploadMethod::Direct {
+                service_account_key: self.resolve_trace_credentials(),
+            });
+        }
+        tracing::warn!(
+            bucket = %bucket_url,
+            "trace_upload_bucket has unrecognized scheme (expected gs:// or s3://), ignoring"
+        );
+        None
+    }
+    pub fn has_noninteractive_upload_auth(&self) -> bool {
+        self.deployment_key.is_some() || self.resolve_direct_upload_method().is_some()
+    }
+    /// Tries the direct bucket, then the proxy (if `auth_token` or `deployment_key`), then ambient GCS, else `None`.
+    pub fn resolve_upload_method(
 =======
 /// The default is `context_window`, else the first listed window; the choices keep list order and include it.
 pub(crate) fn context_window_choices(
@@ -716,7 +1034,7 @@ impl TraceUploadEndpoints for EndpointsConfig {
         self.deployment_key.is_some() || self.resolve_direct_upload_method().is_some()
     }
     fn resolve_upload_method(
->>>>>>> upstream/main
+>>>>>>> upstream
         &self,
         auth_token: Option<String>,
     ) -> Option<crate::session::repo_changes::UploadMethod> {
@@ -725,8 +1043,27 @@ impl TraceUploadEndpoints for EndpointsConfig {
                 proxy_base_url: self.resolve_trace_upload_url(),
                 user_token,
                 alpha_test_key: self.alpha_test_key.clone(),
-<<<<<<< HEAD
+<<<<<<< fork
             },
+||||||| base
+            });
+        }
+        let service_account_key = crate::util::config::load_gcs_service_account_key_sync();
+        if service_account_key.is_some() {
+            return Some(crate::session::repo_changes::UploadMethod::Direct {
+                service_account_key,
+            });
+        }
+        None
+    }
+    /// Resolve trace bucket URL: env > config > compiled-in default.
+    /// `None` disables direct GCS trace uploads.
+    pub fn resolve_trace_bucket_url(&self) -> Option<Resolved<String>> {
+        resolve_string_flag(
+            None,
+            "GROK_TELEMETRY_GCS_BUCKET",
+            self.trace_upload_bucket.as_deref(),
+            None,
 =======
             });
         }
@@ -744,10 +1081,10 @@ impl TraceUploadEndpoints for EndpointsConfig {
             "GROK_TELEMETRY_GCS_BUCKET",
             self.trace_upload_bucket.as_deref(),
             None,
->>>>>>> upstream/main
+>>>>>>> upstream
         )
     }
-<<<<<<< HEAD
+<<<<<<< fork
     /// `models_list_url` > `{models_base_url}/models` > `{proxy_base_url}/models`.
     pub(crate) fn resolve_models_list_url(&self) -> String {
         if let Some(ref url) = self.models_list_url {
@@ -788,13 +1125,58 @@ impl Default for EndpointsConfig {
             otel_exporter_otlp_timeout: env_string("OTEL_EXPORTER_OTLP_TIMEOUT")
                 .and_then(|s| s.parse().ok()),
             management_api_key: None,
+||||||| base
+    /// `models_list_url` > `{models_base_url}/models` > `{proxy_base_url}/models`.
+    pub(crate) fn resolve_models_list_url(&self) -> String {
+        if let Some(ref url) = self.models_list_url {
+            return url.clone();
+        }
+        let base = self
+            .models_base_url
+            .clone()
+            .unwrap_or_else(|| self.proxy_url());
+        format!("{}/models", base)
+    }
+}
+impl Default for EndpointsConfig {
+    fn default() -> Self {
+        Self {
+            cli_chat_proxy_base_url: std::env::var("GROK_CLI_CHAT_PROXY_BASE_URL").ok(),
+            xai_api_base_url: std::env::var("GROK_XAI_API_BASE_URL")
+                .unwrap_or_else(|_| XAI_API_BASE_URL_DEFAULT.to_owned()),
+            alpha_test_key: None,
+            models_base_url: env_string("GROK_MODELS_BASE_URL"),
+            models_list_url: env_string("GROK_MODELS_LIST_URL"),
+            feedback_base_url: env_string("GROK_FEEDBACK_BASE_URL"),
+            trace_upload_url: env_string("GROK_TRACE_UPLOAD_URL"),
+            trace_upload_bucket: env_string("GROK_TRACE_UPLOAD_BUCKET"),
+            trace_upload_region: env_string("GROK_TRACE_UPLOAD_REGION"),
+            trace_upload_credentials_file: env_string("GROK_TRACE_UPLOAD_CREDENTIALS_FILE"),
+            trace_upload_credentials: None,
+            trace_upload_endpoint_url: env_string("GROK_TRACE_UPLOAD_ENDPOINT_URL"),
+            deployment_key: env_string("GROK_DEPLOYMENT_KEY"),
+            managed_config_url: env_string("GROK_MANAGED_CONFIG_URL"),
+            otel_exporter_otlp_endpoint: env_string("OTEL_EXPORTER_OTLP_ENDPOINT"),
+            otel_exporter_otlp_traces_endpoint: env_string("OTEL_EXPORTER_OTLP_TRACES_ENDPOINT"),
+            otel_exporter_otlp_headers: env_string("OTEL_EXPORTER_OTLP_HEADERS"),
+            grok_internal_otlp_traces_endpoint: env_string("GROK_INTERNAL_OTLP_TRACES_ENDPOINT"),
+            grok_internal_otlp_headers: env_string("GROK_INTERNAL_OTLP_HEADERS"),
+            external_otel_master_switch: external_otel_master_switch_resolved(),
+            otel_traces_exporter: env_string("OTEL_TRACES_EXPORTER"),
+            otel_traces_export_interval: env_string("OTEL_BSP_SCHEDULE_DELAY")
+                .or_else(|| env_string("OTEL_TRACES_EXPORT_INTERVAL"))
+                .and_then(|s| s.parse().ok()),
+            otel_exporter_otlp_timeout: env_string("OTEL_EXPORTER_OTLP_TIMEOUT")
+                .and_then(|s| s.parse().ok()),
+            management_api_key: None,
+            gcs_service_account_key: None,
 =======
     fn is_trace_upload_blocked_for(&self, auth: &xai_grok_login::GrokAuth) -> bool {
         if self.resolve_direct_upload_method().is_some() {
             auth.is_zdr_team()
         } else {
             auth.is_data_collection_disabled()
->>>>>>> upstream/main
+>>>>>>> upstream
         }
     }
 }
@@ -935,7 +1317,7 @@ pub(crate) fn resolve_compaction_detail_from(
         .or_else(|| remote.and_then(CompactionDetail::parse))
         .unwrap_or_default()
 }
-<<<<<<< HEAD
+<<<<<<< fork
 /// Resolve a single vendor-compat cell: env > `[compat]` TOML > remote settings remote flag > default ON.
 fn resolve_compat_cell(
     env: &str,
@@ -1076,9 +1458,152 @@ pub(crate) fn resolve_string_flag(
     }
     None
 }
+||||||| base
+/// Resolve a single vendor-compat cell: env > `[compat]` TOML > remote settings remote flag > default ON.
+fn resolve_compat_cell(
+    env: &str,
+    cfg: Option<bool>,
+    remote: Option<bool>,
+    default: bool,
+) -> Resolved<bool> {
+    resolve_compat_cell_with_env(xai_grok_config::env_bool(env), cfg, remote, default)
+}
+pub(crate) fn resolve_compat_cell_with_env(
+    env: Option<bool>,
+    cfg: Option<bool>,
+    remote: Option<bool>,
+    default: bool,
+) -> Resolved<bool> {
+    if let Some(value) = env {
+        Resolved::new(value, ConfigSource::Env)
+    } else if let Some(value) = cfg {
+        Resolved::new(value, ConfigSource::Config)
+    } else if let Some(value) = remote {
+        Resolved::new(value, ConfigSource::Remote)
+    } else {
+        Resolved::new(default, ConfigSource::Default)
+    }
+}
+fn remote_compat_value(
+    remote: Option<&crate::util::config::RemoteSettings>,
+    key: Option<CompatRemoteKey>,
+) -> Option<bool> {
+    let remote = remote?;
+    match key? {
+        CompatRemoteKey::CursorSkills => remote.cursor_skills_enabled,
+        CompatRemoteKey::CursorRules => remote.cursor_rules_enabled,
+        CompatRemoteKey::CursorAgents => remote.cursor_agents_enabled,
+        CompatRemoteKey::CursorMcps => remote.cursor_mcps_enabled,
+        CompatRemoteKey::CursorHooks => remote.cursor_hooks_enabled,
+        CompatRemoteKey::CursorSessions => remote.cursor_sessions_enabled,
+        CompatRemoteKey::ClaudeSkills => remote.claude_skills_enabled,
+        CompatRemoteKey::ClaudeRules => remote.claude_rules_enabled,
+        CompatRemoteKey::ClaudeAgents => remote.claude_agents_enabled,
+        CompatRemoteKey::ClaudeMcps => remote.claude_mcps_enabled,
+        CompatRemoteKey::ClaudeHooks => remote.claude_hooks_enabled,
+        CompatRemoteKey::ClaudeSessions => remote.claude_sessions_enabled,
+        CompatRemoteKey::CodexSessions => remote.codex_sessions_enabled,
+    }
+}
+fn resolve_compat_config(
+    config: &CompatConfigToml,
+    remote: Option<&crate::util::config::RemoteSettings>,
+) -> CompatConfig {
+    let defaults = CompatConfig::default();
+    let mut resolved = defaults;
+    for cell in COMPAT_CELLS {
+        resolved.set(
+            cell,
+            resolve_compat_cell(
+                cell.env_var(),
+                config.value(cell),
+                remote_compat_value(remote, cell.remote_key()),
+                defaults.value(cell),
+            )
+            .value,
+        );
+    }
+    resolved
+}
+#[derive(Debug, Clone, Copy, PartialEq, Eq)]
+pub(crate) enum CompatConfigCellError {
+    Unavailable,
+    Malformed,
+}
+pub(crate) fn compat_config_cell(
+    raw_config: Result<&toml::Value, ()>,
+    cell: xai_grok_tools::types::compat::CompatCell,
+) -> Result<Option<bool>, CompatConfigCellError> {
+    let raw = raw_config.map_err(|()| CompatConfigCellError::Unavailable)?;
+    let Some(compat) = raw.get("compat") else {
+        return Ok(None);
+    };
+    let compat = compat.as_table().ok_or(CompatConfigCellError::Malformed)?;
+    let Some(vendor) = compat.get(cell.vendor().as_ref()) else {
+        return Ok(None);
+    };
+    let vendor = vendor.as_table().ok_or(CompatConfigCellError::Malformed)?;
+    let Some(value) = vendor.get(cell.surface().as_ref()) else {
+        return Ok(None);
+    };
+    value
+        .as_bool()
+        .map(Some)
+        .ok_or(CompatConfigCellError::Malformed)
+}
+/// Resolve only picker-facing session cells from raw config independently.
+pub fn resolve_compat_sessions_from_raw(
+    raw_config: Result<&toml::Value, ()>,
+    remote: Option<&crate::util::config::RemoteSettings>,
+) -> CompatConfig {
+    let mut config = CompatConfigToml::default();
+    for cell in COMPAT_CELLS
+        .into_iter()
+        .filter(|cell| cell.surface() == CompatSurface::Sessions)
+    {
+        let value = match compat_config_cell(raw_config, cell) {
+            Ok(value) => value,
+            Err(error) => {
+                tracing::warn!(
+                    vendor = cell.vendor().as_ref(),
+                    ?error,
+                    "invalid compat config; disabling foreign sessions"
+                );
+                Some(false)
+            }
+        };
+        match cell.vendor() {
+            CompatVendor::Cursor => config.cursor.sessions = value,
+            CompatVendor::Claude => config.claude.sessions = value,
+            CompatVendor::Codex => config.codex.sessions = value,
+        }
+    }
+    resolve_compat_config(&config, remote)
+}
+/// Resolve a string setting: cli > env > config > feature flag. `None` if no source provides a value.
+pub(crate) fn resolve_string_flag(
+    cli_arg: Option<&str>,
+    env_var: &str,
+    config_val: Option<&str>,
+    feature_flag_val: Option<&str>,
+) -> Option<Resolved<String>> {
+    if let Some(val) = cli_arg.filter(|s| !s.is_empty()) {
+        return Some(Resolved::new(val.to_owned(), ConfigSource::Cli));
+    }
+    if let Some(val) = env_string(env_var) {
+        return Some(Resolved::new(val, ConfigSource::Env));
+    }
+    if let Some(val) = config_val.filter(|s| !s.is_empty()) {
+        return Some(Resolved::new(val.to_owned(), ConfigSource::Config));
+    }
+    if let Some(val) = feature_flag_val.filter(|s| !s.is_empty()) {
+        return Some(Resolved::new(val.to_owned(), ConfigSource::Remote));
+    }
+    None
+}
 =======
 pub(crate) use xai_grok_config::resolve_string_flag;
->>>>>>> upstream/main
+>>>>>>> upstream
 /// Resolve `enabled` for section-based configs (memory, subagents, etc.).
 /// Feature flag only applies when the TOML section is absent.
 pub(crate) fn resolve_enabled(
@@ -1103,7 +1628,7 @@ pub(crate) fn resolve_enabled(
 }
 pub(crate) use xai_grok_telemetry::config::env_telemetry_mode;
 pub use xai_grok_telemetry::config::{TelemetryConfig, TelemetryMode};
-<<<<<<< HEAD
+<<<<<<< fork
 /// Plugin system configuration from `[plugins]` section in config.toml.
 #[derive(Clone, Debug, Default, Serialize, Deserialize, schemars::JsonSchema)]
 pub struct PluginsConfig {
@@ -1160,9 +1685,66 @@ impl PluginsConfig {
         }
     }
 }
+||||||| base
+/// Plugin system configuration from `[plugins]` section in config.toml.
+#[derive(Clone, Debug, Default, Serialize, Deserialize)]
+pub struct PluginsConfig {
+    /// Additional plugin directory paths to load.
+    #[serde(default)]
+    pub paths: Vec<String>,
+    /// Plugin IDs or names to disable.
+    /// Disabled plugins are discovered but their components are not loaded into the session.
+    #[serde(default)]
+    pub disabled: Vec<String>,
+    /// Plugin IDs or names to explicitly enable.
+    /// Used for project-scope plugins, which are disabled by default; adding a plugin here overrides that default.
+    #[serde(default)]
+    pub enabled: Vec<String>,
+    /// CLI `--plugin-dir` paths (populated by CLI arg processing, not config file).
+    #[serde(skip)]
+    pub cli_plugin_dirs: Vec<std::path::PathBuf>,
+}
+impl PluginsConfig {
+    /// Merge `enabledPlugins` from Claude settings files into this config. Reads `enabledPlugins` from `~/.claude/settings.json` only (user scope).
+    /// Project-level `<git_root>/.claude/settings.json` is intentionally NOT read here. A malicious repo could pre-populate `enabledPlugins` to bypass the project-plugin auto-disable logic in `populate_plugin_lists`.
+    /// That would enable attacker-controlled hooks (e.g. a SessionStart hook running arbitrary code). Native `.grok/config.toml` entries already present take precedence: a name is only added if it isn't already in the opposite list.
+    pub(crate) fn merge_claude_enabled_plugins(&mut self, _cwd: Option<&std::path::Path>) {
+        if crate::claude_import::is_claude_import_marked_with_log("merge_claude_enabled_plugins") {
+            return;
+        }
+        let mut paths = Vec::new();
+        if let Some(home) = xai_dirs::home_dir() {
+            paths.push(home.join(".claude").join("settings.json"));
+        }
+        for path in &paths {
+            let (claude_enabled, claude_disabled) =
+                xai_grok_agent::plugins::marketplace::load_enabled_disabled_plugins(path);
+            for name in claude_enabled {
+                if !self.disabled.contains(&name) && !self.enabled.contains(&name) {
+                    self.enabled.push(name);
+                }
+            }
+            for name in claude_disabled {
+                if !self.enabled.contains(&name) && !self.disabled.contains(&name) {
+                    self.disabled.push(name);
+                }
+            }
+        }
+    }
+    pub(crate) fn to_discovery_config(
+        &self,
+    ) -> xai_grok_agent::plugins::discovery::DiscoveryConfig {
+        xai_grok_agent::plugins::discovery::DiscoveryConfig {
+            cli_plugin_dirs: self.cli_plugin_dirs.clone(),
+            config_paths: self.paths.iter().map(std::path::PathBuf::from).collect(),
+            disabled: self.disabled.clone(),
+            enabled: self.enabled.clone(),
+        }
+    }
+}
 =======
 pub use xai_grok_workspace::plugins::PluginsConfig;
->>>>>>> upstream/main
+>>>>>>> upstream
 /// Feedback submission configuration (`[feedback]` in config.toml).
 #[derive(Clone, Debug, Default, Serialize, Deserialize, schemars::JsonSchema)]
 #[serde(default)]
@@ -2231,14 +2813,16 @@ impl Config {
         Ok((config, unrecognized_keys))
     }
     pub fn new_from_toml_cfg(raw_config: &toml::Value) -> Result<Self, String> {
-<<<<<<< HEAD
+<<<<<<< fork
         if let Some(removed) = removed_direct_upload_env_error() {
             return Err(removed);
         }
         let raw_config = &Self::expand_auth_alias(raw_config);
+||||||| base
+        let raw_config = &Self::expand_auth_alias(raw_config);
 =======
         let raw_config = &xai_grok_login::expand_auth_alias(raw_config);
->>>>>>> upstream/main
+>>>>>>> upstream
         let super::config_model_override_parse::ParsedModelOverrides {
             models: config_models,
             warnings: config_warnings,
@@ -2704,14 +3288,15 @@ impl Config {
         self.is_feature_enabled(Feature::TwoPassCompaction)
     }
     pub(crate) fn resolve_telemetry_mode(&self) -> Resolved<TelemetryMode> {
-<<<<<<< HEAD
+<<<<<<< fork
         return Resolved::new(TelemetryMode::Disabled, ConfigSource::Default);
         #[allow(unreachable_code)]
+||||||| base
 =======
         if !Distribution::current().allows(Capability::Telemetry) {
             return Resolved::new(TelemetryMode::Disabled, ConfigSource::Default);
         }
->>>>>>> upstream/main
+>>>>>>> upstream
         if let Some(mode) = self.requirements.telemetry.pinned() {
             return Resolved::new(mode, ConfigSource::Requirement);
         }
@@ -2737,11 +3322,12 @@ impl Config {
         Resolved::new(TelemetryMode::Disabled, ConfigSource::Default)
     }
     pub(crate) fn resolve_trace_upload(&self) -> Resolved<bool> {
-<<<<<<< HEAD
+<<<<<<< fork
         // Trace upload is hard-disabled in this build: no env var (GROK_TELEMETRY_TRACE_UPLOAD), config key, requirement pin.
         return Resolved::new(false, ConfigSource::Default);
 
         #[allow(unreachable_code)]
+||||||| base
 =======
         self.resolve_trace_upload_as(Distribution::current())
     }
@@ -2749,7 +3335,7 @@ impl Config {
         if !distribution.allows(Capability::Telemetry) {
             return Resolved::new(false, ConfigSource::Default);
         }
->>>>>>> upstream/main
+>>>>>>> upstream
         let mode = self.resolve_telemetry_mode();
         let ff = if mode.value.is_disabled() {
             None
@@ -3761,7 +4347,7 @@ fn managed_settings_env_flag(key: &str) -> Option<bool> {
     let json: serde_json::Value = serde_json::from_str(&content).ok()?;
     xai_grok_workspace::permission::resolution::json_env_flag(json.get("env"), key)
 }
-<<<<<<< HEAD
+<<<<<<< fork
 /// Pin an unresolved provider-backed model to a credential that cannot mint, so
 /// the session bearer never reaches a third party's endpoint.
 fn fail_closed_on_provider_endpoint(entry: &mut ModelEntry, provider_id: &str) {
@@ -3867,6 +4453,7 @@ pub(crate) fn first_provider_with_own_credentials(cfg: &Config) -> Option<&str> 
         .map(|(id, _)| id.as_str())
 }
 
+||||||| base
 =======
 /// External auth with a custom models endpoint takes every model from that endpoint.
 /// `[model.*]` tables then never reach the catalog, inference routing, or credential choice.
@@ -3890,7 +4477,7 @@ fn drop_model_tables_under_external_auth(config: &mut Config) {
         );
         });
 }
->>>>>>> upstream/main
+>>>>>>> upstream
 /// Assemble the final model map. Priority (highest wins):
 /// config.toml `[model.*]` > prefetched (remote) > hardcoded defaults.
 pub(crate) fn resolve_model_list(
@@ -4015,7 +4602,7 @@ pub(crate) fn resolve_model_list(
     }
     {
         let default_cw = DEFAULT_CONTEXT_WINDOW;
-<<<<<<< HEAD
+<<<<<<< fork
         // Entries that carry a real (non-default) context window. A limit the user set in `[model.<key>]` belongs to that key's provider route, so only a
         // sibling on the same route inherits it.
         let cw_sources: IndexMap<String, ModelEntry> = resolved
@@ -4044,6 +4631,18 @@ pub(crate) fn resolve_model_list(
             .values()
             .filter(|e| e.info.context_window.get() != default_cw)
             .map(|e| (e.info.model.clone(), e.info.api_backend.clone()))
+||||||| base
+        let donors: std::collections::HashMap<String, (std::num::NonZeroU64, ApiBackend)> =
+            resolved
+                .values()
+                .filter(|e| e.info.context_window.get() != default_cw)
+                .map(|e| {
+                    (
+                        e.info.model.clone(),
+                        (e.info.context_window, e.info.api_backend.clone()),
+                    )
+                })
+                .collect();
 =======
         let donors: std::collections::HashMap<
             String,
@@ -4061,7 +4660,7 @@ pub(crate) fn resolve_model_list(
                     ),
                 )
             })
->>>>>>> upstream/main
+>>>>>>> upstream
             .collect();
         let mut menu_donors: std::collections::HashMap<String, (Vec<ReasoningEffortOption>, bool)> =
             std::collections::HashMap::new();
@@ -4084,7 +4683,7 @@ pub(crate) fn resolve_model_list(
             }
         }
         for (key, entry) in resolved.iter_mut() {
-<<<<<<< HEAD
+<<<<<<< fork
             if !entry.info.context_window_pinned && entry.info.context_window.get() == default_cw {
                 let url = route_url(&entry.info.base_url);
                 let donors = sources_by_url
@@ -4093,22 +4692,27 @@ pub(crate) fn resolve_model_list(
                 let resolved_cw =
                     crate::agent::remote_config::resolve_context_window(&entry.info.model, donors);
                 if resolved_cw.get() != default_cw {
+||||||| base
+            if let Some((donor_cw, donor_backend)) = donors.get(&entry.info.model) {
+                if entry.info.context_window.get() == default_cw {
 =======
             if let Some((donor_cw, donor_choices, donor_backend)) = donors.get(&entry.info.model) {
                 if !has_explicit_context_window(&entry.info, default_cw) {
->>>>>>> upstream/main
+>>>>>>> upstream
                     tracing::debug!(
                         model = %entry.info.model,
                         from = default_cw,
                         to = resolved_cw.get(),
                         "context_window resolved per exact slug from sibling entry on the same route"
                     );
-<<<<<<< HEAD
+<<<<<<< fork
                     entry.info.context_window = resolved_cw;
+||||||| base
+                    entry.info.context_window = *donor_cw;
 =======
                     entry.info.context_window = *donor_cw;
                     entry.info.context_windows.clone_from(donor_choices);
->>>>>>> upstream/main
+>>>>>>> upstream
                 }
             }
             // BYOK/custom-base gap: the sibling resolve above (and the generic /v1/models prefetch) only ever sees the xAI
@@ -4358,9 +4962,13 @@ fn default_models(endpoints: &EndpointsConfig) -> IndexMap<String, ModelEntryCon
                 m.id
             );
             let key = m.id.clone().unwrap_or_else(|| m.model.clone());
-<<<<<<< HEAD
+<<<<<<< fork
             let context_window = m.context_window.unwrap_or_else(|| {
                 NonZeroU64::new(CONFIG_DEFAULT_CONTEXT_WINDOW).expect("200000 is non-zero")
+||||||| base
+            let context_window = m
+                .context_window
+                .unwrap_or_else(|| NonZeroU64::new(200_000).expect("200000 is non-zero"));
 =======
             let (context_window, context_windows) = context_window_choices(
                 m.context_window,
@@ -4371,7 +4979,7 @@ fn default_models(endpoints: &EndpointsConfig) -> IndexMap<String, ModelEntryCon
                     NonZeroU64::new(200_000).expect("200000 is non-zero"),
                     Vec::new(),
                 )
->>>>>>> upstream/main
+>>>>>>> upstream
             });
             let config = ModelEntryConfig {
                 id: m.id,
@@ -4854,11 +5462,12 @@ impl ConfigModelOverride {
         };
         if let Some((cw, choices)) = windows {
             entry.info.context_window = cw;
-<<<<<<< HEAD
+<<<<<<< fork
             entry.info.context_window_pinned = true;
+||||||| base
 =======
             entry.info.context_windows = choices;
->>>>>>> upstream/main
+>>>>>>> upstream
         }
         if self.max_request_bytes.is_some() {
             entry.info.max_request_bytes = self.max_request_bytes;
@@ -5110,12 +5719,14 @@ impl ModelInfo {
             extra_headers: IndexMap::new(),
             query_params: IndexMap::new(),
             env_http_headers: IndexMap::new(),
-<<<<<<< HEAD
+<<<<<<< fork
             context_window: NonZeroU64::new(DEFAULT_CONTEXT_WINDOW).unwrap(),
+||||||| base
+            context_window: NonZeroU64::new(200_000).unwrap(),
 =======
             context_window: NonZeroU64::new(200_000).unwrap(),
             context_windows: Vec::new(),
->>>>>>> upstream/main
+>>>>>>> upstream
             max_request_bytes: None,
             auto_compact_threshold_percent: None,
             system_prompt_label: None,
@@ -6447,7 +7058,7 @@ pub(crate) fn to_acp_model_info(
         .map(|(key, model)| {
             let info = model.info();
             let model_id = acp::ModelId::new(Arc::from(key.clone()));
-<<<<<<< HEAD
+<<<<<<< fork
             let total_context_tokens = info.context_window.get();
             let meta = {
                 let mut map = serde_json::Map::new();
@@ -6505,8 +7116,40 @@ pub(crate) fn to_acp_model_info(
                 }
                 if map.is_empty() { None } else { Some(map) }
             };
+||||||| base
+            let total_context_tokens = info.context_window.get();
+            let meta = {
+                let mut map = serde_json::Map::new();
+                map.insert(
+                    "totalContextTokens".to_string(),
+                    serde_json::Value::Number(total_context_tokens.into()),
+                );
+                map.insert(
+                    "agentType".to_string(),
+                    serde_json::Value::String(info.agent_type.clone()),
+                );
+                if info.supports_reasoning_effort {
+                    map.insert(
+                        "supportsReasoningEffort".to_string(),
+                        serde_json::Value::Bool(true),
+                    );
+                    if let Some(effort) = info.reasoning_effort {
+                        map.insert(
+                            REASONING_EFFORT_META_KEY.to_string(),
+                            reasoning_effort_meta_value(effort),
+                        );
+                    }
+                }
+                if !info.reasoning_efforts.is_empty() {
+                    map.insert(
+                        REASONING_EFFORTS_META_KEY.to_string(),
+                        reasoning_efforts_meta_value(&info.reasoning_efforts),
+                    );
+                }
+                if map.is_empty() { None } else { Some(map) }
+            };
 =======
->>>>>>> upstream/main
+>>>>>>> upstream
             (
                 model_id.clone(),
                 acp::ModelInfo::new(
@@ -6608,7 +7251,7 @@ impl ModelSwitchIncompatibleAgentError {
         )
     }
 }
-<<<<<<< HEAD
+<<<<<<< fork
 /// The `force_login_team_uuid` pin from the merged `requirements.toml` / MDM
 /// layers; the non-overridable tier in `resolve_force_login_team`.
 fn force_login_team_from_requirements() -> Option<xai_grok_login::ForceLoginTeam> {
@@ -6616,8 +7259,17 @@ fn force_login_team_from_requirements() -> Option<xai_grok_login::ForceLoginTeam
         &crate::config::load_merged_requirements()?,
     )
 }
+||||||| base
+/// The `force_login_team_uuid` pin from the merged `requirements.toml` / MDM layers; the non-overridable tier in `resolve_force_login_team`.
+/// Read at call time so the clamp holds on config-load paths that build `GrokComConfig` without a separate `apply_requirements` pass.
+/// Shell loads the requirements here and hands auth the parsed value.
+fn force_login_team_from_requirements() -> Option<xai_grok_login::ForceLoginTeam> {
+    xai_grok_login::force_login_team_from_requirements_value(
+        &crate::config::load_merged_requirements()?,
+    )
+}
 =======
->>>>>>> upstream/main
+>>>>>>> upstream
 #[cfg(test)]
 #[path = "config_tests.rs"]
 mod tests;

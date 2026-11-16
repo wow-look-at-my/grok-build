@@ -46,12 +46,29 @@ impl StorageConfig for TraceExportConfigWithAuth {
     }
     fn proxy_credentials(&self) -> Option<Arc<dyn AuthCredentialProvider>> {
         let am = self.auth_manager.as_ref()?;
-<<<<<<< HEAD
+<<<<<<< fork
         let UploadMethod::Proxy { alpha_test_key, .. } = &self.inner.upload_method;
         Some(Arc::new(ShellAuthCredentialProvider::new(
             am.clone(),
             alpha_test_key.clone(),
         )))
+||||||| base
+        let UploadMethod::Proxy {
+            deployment_key,
+            alpha_test_key,
+            ..
+        } = &self.inner.upload_method
+        else {
+            return None;
+        };
+        Some(Arc::new(
+            ShellAuthCredentialProvider::with_deployment_id_resolver(
+                am.clone(),
+                deployment_key.clone(),
+                alpha_test_key.clone(),
+                std::sync::Arc::new(crate::managed_config::resolve_deployment_id),
+            ),
+        ))
 =======
         let UploadMethod::Proxy {
             deployment_key,
@@ -69,7 +86,7 @@ impl StorageConfig for TraceExportConfigWithAuth {
                 std::sync::Arc::new(xai_grok_cloud_config::managed_config::resolve_deployment_id),
             ),
         ))
->>>>>>> upstream/main
+>>>>>>> upstream
     }
     fn proxy_attribution(&self) -> Option<Arc<dyn Auth401AttributionCallback>> {
         let am = self.auth_manager.as_ref()?;

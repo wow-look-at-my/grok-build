@@ -6113,7 +6113,7 @@ mod tests {
 
         #[test]
         fn unix_shell_omits_utility_and_chaining_notes() {
-<<<<<<< HEAD
+<<<<<<< fork
             let out = render(BashTool::default_description_template_enabled(), true);
             // On a real bash/unix shell the utilities exist and `&&` works,
             // so neither the unavailable-utilities note nor the `;`-chaining
@@ -6132,11 +6132,15 @@ mod tests {
                 out.contains("Never `rm` a non-ignored file in a git repo"),
                 "git-rm policy must be in the bash description:\n{out}"
             );
+||||||| base
+            let unix = render(BashTool::default_description_template_enabled(), true);
+            let pwsh = render(BashTool::default_description_template_enabled(), false);
+            assert_ne!(unix, pwsh);
 =======
             let unix = render(BashTool::two_knob_description_template_enabled(), true);
             let pwsh = render(BashTool::two_knob_description_template_enabled(), false);
             assert_ne!(unix, pwsh);
->>>>>>> upstream/main
+>>>>>>> upstream
         }
 
         #[test]

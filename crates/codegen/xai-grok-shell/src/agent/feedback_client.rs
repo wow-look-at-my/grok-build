@@ -124,10 +124,6 @@ impl FeedbackClient {
                 xai_grok_login::credential_provider::ShellAuthCredentialProvider::new(
                     am.clone(),
                     credentials.alpha_test_key.clone(),
-<<<<<<< HEAD
-=======
-                    std::sync::Arc::new(xai_grok_cloud_config::managed_config::resolve_deployment_id),
->>>>>>> upstream/main
                 ),
             )
         } else {

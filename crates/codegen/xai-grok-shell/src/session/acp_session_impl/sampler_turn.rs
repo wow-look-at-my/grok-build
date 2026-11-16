@@ -786,13 +786,17 @@ impl SessionActor {
             stream_tool_calls: cfg.stream_tool_calls.unwrap_or(false),
             idle_timeout_secs: None,
             client_identifier: self.client_identifier.clone(),
-<<<<<<< HEAD
+<<<<<<< fork
             deployment_id: None,
+||||||| base
+            deployment_id: crate::managed_config::resolve_deployment_id(
+                crate::managed_config::resolve_deployment_key().as_deref(),
+            ),
 =======
             deployment_id: xai_grok_cloud_config::managed_config::resolve_deployment_id(
                 xai_grok_cloud_config::managed_config::resolve_deployment_key().as_deref(),
             ),
->>>>>>> upstream/main
+>>>>>>> upstream
             user_id: self
                 .auth_manager
                 .as_ref()
@@ -1361,7 +1365,7 @@ impl SessionActor {
                 && let Some(new_cw) = std::num::NonZeroU64::new(cw)
                 && self.compaction.context_window_override.is_none()
             {
-<<<<<<< HEAD
+<<<<<<< fork
                 cfg.context_window = new_cw;
                 self.chat_state_handle.update_sampling_config(cfg);
             }
@@ -1387,6 +1391,28 @@ impl SessionActor {
                             return Err(self.surface_compact_auth_failure(e).await);
                         }
                         return Err(e);
+||||||| base
+                let total_tokens = self.chat_state_handle.get_estimated_total_tokens().await;
+                let percentage = xai_token_estimation::usage_percentage_u8(total_tokens, cw);
+
+                // Update the in-memory sampling config's `context_window` if the model reported a different value (mirror the legacy path's bookkeeping)
+                if let Some(mut cfg) = self.chat_state_handle.get_sampling_config().await
+                    && let Some(new_cw) = std::num::NonZeroU64::new(cw)
+                    && self.compaction.context_window_override.is_none()
+                {
+                    cfg.context_window = new_cw;
+                    self.chat_state_handle.update_sampling_config(cfg);
+                }
+
+                let trigger_info = compaction::AutoCompactTriggerInfo {
+                    tokens_used: total_tokens,
+                    context_window: cw,
+                    percentage,
+                    reason_override: None,
+                };
+                if let Err(e) = self.run_compact_only(trigger_info, false).await {
+                    if Self::is_auth_compact_error(&e) {
+                        return Err(self.surface_compact_auth_failure(e).await);
 =======
                 let total_tokens = self.chat_state_handle.get_estimated_total_tokens().await;
                 let percentage = xai_token_estimation::usage_percentage_u8(total_tokens, cw);
@@ -1409,7 +1435,7 @@ impl SessionActor {
                 if let Err(e) = self.run_compact_only(trigger_info, false).await {
                     if Self::is_auth_compact_error(&e) {
                         return Err(self.surface_compact_auth_failure(e).await);
->>>>>>> upstream/main
+>>>>>>> upstream
                     }
                     self.compaction
                         .context_overflow_recovery

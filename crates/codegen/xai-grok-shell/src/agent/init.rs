@@ -555,20 +555,10 @@ pub async fn apply_post_login_config(
 ) -> anyhow::Result<()> {
     let outcome = xai_grok_cloud_config::managed_config::post_login_sync(Some(authenticated)).await;
     match outcome {
-<<<<<<< HEAD
-        crate::managed_config::ManagedConfigSync::Updated => {
+        xai_grok_cloud_config::managed_config::ManagedConfigSync::Updated => {
             eprintln!("Applied your team's managed configuration.");
-        }
-        crate::managed_config::ManagedConfigSync::Staged => {
-=======
-        xai_grok_cloud_config::managed_config::ManagedConfigSync::Updated { is_team: true } => {
-            eprintln!("Applied your team's managed configuration.");
-        }
-        xai_grok_cloud_config::managed_config::ManagedConfigSync::Updated { is_team: false } => {
-            eprintln!("Applied your deployment's managed configuration.");
         }
         xai_grok_cloud_config::managed_config::ManagedConfigSync::Staged => {
->>>>>>> upstream/main
             eprintln!(
                 "Managed configuration update verified; it takes effect the next time Grok starts."
             );

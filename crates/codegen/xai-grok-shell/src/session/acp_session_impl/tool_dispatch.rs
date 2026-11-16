@@ -71,12 +71,15 @@ fn str_arg<'a>(args: &'a serde_json::Value, keys: &[&str]) -> Option<&'a str> {
 }
 
 /// Extract the workspace path that a tool call targets, to serialize concurrent same-file edits inside `execute_tool_calls`.
-<<<<<<< HEAD
+<<<<<<< fork
 /// `file_path`: grok_build (`search_replace`), opencode.
+/// `target_directory` is deliberately omitted: a directory listing isn't an edit and must not share a file lock.
+||||||| base
+/// `file_path`: grok_build (`search_replace`), opencode (`EditTool`, `WriteTool`, `ReadTool`), codex (`read_file`).
 /// `target_directory` is deliberately omitted: a directory listing isn't an edit and must not share a file lock.
 =======
 /// Shared with `FinalizedToolset`'s per-call write lock (`xai_grok_tools::util::lock_path`) so both dispatchers key one file identically.
->>>>>>> upstream/main
+>>>>>>> upstream
 pub(super) fn lock_path_for_args(args: &serde_json::Value, cwd: &Path) -> Option<String> {
     xai_grok_tools::util::lock_path::lock_path_for_args(args, cwd)
 }

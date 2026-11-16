@@ -114,7 +114,7 @@ async fn create_test_actor(
         rewind_pending_prompt: std::sync::Mutex::new(None),
         startup_hints: StartupHints::default(),
         forked_tool_override: None,
-<<<<<<< HEAD
+<<<<<<< fork
         compaction: crate::session::compaction_config::CompactionConfig {
             threshold_percent: std::cell::Cell::new(threshold_percent),
             pending_manual_compact: std::cell::Cell::new(None),
@@ -131,9 +131,24 @@ async fn create_test_actor(
             cancel: Default::default(),
             context_overflow_recovery: Default::default(),
         },
+||||||| base
+        compaction: crate::session::compaction_config::CompactionConfig {
+            threshold_percent: std::cell::Cell::new(threshold_percent),
+            force_compact: std::sync::Arc::new(std::sync::atomic::AtomicBool::new(false)),
+            context_window_override: None,
+            count: std::sync::atomic::AtomicU64::new(0),
+            auto_compact_suppressed: std::sync::atomic::AtomicU8::new(0),
+            previous_model: std::cell::Cell::new(None),
+            compaction_mode: xai_chat_state::CompactionMode::Transcript,
+            verbatim_input: true,
+            tool_choice: crate::util::config::CompactionToolChoice::Auto,
+            prefire: crate::session::compaction_config::PrefireState::default(),
+            prefix_released: std::sync::atomic::AtomicBool::new(false),
+            cancel: Default::default(),
+        },
 =======
         compaction: test_compaction_config(threshold_percent),
->>>>>>> upstream/main
+>>>>>>> upstream
         long_reasoning_reminder: crate::session::long_reasoning_reminder::LongReasoningReminder {
             enabled: false,
             tokens: crate::session::long_reasoning_reminder::DEFAULT_TOKENS,
@@ -591,7 +606,7 @@ async fn create_test_actor_with_memory(
         rewind_pending_prompt: std::sync::Mutex::new(None),
         startup_hints: StartupHints::default(),
         forked_tool_override: None,
-<<<<<<< HEAD
+<<<<<<< fork
         compaction: crate::session::compaction_config::CompactionConfig {
             threshold_percent: std::cell::Cell::new(threshold_percent),
             pending_manual_compact: std::cell::Cell::new(None),
@@ -608,9 +623,24 @@ async fn create_test_actor_with_memory(
             cancel: Default::default(),
             context_overflow_recovery: Default::default(),
         },
+||||||| base
+        compaction: crate::session::compaction_config::CompactionConfig {
+            threshold_percent: std::cell::Cell::new(threshold_percent),
+            force_compact: std::sync::Arc::new(std::sync::atomic::AtomicBool::new(false)),
+            context_window_override: None,
+            count: std::sync::atomic::AtomicU64::new(0),
+            auto_compact_suppressed: std::sync::atomic::AtomicU8::new(0),
+            previous_model: std::cell::Cell::new(None),
+            compaction_mode: xai_chat_state::CompactionMode::Transcript,
+            verbatim_input: true,
+            tool_choice: crate::util::config::CompactionToolChoice::Auto,
+            prefire: crate::session::compaction_config::PrefireState::default(),
+            prefix_released: std::sync::atomic::AtomicBool::new(false),
+            cancel: Default::default(),
+        },
 =======
         compaction: test_compaction_config(threshold_percent),
->>>>>>> upstream/main
+>>>>>>> upstream
         long_reasoning_reminder: crate::session::long_reasoning_reminder::LongReasoningReminder {
             enabled: false,
             tokens: crate::session::long_reasoning_reminder::DEFAULT_TOKENS,
