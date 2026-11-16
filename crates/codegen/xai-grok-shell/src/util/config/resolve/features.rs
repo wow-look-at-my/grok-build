@@ -52,36 +52,11 @@ fn compose_turn_transient_retry(
     .value
 }
 
-<<<<<<< fork
-/// Whether model-catalog (`/v1/models`) and remote-settings (`/v1/settings`) fetches from xAI backends are allowed. That includes the deployment-config sync bundled into the startup prefetch.
 /// The background managed-config sync has its own `features.managed_config` gate. Precedence: requirements (MDM > system > user) > managed (`managed_config.toml` > system managed) > user `config.json` > default (true).
-/// This is an egress gate, so an overlay cannot re-enable a user's or a deployment's "never fetch" decision. Callable before an `AgentConfig` exists (startup prefetch runs pre-agent).
-pub fn resolve_remote_fetch_enabled() -> bool {
-    match crate::config::ConfigLayers::load() {
-        Ok(layers) => remote_fetch_enabled_from_layers(&layers),
         // A corrupt user-writable config.json must not drop a requirements or managed-layer pin
-        Err(_) => remote_fetch_enabled_from_policy_layers(
-            crate::config::load_merged_requirements().as_ref(),
-            crate::config::load_managed_config().ok().as_ref(),
-            crate::config::load_system_managed_config().ok().as_ref(),
-        ),
-    }
-}
 ||||||| base
-/// Whether model-catalog (`/v1/models`) and remote-settings (`/v1/settings`) fetches from xAI backends are allowed. That includes the deployment-config sync bundled into the startup prefetch.
 /// The background managed-config sync has its own `[features] managed_config` gate. Precedence: requirements (MDM > system > user) > managed (`managed_config.toml` > system managed) > user `config.toml` > default (true).
-/// This is an egress gate, so an overlay cannot re-enable a user's or a deployment's "never fetch" decision. Callable before an `AgentConfig` exists (startup prefetch runs pre-agent).
-pub fn resolve_remote_fetch_enabled() -> bool {
-    match crate::config::ConfigLayers::load() {
-        Ok(layers) => remote_fetch_enabled_from_layers(&layers),
         // A corrupt user-writable config.toml must not drop a requirements or managed-layer pin
-        Err(_) => remote_fetch_enabled_from_policy_layers(
-            crate::config::load_merged_requirements().as_ref(),
-            crate::config::load_managed_config().ok().as_ref(),
-            crate::config::load_system_managed_config().ok().as_ref(),
-        ),
-    }
-}
 =======
 pub use xai_grok_config::resolve_remote_fetch_enabled;
 >>>>>>> upstream

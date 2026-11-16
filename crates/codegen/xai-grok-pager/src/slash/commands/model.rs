@@ -41,24 +41,10 @@ impl SlashCommand for ModelCommand {
             return None;
         }
 
-<<<<<<< fork
-        if let Some(items) = sub_phase_items(ctx.models, args_query) {
-            return Some(items);
-||||||| base
-        // Effort phase if input is "<reasoning-model> ", else model phase.
-        if let Some((model_id, prefix)) = matched_reasoning_prefix(ctx.models, args_query) {
-            return Some(build_effort_items(ctx.models, &model_id, &prefix));
-=======
-        match chained_phase(ctx.models, args_query) {
-            Some(ChainedPhase::Window { model_id, prefix }) => {
-                Some(build_window_items(ctx.models, &model_id, &prefix))
-            }
-            Some(ChainedPhase::Effort { model_id, prefix }) => {
-                Some(build_effort_items(ctx.models, &model_id, &prefix))
-            }
-            Some(ChainedPhase::Done) => None,
+        match sub_phase(ctx.models, args_query) {
+            Some(SubPhase::Rows(items)) => Some(items),
+            Some(SubPhase::Done) => None,
             None => Some(build_model_items(ctx.models)),
->>>>>>> upstream
         }
     }
 
@@ -66,10 +52,10 @@ impl SlashCommand for ModelCommand {
         if ctx.models.is_empty() {
             return None;
         }
-        if let Some(items) = sub_phase_items(ctx.models, args_query) {
-            return Some(items);
+        match sub_phase(ctx.models, args_query) {
+            Some(SubPhase::Rows(items)) => Some(items),
+            Some(SubPhase::Done) | None => Some(build_model_items(ctx.models)),
         }
-        Some(build_model_items(ctx.models))
     }
 
     fn keeps_arg_order_on_ties(&self) -> bool {
@@ -106,7 +92,6 @@ impl SlashCommand for ModelCommand {
             return CommandResult::Action(Action::SetDefaultModel(id));
         }
 
-<<<<<<< fork
         // `/model <name> <provider>` picks one of several providers serving a
         // name. It sits before the effort phase, so a name the catalog shares
         // reaches the provider split instead of the ambiguity error.
@@ -122,23 +107,12 @@ impl SlashCommand for ModelCommand {
             }
         }
 
-        // Trailing effort token + reasoning model → session-scoped switch
-        // (not persisted as default).
+        // A name several models share needs a provider before a window or effort.
         if let Some((prefix, _)) = trimmed.rsplit_once(char::is_whitespace)
             && let Some(message) = ambiguous_name(ctx.models, prefix.trim_end())
         {
             return CommandResult::Error(message);
         }
-        // The effort token keeps its spaces, so a multi-word label resolves.
-        if let Some((id, token)) = split_model_effort(ctx.models, trimmed) {
-            return match ctx.models.resolve_effort_for_model(&id, token) {
-                Ok(effort) => CommandResult::Action(Action::SwitchModel {
-||||||| base
-        // Trailing effort on a reasoning model is a session switch. The token keeps its spaces.
-        if let Some((id, token)) = split_model_effort(ctx.models, trimmed) {
-            return match ctx.models.resolve_effort_for_model(&id, token) {
-                Ok(effort) => CommandResult::Action(Action::SwitchModel {
-=======
         // A trailing window or effort after the model is a session switch
         if let Some((id, rest)) = split_model_rest(ctx.models, trimmed) {
             let windows = ctx.models.context_window_options_for(&id);
@@ -163,7 +137,6 @@ impl SlashCommand for ModelCommand {
             }
             return match ctx.models.resolve_effort_for_model(&id, effort_token) {
                 Ok(effort) => CommandResult::Action(Action::SwitchModel(ModelChoice {
->>>>>>> upstream
                     model_id: id,
                     effort: Some(effort),
                     context_window_selection: window,
@@ -180,44 +153,11 @@ fn supports_reasoning_effort(info: &acp::ModelInfo) -> bool {
     supports_reasoning_effort_meta(info.meta.as_ref())
 }
 
-<<<<<<< fork
-/// The reasoning model `args` leads with, and the effort text after it.
-fn split_model_effort<'a>(models: &ModelState, args: &'a str) -> Option<(acp::ModelId, &'a str)> {
-    let (id, len) = detect_effort_phase(models, args)?;
-    let token = args[len..].trim();
-    (!token.is_empty()).then_some((id, token))
-}
-
-/// The reasoning model `args_query` leads with, and the name or id the user
-/// typed for it.
-fn matched_reasoning_prefix(
-    models: &ModelState,
-    args_query: &str,
-) -> Option<(acp::ModelId, String)> {
-    let (id, len) = detect_effort_phase(models, args_query)?;
-    Some((id, args_query[..len].to_string()))
-}
-
-/// Whether `query` is `token`, then whitespace, then anything.
-fn leads_with(query: &str, token: &str) -> bool {
-    query.len() > token.len() && query.is_char_boundary(token.len()) && {
-        // The `is_char_boundary` clause above runs first and short-circuits.
-        let (head, tail) = query.split_at(token.len());
-        head.eq_ignore_ascii_case(token) && tail.starts_with(char::is_whitespace)
-||||||| base
-fn split_on_model_key<'a>(args: &'a str, key: &str) -> Option<&'a str> {
-    let rest = args.get(key.len()..)?;
-    if args
-        .get(..key.len())
-        .is_some_and(|prefix| prefix.eq_ignore_ascii_case(key))
-        && rest.starts_with(char::is_whitespace)
-    {
-        Some(rest)
-    } else {
-        None
-=======
 /// The arg picker title for the `/model` sub-menu that `args_query` has reached.
 pub(crate) fn picker_title(models: &ModelState, args_query: &str) -> &'static str {
+    if winning_route(models, args_query).is_some() {
+        return "Pick provider";
+    }
     match chained_phase(models, args_query) {
         Some(ChainedPhase::Window { .. }) => "Pick context window",
         Some(ChainedPhase::Effort { .. }) => "Pick reasoning effort",

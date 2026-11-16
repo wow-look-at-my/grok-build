@@ -92,16 +92,6 @@ nucleo = { workspace = true }
 xai-ratatui-textarea = { workspace = true }
 xai-ratatui-inline = { workspace = true }
 
-<<<<<<< fork
-||||||| base
-# Update
-xai-grok-update = { path = "../xai-grok-update" }
-
-=======
-# Update
-xai-grok-update = { path = "../xai-grok-update", default-features = false }
-
->>>>>>> upstream
 # ACP
 agent-client-protocol = { workspace = true }
 xai-acp-lib = { workspace = true }
@@ -122,15 +112,9 @@ xai-grok-dashboard-store = { workspace = true }
 # (cpal is target-gated to non-Linux inside xai-grok-voice).
 xai-grok-voice = { path = "../xai-grok-voice", default-features = false, features = ["audio"] }
 xai-grok-login = { workspace = true }
-<<<<<<< fork
-xai-grok-shell = { workspace = true }
-xai-grok-models = { workspace = true }
-||||||| base
-xai-grok-shell = { workspace = true }
-=======
 xai-grok-cloud-config = { workspace = true }
 xai-grok-shell = { path = "../xai-grok-shell", default-features = false }
->>>>>>> upstream
+xai-grok-models = { workspace = true }
 # The status-line contract: the config the user writes and the payload the
 # agent sends. A leaf crate rather than the agent's, so the client reads it
 # from upstream of the crate that fills it in.
@@ -206,15 +190,6 @@ xai-grok-gboom = { path = "../xai-grok-gboom", features = ["test-support"] }
 xai-grok-login = { workspace = true, features = ["test-support"] }
 xai-grok-shell = { path = "../xai-grok-shell", default-features = false, features = ["test-support"] }
 pretty_assertions = { workspace = true }
-<<<<<<< fork
-||||||| base
-wiremock = { workspace = true }
-=======
-rstest = { workspace = true }
-wiremock = { workspace = true }
-# Decodes the clip-transcription request the voice tests capture off wiremock.
-prost = { workspace = true }
->>>>>>> upstream
 insta = { workspace = true }
 criterion = { workspace = true }
 tempfile = { workspace = true }
@@ -265,18 +240,10 @@ path = "tests/plugin_marketplace_remove_official.rs"
 workspace = true
 
 [features]
-<<<<<<< fork
-default = ["sandbox-enforce"]
-||||||| base
-default = ["jemalloc", "sandbox-enforce"]
-=======
 default = [
-    "jemalloc",
     "sandbox-enforce",
     "xai-grok-shell/default",
-    "xai-grok-update/default",
 ]
->>>>>>> upstream
 default-bazel = [
     "sandbox-enforce",
     "test-support",

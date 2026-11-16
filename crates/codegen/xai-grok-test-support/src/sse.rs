@@ -437,7 +437,7 @@ pub fn responses_api_script_chunks<S: AsRef<str>>(chunks: &[S], model: &str) -> 
         .map(|chunk| chunk.as_ref().to_owned())
         .collect();
     let text = deltas.concat();
-    responses_api_script_from_deltas(&deltas, &text, model)
+    responses_api_script_from_deltas(&deltas, &text, model, ResponsesEnd::Completed)
 }
 
 /// `split_inclusive(' ')` keeps each chunk's trailing space, so concatenating the chunks reconstructs `text` byte-for-byte (newlines included).
@@ -445,7 +445,6 @@ pub(crate) fn responses_api_deltas(text: &str) -> Vec<String> {
     text.split_inclusive(' ').map(str::to_owned).collect()
 }
 
-<<<<<<< fork
 // `deltas` and `text` deliberately disagree in echo mode: collapsed deltas, uncollapsed `response.completed` text
 // The shell depends on that mismatch, so do not unify them
 fn responses_api_script_from_deltas(
@@ -454,17 +453,7 @@ fn responses_api_script_from_deltas(
     model: &str,
     end: ResponsesEnd,
 ) -> Vec<SseEvent> {
-    let (end_type, end_status) = match end {
-        ResponsesEnd::Completed => ("response.completed", "completed"),
-        ResponsesEnd::Incomplete => ("response.incomplete", "incomplete"),
-    };
-||||||| base
-// `deltas` and `text` deliberately disagree in echo mode: collapsed deltas, uncollapsed `response.completed` text
-// The shell depends on that mismatch, so do not unify them
-fn responses_api_script_from_deltas(deltas: &[String], text: &str, model: &str) -> Vec<SseEvent> {
-=======
-fn responses_api_script_from_deltas(deltas: &[String], text: &str, model: &str) -> Vec<SseEvent> {
-    responses_api_script_from_deltas_with_usage(deltas, text, model, None)
+    responses_api_script_from_deltas_ending(deltas, text, model, None, end)
 }
 
 pub(crate) fn responses_api_script_from_deltas_with_usage(
@@ -473,6 +462,20 @@ pub(crate) fn responses_api_script_from_deltas_with_usage(
     model: &str,
     usage: Option<&UsageReport>,
 ) -> Vec<SseEvent> {
+    responses_api_script_from_deltas_ending(deltas, text, model, usage, ResponsesEnd::Completed)
+}
+
+fn responses_api_script_from_deltas_ending(
+    deltas: &[String],
+    text: &str,
+    model: &str,
+    usage: Option<&UsageReport>,
+    end: ResponsesEnd,
+) -> Vec<SseEvent> {
+    let (end_type, end_status) = match end {
+        ResponsesEnd::Completed => ("response.completed", "completed"),
+        ResponsesEnd::Incomplete => ("response.incomplete", "incomplete"),
+    };
     let usage = usage.map_or_else(
         || {
             json!({
@@ -485,7 +488,6 @@ pub(crate) fn responses_api_script_from_deltas_with_usage(
         },
         responses_usage_block,
     );
->>>>>>> upstream
     let mut events = Vec::new();
     let mut seq = 0;
 

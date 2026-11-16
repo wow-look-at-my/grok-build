@@ -51,14 +51,14 @@ use super::actions::Action;
 use super::agent::AgentSession;
 use super::app_view::InputOutcome;
 use super::cancel_latency::CancelLatency;
+use crate::scrollback::EntryId;
+use crate::scrollback::ScrollbackSearchState;
 use crate::scrollback::state::ScrollbackState;
 use crate::scrollback::text_selection::{
     ActiveBlockDrag, ActiveTextDrag, DragAutoScrollState, PendingBlockDrag, PendingTextDrag,
     PersistentTextSelection, ResolvedSelectionBoundaries, ResolvedSelectionModel,
     TableSelectionGeometry,
 };
-use crate::scrollback::EntryId;
-use crate::scrollback::ScrollbackSearchState;
 use crate::theme::Theme;
 pub use crate::views::agent::{ActivePane, AgentViewLayout, PaneAreas};
 use crate::views::block_viewer::{BlockViewerPane, ViewerKind};
@@ -105,8 +105,8 @@ mod plan;
 #[cfg(test)]
 pub(crate) use plan::MAX_KEPT_PLAN_FILE_BYTES;
 pub(crate) use plan::{
-    capped_kept_plan_body, PostTurnPlanCommit, BUILD_IN_FLIGHT_ABANDON_NOTICE,
-    BUILD_IN_FLIGHT_REVISE_NOTICE, LEAVE_PLAN_REVISE_NOTICE,
+    BUILD_IN_FLIGHT_ABANDON_NOTICE, BUILD_IN_FLIGHT_REVISE_NOTICE, LEAVE_PLAN_REVISE_NOTICE,
+    PostTurnPlanCommit, capped_kept_plan_body,
 };
 mod prompt;
 mod prompt_stash;
@@ -1773,8 +1773,8 @@ pub(crate) mod test_fixtures {
     use crate::scrollback::state::ScrollbackState;
     use agent_client_protocol as acp;
     use crossterm::event::{Event, KeyCode, KeyEvent, KeyModifiers};
-    pub(crate) fn make_followup_permission_state(
-    ) -> crate::views::permission_view::PermissionViewState {
+    pub(crate) fn make_followup_permission_state()
+    -> crate::views::permission_view::PermissionViewState {
         let (response_tx, _rx) = tokio::sync::oneshot::channel();
         let request = agent_client_protocol::RequestPermissionRequest::new(
             agent_client_protocol::SessionId::new(std::sync::Arc::from("test")),
@@ -1808,8 +1808,8 @@ pub(crate) mod test_fixtures {
             options_scroll_offset: 0,
         }
     }
-    pub(crate) fn make_plan_approval_view_state(
-    ) -> crate::views::plan_approval_view::PlanApprovalViewState {
+    pub(crate) fn make_plan_approval_view_state()
+    -> crate::views::plan_approval_view::PlanApprovalViewState {
         let (tx, _rx) = tokio::sync::oneshot::channel();
         let request = crate::views::plan_approval_view::ExitPlanModeExtRequest {
             session_id: "test-session".into(),

@@ -11,7 +11,6 @@ use xai_grok_sampling_types::{ConversationItem, SyntheticReason};
 const DEVICE_TEST_OBJECTIVE: &str = "ssh to root@example.test and test that a genbw meter profile does NOT produce aggregate meter data on dnp3 or modbus";
 const STALE_CODE_REVIEW: &str = "please review the PR for config-json-go";
 
-<<<<<<< fork
 async fn make_goal_actor() -> (StdArc<SessionActor>, TempDir) {
     let tmp = TempDir::new().expect("tempdir");
     let (gateway_tx, _gateway_rx) =
@@ -62,49 +61,6 @@ fn stale_pre_goal_conversation() -> Vec<ConversationItem> {
     ]
 }
 
-||||||| base
-async fn make_goal_actor() -> (StdArc<SessionActor>, TempDir) {
-    let tmp = TempDir::new().expect("tempdir");
-    let (gateway_tx, _gateway_rx) =
-        tokio::sync::mpsc::unbounded_channel::<xai_acp_lib::AcpClientMessage>();
-    let (persistence_tx, _persistence_rx) =
-        tokio::sync::mpsc::unbounded_channel::<PersistenceMsg>();
-    let mut actor = create_test_actor(0, 256_000, 85, gateway_tx, persistence_tx).await;
-    actor.events = crate::session::events::EventTracker::new(tmp.path());
-    actor.goal_enabled = true;
-    set_goal_harness_for_tests(&actor);
-    actor.goal_tracker = StdArc::new(parking_lot::Mutex::new(
-        crate::session::goal_tracker::GoalTracker::new(tmp.path().to_path_buf()),
-    ));
-    (StdArc::new(actor), tmp)
-}
-
-fn start_device_test_goal(actor: &SessionActor) {
-    actor.goal_tracker.lock().create_goal(
-        "g-device-test".into(),
-        DEVICE_TEST_OBJECTIVE.into(),
-        None,
-        0,
-        "2026-08-06T00:00:00Z".into(),
-        None,
-    );
-}
-
-fn stale_pre_goal_conversation() -> Vec<ConversationItem> {
-    vec![
-        ConversationItem::system("You are Grok."),
-        ConversationItem::user(format!(
-            "<user_info>OS: linux</user_info>\n\n<user_query>\n{STALE_CODE_REVIEW}\n</user_query>"
-        )),
-        ConversationItem::assistant("I'll start the branch code review."),
-        ConversationItem::system_reminder(format!(
-            "A goal has been set: {DEVICE_TEST_OBJECTIVE}\nStart now."
-        )),
-    ]
-}
-
-=======
->>>>>>> upstream
 #[tokio::test(flavor = "current_thread")]
 async fn last_user_query_seeds_from_active_goal_not_stale_pre_goal_prompt() {
     let local = tokio::task::LocalSet::new();
@@ -199,34 +155,11 @@ async fn summarizer_user_context_pins_objective() {
             start_device_test_goal(&actor);
 
             let ctx = actor
-<<<<<<< fork
-                .merge_goal_compaction_user_context(None)
-                .await
-||||||| base
-                .merge_goal_compaction_user_context(None)
-=======
                 .goal_compaction_user_context()
->>>>>>> upstream
+                .await
                 .expect("active goal must produce summarizer context");
             assert!(ctx.contains(DEVICE_TEST_OBJECTIVE), "{ctx}");
             assert!(ctx.contains("Do not restart this goal"), "{ctx}");
-<<<<<<< fork
-
-            let merged = actor
-                .merge_goal_compaction_user_context(Some("keep auth".into()))
-                .await
-                .expect("merge keeps caller text");
-            assert!(merged.contains("keep auth"), "{merged}");
-            assert!(merged.contains(DEVICE_TEST_OBJECTIVE), "{merged}");
-||||||| base
-
-            let merged = actor
-                .merge_goal_compaction_user_context(Some("keep auth".into()))
-                .expect("merge keeps caller text");
-            assert!(merged.contains("keep auth"), "{merged}");
-            assert!(merged.contains(DEVICE_TEST_OBJECTIVE), "{merged}");
-=======
->>>>>>> upstream
         })
         .await;
 }
@@ -368,13 +301,7 @@ async fn paused_goal_does_not_override_later_human_query() {
             );
 
             assert_eq!(actor.goal_objective_for_compaction(), None);
-<<<<<<< fork
-            assert_eq!(actor.merge_goal_compaction_user_context(None).await, None);
-||||||| base
-            assert_eq!(actor.merge_goal_compaction_user_context(None), None);
-=======
-            assert_eq!(actor.goal_compaction_user_context(), None);
->>>>>>> upstream
+            assert_eq!(actor.goal_compaction_user_context().await, None);
 
             let conversation = stale_pre_goal_conversation();
             let ctx =
@@ -454,44 +381,4 @@ async fn compact_reseed_skips_round_count() {
             );
         })
         .await;
-}
-
-async fn make_goal_actor() -> (StdArc<SessionActor>, TempDir) {
-    let tmp = TempDir::new().expect("tempdir");
-    let (gateway_tx, _gateway_rx) =
-        tokio::sync::mpsc::unbounded_channel::<xai_acp_lib::AcpClientMessage>();
-    let (persistence_tx, _persistence_rx) =
-        tokio::sync::mpsc::unbounded_channel::<PersistenceMsg>();
-    let mut actor = create_test_actor(0, 256_000, 85, gateway_tx, persistence_tx).await;
-    actor.events = crate::session::events::EventTracker::new(tmp.path());
-    actor.goal_enabled = true;
-    set_goal_harness_for_tests(&actor);
-    actor.goal_tracker = StdArc::new(parking_lot::Mutex::new(
-        crate::session::goal_tracker::GoalTracker::new(tmp.path().to_path_buf()),
-    ));
-    (StdArc::new(actor), tmp)
-}
-
-fn start_device_test_goal(actor: &SessionActor) {
-    actor.goal_tracker.lock().create_goal(
-        "g-device-test".into(),
-        DEVICE_TEST_OBJECTIVE.into(),
-        None,
-        0,
-        "2026-08-06T00:00:00Z".into(),
-        None,
-    );
-}
-
-fn stale_pre_goal_conversation() -> Vec<ConversationItem> {
-    vec![
-        ConversationItem::system("You are Grok."),
-        ConversationItem::user(format!(
-            "<user_info>OS: linux</user_info>\n\n<user_query>\n{STALE_CODE_REVIEW}\n</user_query>"
-        )),
-        ConversationItem::assistant("I'll start the branch code review."),
-        ConversationItem::system_reminder(format!(
-            "A goal has been set: {DEVICE_TEST_OBJECTIVE}\nStart now."
-        )),
-    ]
 }

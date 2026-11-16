@@ -1753,8 +1753,8 @@ async fn a_restored_session_with_no_effort_anywhere_still_gets_one() {
         restore_effort_via_load(Some(ReasoningEffort::None), None).await,
         Some(ReasoningEffort::None),
         "an explicit none is kept"
-||||||| base
-=======
+    );
+}
 #[tokio::test]
 async fn restore_applies_the_saved_context_window_selection() {
     let agent = build_minimal_agent_for_tests();
@@ -1850,7 +1850,6 @@ async fn restore_keeps_the_saved_context_window_selection_without_a_catalog() {
     assert_eq!(
         500_000,
         selection.load(std::sync::atomic::Ordering::Relaxed)
->>>>>>> upstream
     );
 }
 /// A session persisted under a routing *slug* (not the catalog map key) must still get reasoning modes and a selected model.
@@ -3079,8 +3078,8 @@ fn write_plugin_manifest(dir: &std::path::Path, name: &str) {
 <<<<<<< fork
 /// Kill-switch ordering through the production session-less `example.invalid/plugins/reload` path (no resident
 /// session, so the rebuild targets the launch dir). `resolve_effective_plugins_config` consults the
-/// folder-trust gate, whose cold-key backstop resolves WITHOUT remote settings and records a durable
-/// verdict; if the disk read ran before the real-remote resolve, a cold launch dir under an org
+/// folder-trust gate, whose cold-key backstop resolves WITHOUT remote settings and records a durable verdict.
+/// If the disk read ran before the real-remote resolve, a cold launch dir under an org
 ||||||| base
 /// Kill-switch ordering through the production session-less `x.ai/plugins/reload` path (no resident
 /// session, so the rebuild targets the launch dir). `resolve_effective_plugins_config` consults the
@@ -3131,7 +3130,7 @@ async fn plugins_reload_resolves_real_remote_trust_before_reading_disk_config() 
         "kill-switched folder counts trusted, so the project [plugins].paths plugin must be discovered"
     );
 }
-/// A session-less `example.invalid/plugins/reload` must re-resolve the launch dir's folder trust rather than
+/// A session-less `example.invalid/plugins/reload` must re-resolve the launch dir's folder trust.
 /// reuse the startup primer's memoized verdict. The primer records a point-in-time answer, and a
 /// no-configs launch dir yields a non-durable "trusted" allow; if repo-local plugin configs appear
 /// afterwards, a reload that reused that allow would grant them executable trust with no check.

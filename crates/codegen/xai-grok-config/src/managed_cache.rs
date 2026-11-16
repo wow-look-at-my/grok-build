@@ -261,13 +261,6 @@ fn serving_team_id(identity: &ServingIdentity) -> Option<&str> {
     }
 }
 
-<<<<<<< fork
-/// Tamper signals for the current identity, split ways: [`Self::needs_refetch`] (staleness) fires on ANY signal.
-/// [`Self::compromised_for_gate`] (gate) fires only on artifact-missing.
-||||||| base
-/// Tamper signals for the current identity, split two ways: [`Self::needs_refetch`] (staleness) fires on ANY signal.
-/// [`Self::compromised_for_gate`] (gate) fires only on artifact-missing or key-change.
-=======
 /// Why the gate refuses the managed policy.
 #[derive(Debug, Clone, Copy, PartialEq, Eq, serde::Serialize, thiserror::Error)]
 #[serde(rename_all = "camelCase")]
@@ -278,13 +271,10 @@ pub enum ManagedPolicyCompromise {
     SignatureMissing,
     #[error("managed policy file is missing")]
     PolicyFileMissing,
-    #[error("managed deployment key changed")]
-    DeploymentKeyChanged,
 }
 
 /// Tamper signals for the current identity, split two ways: [`Self::needs_refetch`] (staleness) fires on ANY signal.
-/// [`Self::compromised_reason`] (gate) fires only on artifact-missing or key-change.
->>>>>>> upstream
+/// [`Self::compromised_reason`] (gate) fires only on artifact-missing.
 /// A pure identity mismatch never compromises the gate: a foreign marker is rebound by the online refetch.
 #[derive(Clone, Copy)]
 struct TamperSignals {
@@ -304,23 +294,9 @@ impl TamperSignals {
         self.artifact_missing || self.identity_mismatch
     }
 
-<<<<<<< fork
-    fn compromised_for_gate(self) -> bool {
-        self.artifact_missing
-||||||| base
-    fn compromised_for_gate(self) -> bool {
-        self.artifact_missing || self.key_fingerprint_mismatch
-=======
     fn compromised_reason(self) -> Option<ManagedPolicyCompromise> {
-        // A key change outranks a missing policy file on every verdict.
-        if self.key_fingerprint_mismatch {
-            Some(ManagedPolicyCompromise::DeploymentKeyChanged)
-        } else if self.artifact_missing {
-            Some(ManagedPolicyCompromise::PolicyFileMissing)
-        } else {
-            None
-        }
->>>>>>> upstream
+        self.artifact_missing
+            .then_some(ManagedPolicyCompromise::PolicyFileMissing)
     }
 }
 
@@ -433,73 +409,9 @@ fn managed_policy_compromised_decision(
         }
         required
     };
-<<<<<<< fork
-    // The best-effort marker decision: refuse only an opted-in marker whose tamper counts for the gate (`compromised_for_gate`)
-    let marker_compromised = || {
-        cache.is_some_and(|cache| {
-            if !cache.fail_closed {
-                return false;
-            }
-            let signals = TamperSignals::evaluate(cache, home, identity);
-            let compromised = signals.compromised_for_gate();
-            if compromised {
-                tracing::warn!(
-                    artifact_missing = signals.artifact_missing,
-                    identity_mismatch = signals.identity_mismatch,
-                    "managed policy fail-closed gate: refusing session on tamper evidence"
-                );
-            } else if signals.identity_mismatch {
-                tracing::debug!(
-                    identity_mismatch = true,
-                    "managed policy fail-closed gate: foreign marker, not refusing (online refetch rebinds)"
-                );
-            }
-            compromised
-        })
-    };
-||||||| base
-    // The best-effort marker decision: refuse only an opted-in marker whose tamper counts for the gate (`compromised_for_gate`)
-    let marker_compromised = || {
-        cache.is_some_and(|cache| {
-            if !cache.fail_closed {
-                return false;
-            }
-            let signals = TamperSignals::evaluate(cache, home, identity);
-            let compromised = signals.compromised_for_gate();
-            // Booleans only, never the raw key (the fingerprint is already a one-way hash)
-            if compromised {
-                tracing::warn!(
-                    artifact_missing = signals.artifact_missing,
-                    identity_mismatch = signals.identity_mismatch,
-                    key_fingerprint_mismatch = signals.key_fingerprint_mismatch,
-                    "managed policy fail-closed gate: refusing session on tamper evidence"
-                );
-            } else if signals.identity_mismatch {
-                tracing::debug!(
-                    identity_mismatch = true,
-                    "managed policy fail-closed gate: foreign marker, not refusing (online refetch rebinds)"
-                );
-            }
-            compromised
-        })
-    };
-=======
->>>>>>> upstream
     match signed_verdict {
-<<<<<<< fork
-        SignedVerdict::Compromised => true,
-        SignedVerdict::Trusted => false,
-||||||| base
-        SignedVerdict::Compromised => true,
-        // Trusted clears the gate except for the deploy-key fingerprint, which the signature can't attest
-        SignedVerdict::Trusted => key_fingerprint_mismatch && marker_compromised(),
-=======
         SignedVerdict::Compromised => Some(ManagedPolicyCompromise::SignatureInvalid),
-        SignedVerdict::Trusted if key_fingerprint_mismatch => {
-            marker_compromise(cache, home, identity)
-        }
         SignedVerdict::Trusted => None,
->>>>>>> upstream
         SignedVerdict::NoAuthenticSidecar => {
             if claim_imposes() {
                 tracing::warn!(
@@ -530,7 +442,6 @@ fn marker_compromise(
         tracing::warn!(
             artifact_missing = signals.artifact_missing,
             identity_mismatch = signals.identity_mismatch,
-            key_fingerprint_mismatch = signals.key_fingerprint_mismatch,
             "managed policy fail-closed gate: refusing session on tamper evidence"
         );
     } else if signals.identity_mismatch {

@@ -1187,11 +1187,7 @@ impl PlanModeKind {
     }
     /// Construct from a bool (the inverse of [`Self::to_bool`]).
     pub fn from_bool(b: bool) -> Self {
-        if b {
-            Self::On
-        } else {
-            Self::Off
-        }
+        if b { Self::On } else { Self::Off }
     }
 }
 /// What user gesture triggered a turn cancel; sent as `session/cancel`'s `_meta.cancelTrigger`.
