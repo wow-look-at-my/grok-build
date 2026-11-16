@@ -778,16 +778,8 @@ Usage notes:
             !rendered.contains("${{"),
             "must not leak raw template source: {rendered}"
         );
-<<<<<<< fork
-        assert!(rendered.contains("background=true"));
-        assert!(rendered.contains("This tool never waits."));
-||||||| base
-        assert!(rendered.contains("background=true"));
-        assert!(rendered.contains("Omit timeout_ms") || rendered.contains("positive timeout_ms"));
-=======
         assert!(rendered.contains("block_until_ms=0") && rendered.contains("background=true"));
-        assert!(rendered.contains("Omit timeout_ms") || rendered.contains("positive timeout_ms"));
->>>>>>> upstream
+        assert!(rendered.contains("This tool never waits."));
     }
 
     #[tokio::test]

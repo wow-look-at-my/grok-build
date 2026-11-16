@@ -9,21 +9,12 @@ use parking_lot::RwLock;
 use agent_client_protocol as acp;
 
 use super::{
-<<<<<<< fork
-    HttpModelsEndpoint, ModelFetchAuth, ModelsCacheManager, ModelsCacheScope, ModelsEndpoint,
-    allowlist_matches_nothing, available_models, is_campaign_only_flip, merge_additive_catalog,
-    resolve_catalog_key, resolve_default_model, resolve_model_catalog, resolve_route_catalog_key,
-||||||| base
-    HttpModelsEndpoint, ModelFetchAuth, ModelsCacheManager, ModelsCacheScope, ModelsEndpoint,
-    allowlist_matches_nothing, available_models, is_campaign_only_flip, resolve_catalog_key,
-    resolve_default_model, resolve_model_catalog, task_model_error_for_catalog,
-    validate_selectable,
-=======
     CatalogSource, HttpModelsEndpoint, ModelFetchAuth, ModelsCacheManager, ModelsCacheScope,
     ModelsEndpoint, allowlist_excludes_all_message, allowlist_matches_nothing, available_models,
-    fallback_model_id, is_campaign_only_flip, models_endpoint_empty_message, models_fetch_enabled,
-    resolve_catalog_key, resolve_default_model, resolve_model_catalog, resolve_models_cache_scope,
->>>>>>> upstream
+    fallback_model_id, is_campaign_only_flip, merge_additive_catalog,
+    models_endpoint_empty_message, models_fetch_enabled, resolve_catalog_key,
+    resolve_default_model, resolve_model_catalog, resolve_models_cache_scope,
+    resolve_route_catalog_key,
     task_model_error_for_catalog, validate_selectable,
 };
 use crate::agent::config::{self, ModelEntry, resolve_credentials, sampling_config_for_model};
@@ -529,7 +520,6 @@ impl ModelsManager {
         self.inner.catalog.write().models.insert(id.into(), entry);
     }
 
-<<<<<<< fork
     /// Replace the models autodetected from the `[model_providers.*]` listings
     /// and notify every connected model selector. The xAI catalog is untouched,
     /// so a provider's listing expands the picker rather than replacing it.
@@ -593,8 +583,8 @@ impl ModelsManager {
         let prefetched = self.inner.catalog.read().prefetched.clone();
         self.rebuild(&cfg, prefetched);
         self.notify_models_updated();
-||||||| base
-=======
+    }
+
     #[cfg(test)]
     pub(crate) fn settle_first_catalog_for_tests(&self, ready: bool) {
         self.inner.catalog_progress.send_replace(if ready {
@@ -602,7 +592,6 @@ impl ModelsManager {
         } else {
             CatalogProgress::Failed
         });
->>>>>>> upstream
     }
 
     pub(crate) fn current_reasoning_effort(&self) -> Option<ReasoningEffort> {
@@ -621,7 +610,6 @@ impl ModelsManager {
         models.get(key.0.as_ref()).map(f)
     }
 
-<<<<<<< fork
     /// The catalog key of the entry a session sends to. See
     /// [`resolve_route_catalog_key`].
     pub(crate) fn route_catalog_key(&self, model: &str, base_url: &str) -> Option<acp::ModelId> {
@@ -653,8 +641,8 @@ impl ModelsManager {
     ) -> Option<std::num::NonZeroU64> {
         self.route_context_window(model, base_url)
             .and_then(|(cw, pinned)| pinned.then_some(cw))
-||||||| base
-=======
+    }
+
     /// Whether `model_id` is served by the same endpoint, backend, and session auth as a config already built for another model.
     /// Only then can a request swap in `model_id` without rebuilding the client.
     pub(crate) fn model_shares_route(
@@ -673,7 +661,6 @@ impl ModelsManager {
                         .is_some_and(|u| u.trim_end_matches('/') == base_url))
         })
         .unwrap_or(false)
->>>>>>> upstream
     }
 
     pub(crate) fn model_supports_reasoning_effort(&self, model_id: &str) -> bool {

@@ -15,13 +15,8 @@ pub use store::MANAGED_ARTIFACT_FILES;
 pub use store::{
     classify_auth_mode, clear_orphan, current_serving_identity, has_principal, is_fetch_enabled,
 };
-<<<<<<< HEAD:crates/codegen/xai-grok-shell/src/managed_config/mod.rs
-pub(crate) use supervisor::policy_repair_pending;
-=======
-pub use store::{resolve_deployment_id, resolve_deployment_key};
 pub use supervisor::policy_repair_pending;
 #[cfg(any(test, feature = "test-support"))]
->>>>>>> upstream/main:crates/codegen/xai-grok-cloud-config/src/managed_config/mod.rs
 #[doc(hidden)]
 pub use supervisor::{ManagedConfigRefresher, spawn_refresh_supervisor, take_refresh_supervisor};
 pub use supervisor::{

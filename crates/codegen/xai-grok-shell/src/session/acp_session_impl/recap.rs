@@ -293,13 +293,6 @@ impl SessionActor {
         // Advance the watermark only on success or suppress (not on failure, empty, or cancel) so auto can retry later for this turn
         let clear_in_flight = || self.recap_in_flight.set(false);
 
-<<<<<<< fork
-        let setup = match self.prepare_side_call("recap").await {
-            Ok(s) => s,
-||||||| base
-        let setup = match self.prepare_side_call().await {
-            Ok(s) => s,
-=======
         let settings = crate::util::config::resolve_session_recap_settings_from_disk();
         let Some(transcript) = session_recap::recap_transcript(
             &conversation,
@@ -316,7 +309,6 @@ impl SessionActor {
         };
         let (client, model, reasoning_effort) = match self.recap_sampling_client(&settings).await {
             Ok(c) => c,
->>>>>>> upstream
             Err(e) => {
                 tracing::warn!(error = %e, "recap: failed to prepare sampling client");
                 clear_in_flight();
@@ -486,7 +478,7 @@ impl SessionActor {
         .await;
     }
 
-    /// Client for the recap call: the configured model when it shares the session's endpoint and auth, else the session model.
+    /// Client for the recap call: a pinned `recap` harness slot wins. Otherwise the configured model when it shares the session's endpoint and auth, else the session model.
     /// The configured effort applies when the chosen model supports it, else the session's effort stays.
     async fn recap_sampling_client(
         &self,
@@ -499,6 +491,9 @@ impl SessionActor {
         ),
         acp::Error,
     > {
+        if let Some((client, cfg)) = self.resolve_slot_sampler("recap").await {
+            return Ok((client, cfg.model.clone(), cfg.reasoning_effort));
+        }
         self.refresh_token_if_expired().await;
         let mut config = self.reconstruct_full_config().await;
         if self.models_manager.model_shares_route(

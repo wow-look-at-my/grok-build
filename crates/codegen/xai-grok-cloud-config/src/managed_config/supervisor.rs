@@ -55,15 +55,9 @@ async fn fetch_managed_config(
     max_attempts: u32,
     echo_principal: Option<&str>,
 ) -> Result<ManagedConfigResponse, ManagedConfigError> {
-<<<<<<< HEAD:crates/codegen/xai-grok-shell/src/managed_config/supervisor.rs
-    crate::http::send_with_retry_escaping_pool(
+    xai_grok_http::send_with_retry_escaping_pool(
         move |client: xai_grok_net::HttpClient| async move {
             fetch_managed_config_once(&client, url, auth.clone(), echo_principal).await
-=======
-    xai_grok_http::send_with_retry_escaping_pool(
-        move |client: reqwest::Client| async move {
-            fetch_managed_config_once(&client, url, token, source, echo_principal).await
->>>>>>> upstream/main:crates/codegen/xai-grok-cloud-config/src/managed_config/supervisor.rs
         },
         max_attempts,
         |e: &ManagedConfigError| e.is_retryable(),
@@ -96,13 +90,8 @@ pub(super) fn map_transport_failure(
     }
 }
 
-<<<<<<< HEAD:crates/codegen/xai-grok-shell/src/managed_config/supervisor.rs
 fn map_send_error(e: &xai_grok_net::Error) -> ManagedConfigError {
-    map_transport_failure(crate::http::TransportFailure::classify(e))
-=======
-fn map_send_error(e: &reqwest::Error) -> ManagedConfigError {
     map_transport_failure(xai_grok_http::TransportFailure::classify(e))
->>>>>>> upstream/main:crates/codegen/xai-grok-cloud-config/src/managed_config/supervisor.rs
 }
 
 async fn fetch_managed_config_once(
@@ -274,15 +263,11 @@ async fn revalidate_stale_start(auth_manager: std::sync::Arc<xai_grok_login::Aut
         return;
     }
     // An auth.json read error is not "no principal".
-<<<<<<< HEAD:crates/codegen/xai-grok-shell/src/managed_config/supervisor.rs
     if matches!(store::team_principal_signed_in(), Ok(false)) {
-=======
-    if !store::managed_principal_present() {
         return;
     }
     if !xai_grok_config::is_managed_config_stale_for(&store::current_serving_identity_any_expiry())
     {
->>>>>>> upstream/main:crates/codegen/xai-grok-cloud-config/src/managed_config/supervisor.rs
         return;
     }
 
@@ -347,33 +332,7 @@ async fn fetch_for_principal(
     let url =
         xai_grok_config::EndpointsConfig::from_effective_config().resolve_managed_config_url();
 
-<<<<<<< HEAD:crates/codegen/xai-grok-shell/src/managed_config/supervisor.rs
     if let Some(auth) = team_override.or_else(store::read_active_team_auth) {
-=======
-    let team_auth = team_override.or_else(store::read_active_team_auth);
-
-    if let Some(dk) = store::resolve_deployment_key() {
-        let source = ManagedConfigSource::DeploymentKey;
-        // Echo binds to the deployment this key last synced.
-        let echo_principal =
-            xai_grok_config::managed_deployment_id(&store::deployment_key_fingerprint(&dk));
-        match fetch_managed_config(&url, &dk, source, max_attempts, echo_principal.as_deref()).await
-        {
-            // A rejected key must not starve a valid team sign-in; network/5xx do not fall through.
-            Err(ManagedConfigError::DeploymentKeyRejected) if team_auth.is_some() => {
-                tracing::warn!("deployment key rejected; falling back to the team session token");
-            }
-            Err(e) => return Err(e),
-            // Only a missing row falls through: applying the empty key body would delete team files.
-            Ok(body) if !body.config_exists() && team_auth.is_some() => {
-                tracing::debug!("deployment key has no config; trying the team principal");
-            }
-            Ok(body) => return Ok(FetchedConfig::DeploymentKey { key: dk, body }),
-        }
-    }
-
-    if let Some(auth) = team_auth {
->>>>>>> upstream/main:crates/codegen/xai-grok-cloud-config/src/managed_config/supervisor.rs
         let body = fetch_managed_config(
             &url,
             &auth.wire_auth(),
@@ -465,16 +424,8 @@ pub async fn post_login_sync(authenticated: Option<GrokAuth>) -> ManagedConfigSy
 
 /// True when the session-start repair will run; while this holds, no startup
 /// fetch may send an authenticated request.
-<<<<<<< HEAD:crates/codegen/xai-grok-shell/src/managed_config/supervisor.rs
-pub(crate) fn policy_repair_pending() -> bool {
-    policy_repair_pending_from(&store::team_principal_signed_in())
-=======
 pub fn policy_repair_pending() -> bool {
-    policy_repair_pending_from(
-        store::resolve_deployment_key().is_some(),
-        &store::team_principal_signed_in(),
-    )
->>>>>>> upstream/main:crates/codegen/xai-grok-cloud-config/src/managed_config/supervisor.rs
+    policy_repair_pending_from(&store::team_principal_signed_in())
 }
 
 fn policy_repair_pending_from(signed_in_team: &std::io::Result<bool>) -> bool {

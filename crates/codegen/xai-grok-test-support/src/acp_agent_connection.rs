@@ -125,14 +125,8 @@ impl AgentConnection {
         AgentConnection {
             conn,
             handler,
-<<<<<<< fork
-            _io_task: AbortOnDropHandle::new(xai_spawn::spawn_local(handle_io)),
-||||||| base
-            _io_task: AbortOnDropHandle::new(tokio::task::spawn_local(handle_io)),
-=======
             session_params: SessionParams::default(),
-            _io_task: AbortOnDropHandle::new(tokio::task::spawn_local(handle_io)),
->>>>>>> upstream
+            _io_task: AbortOnDropHandle::new(xai_spawn::spawn_local(handle_io)),
             _stop_spawned_tasks: stop.drop_guard(),
         }
     }

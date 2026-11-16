@@ -312,11 +312,7 @@ fn integration_claude_settings_file_to_permission_config() {
 /// Discovery order: project paths before global, and settings.local.json before settings.json within each directory.
 #[test]
 fn discovery_priority_order() {
-<<<<<<< HEAD:crates/codegen/xai-grok-workspace/src/permission/resolution_tests.rs
-    let _home = IsolatedHome::new();
-=======
     let home = isolated_home();
->>>>>>> upstream/main:crates/codegen/xai-grok-permission-rules/src/resolution_tests.rs
     let tmp = tempfile::tempdir().unwrap();
     let cwd = tmp.path();
 
@@ -336,11 +332,7 @@ fn discovery_priority_order() {
 /// When no .claude/settings.json exists anywhere, find returns paths but load returns None for each.
 #[test]
 fn discovery_with_no_settings_files() {
-<<<<<<< HEAD:crates/codegen/xai-grok-workspace/src/permission/resolution_tests.rs
-    let _home = IsolatedHome::new();
-=======
     let _home = isolated_home();
->>>>>>> upstream/main:crates/codegen/xai-grok-permission-rules/src/resolution_tests.rs
     let tmp = tempfile::tempdir().unwrap();
     let cwd = tmp.path();
 
@@ -386,11 +378,7 @@ fn project_claude_absent_when_home_is_git_repo() {
 
 #[test]
 fn default_mode_accept_edits_produces_allow_edit_rule() {
-<<<<<<< HEAD:crates/codegen/xai-grok-workspace/src/permission/resolution_tests.rs
-    let _home = IsolatedHome::new();
-=======
     let _home = isolated_home();
->>>>>>> upstream/main:crates/codegen/xai-grok-permission-rules/src/resolution_tests.rs
     let tmp = tempfile::tempdir().unwrap();
     let claude_dir = tmp.path().join(".claude");
     std::fs::create_dir_all(&claude_dir).unwrap();
@@ -437,11 +425,7 @@ fn default_mode_accept_edits_produces_allow_edit_rule() {
 
 #[test]
 fn default_mode_accept_edits_no_permissions_still_produces_rule() {
-<<<<<<< HEAD:crates/codegen/xai-grok-workspace/src/permission/resolution_tests.rs
-    let _home = IsolatedHome::new();
-=======
     let _home = isolated_home();
->>>>>>> upstream/main:crates/codegen/xai-grok-permission-rules/src/resolution_tests.rs
     let tmp = tempfile::tempdir().unwrap();
     let claude_dir = tmp.path().join(".claude");
     std::fs::create_dir_all(&claude_dir).unwrap();
@@ -473,11 +457,7 @@ fn default_mode_accept_edits_no_permissions_still_produces_rule() {
 
 #[test]
 fn claude_only_returns_claude_settings_source() {
-<<<<<<< HEAD:crates/codegen/xai-grok-workspace/src/permission/resolution_tests.rs
-    let _home = IsolatedHome::new();
-=======
     let _home = isolated_home();
->>>>>>> upstream/main:crates/codegen/xai-grok-permission-rules/src/resolution_tests.rs
     let tmp = tempfile::tempdir().unwrap();
     let claude_dir = tmp.path().join(".claude");
     std::fs::create_dir_all(&claude_dir).unwrap();
@@ -503,11 +483,7 @@ fn claude_only_returns_claude_settings_source() {
 
 #[test]
 fn no_claude_settings_returns_none() {
-<<<<<<< HEAD:crates/codegen/xai-grok-workspace/src/permission/resolution_tests.rs
-    let _home = IsolatedHome::new();
-=======
     let _home = isolated_home();
->>>>>>> upstream/main:crates/codegen/xai-grok-permission-rules/src/resolution_tests.rs
     let tmp = tempfile::tempdir().unwrap();
     assert!(
         resolve_claude_settings_inner(tmp.path(), true, None, UserDefaultModeLoad::Apply).is_none()
@@ -516,11 +492,7 @@ fn no_claude_settings_returns_none() {
 
 #[test]
 fn default_mode_accept_edits_explicit_deny_takes_priority() {
-<<<<<<< HEAD:crates/codegen/xai-grok-workspace/src/permission/resolution_tests.rs
-    let _home = IsolatedHome::new();
-=======
     let _home = isolated_home();
->>>>>>> upstream/main:crates/codegen/xai-grok-permission-rules/src/resolution_tests.rs
     let tmp = tempfile::tempdir().unwrap();
     let claude_dir = tmp.path().join(".claude");
     std::fs::create_dir_all(&claude_dir).unwrap();
@@ -1009,11 +981,7 @@ fn parse_bare_unknown_stays_glob_pattern() {
 
 #[test]
 fn merge_permissions_across_project_and_global_settings() {
-<<<<<<< HEAD:crates/codegen/xai-grok-workspace/src/permission/resolution_tests.rs
-    let _home = IsolatedHome::new();
-=======
     let _home = isolated_home();
->>>>>>> upstream/main:crates/codegen/xai-grok-permission-rules/src/resolution_tests.rs
     let tmp = tempfile::tempdir().unwrap();
     let cwd = tmp.path();
 
@@ -1067,11 +1035,7 @@ fn merge_permissions_across_project_and_global_settings() {
 
 #[test]
 fn merge_deny_from_project_with_allow_from_parent() {
-<<<<<<< HEAD:crates/codegen/xai-grok-workspace/src/permission/resolution_tests.rs
-    let _home = IsolatedHome::new();
-=======
     let _home = isolated_home();
->>>>>>> upstream/main:crates/codegen/xai-grok-permission-rules/src/resolution_tests.rs
     let tmp = tempfile::tempdir().unwrap();
     let repo_dir = tmp.path().join("repo");
     std::fs::create_dir_all(repo_dir.join(".git")).unwrap();
@@ -1118,11 +1082,7 @@ fn merge_deny_from_project_with_allow_from_parent() {
 
 #[test]
 fn default_mode_from_specific_file_wins() {
-<<<<<<< HEAD:crates/codegen/xai-grok-workspace/src/permission/resolution_tests.rs
-    let _home = IsolatedHome::new();
-=======
     let _home = isolated_home();
->>>>>>> upstream/main:crates/codegen/xai-grok-permission-rules/src/resolution_tests.rs
     let tmp = tempfile::tempdir().unwrap();
     let repo_dir = tmp.path().join("repo");
     std::fs::create_dir_all(repo_dir.join(".git")).unwrap();
@@ -1167,11 +1127,7 @@ fn default_mode_from_specific_file_wins() {
 
 #[test]
 fn default_mode_inherited_from_parent_when_not_set() {
-<<<<<<< HEAD:crates/codegen/xai-grok-workspace/src/permission/resolution_tests.rs
-    let _home = IsolatedHome::new();
-=======
     let _home = isolated_home();
->>>>>>> upstream/main:crates/codegen/xai-grok-permission-rules/src/resolution_tests.rs
     let tmp = tempfile::tempdir().unwrap();
     let repo_dir = tmp.path().join("repo");
     std::fs::create_dir_all(repo_dir.join(".git")).unwrap();
@@ -1242,11 +1198,7 @@ fn single_file_still_works() {
 /// Untrusted clone must not honor project `.claude/settings.json` permission rules or `defaultMode` (including bypassPermissions).
 #[test]
 fn untrusted_project_claude_permissions_are_not_honored() {
-<<<<<<< HEAD:crates/codegen/xai-grok-workspace/src/permission/resolution_tests.rs
-    let home = IsolatedHome::new();
-=======
     let home = isolated_home();
->>>>>>> upstream/main:crates/codegen/xai-grok-permission-rules/src/resolution_tests.rs
 
     // Global user-tier allow (must survive untrusted project).
     let global_claude = home.path().join(".claude");
@@ -1318,11 +1270,7 @@ fn untrusted_project_claude_permissions_are_not_honored() {
 /// `user_grok_home()`.
 #[test]
 fn untrusted_project_config_toml_permissions_are_not_honored() {
-<<<<<<< HEAD:crates/codegen/xai-grok-workspace/src/permission/resolution_tests.rs
-    let home = IsolatedHome::new();
-=======
     let home = isolated_home();
->>>>>>> upstream/main:crates/codegen/xai-grok-permission-rules/src/resolution_tests.rs
 
     // Global allow (survives untrusted project when GROK_HOME resolves here).
     std::fs::create_dir_all(home.path().join(".grok")).unwrap();
@@ -1421,11 +1369,7 @@ allow = ["Bash(evil *)"]
 
 #[test]
 fn bypass_permissions_produces_catch_all_allow() {
-<<<<<<< HEAD:crates/codegen/xai-grok-workspace/src/permission/resolution_tests.rs
-    let _home = IsolatedHome::new();
-=======
     let _home = isolated_home();
->>>>>>> upstream/main:crates/codegen/xai-grok-permission-rules/src/resolution_tests.rs
     let tmp = tempfile::tempdir().unwrap();
     let claude_dir = tmp.path().join(".claude");
     std::fs::create_dir_all(&claude_dir).unwrap();
@@ -1470,11 +1414,7 @@ fn bypass_permissions_produces_catch_all_allow() {
 
 #[test]
 fn bypass_permissions_with_explicit_deny_still_has_deny() {
-<<<<<<< HEAD:crates/codegen/xai-grok-workspace/src/permission/resolution_tests.rs
-    let _home = IsolatedHome::new();
-=======
     let _home = isolated_home();
->>>>>>> upstream/main:crates/codegen/xai-grok-permission-rules/src/resolution_tests.rs
     let tmp = tempfile::tempdir().unwrap();
     let claude_dir = tmp.path().join(".claude");
     std::fs::create_dir_all(&claude_dir).unwrap();
@@ -1495,11 +1435,7 @@ fn bypass_permissions_with_explicit_deny_still_has_deny() {
 
 #[test]
 fn bypass_permissions_overrides_accept_edits_cross_file() {
-<<<<<<< HEAD:crates/codegen/xai-grok-workspace/src/permission/resolution_tests.rs
-    let _home = IsolatedHome::new();
-=======
     let _home = isolated_home();
->>>>>>> upstream/main:crates/codegen/xai-grok-permission-rules/src/resolution_tests.rs
     let tmp = tempfile::tempdir().unwrap();
     let repo_dir = tmp.path().join("repo");
     std::fs::create_dir_all(repo_dir.join(".git")).unwrap();
@@ -1620,11 +1556,7 @@ fn block_on<F: std::future::Future>(future: F) -> F::Output {
 /// Pin active: no catch-all Allow Any; explicit rules stay; the block is recorded as a skip for inspect.
 #[test]
 fn bypass_permissions_blocked_by_policy_pin() {
-<<<<<<< HEAD:crates/codegen/xai-grok-workspace/src/permission/resolution_tests.rs
-    let _home = IsolatedHome::new();
-=======
     let _home = isolated_home();
->>>>>>> upstream/main:crates/codegen/xai-grok-permission-rules/src/resolution_tests.rs
     let tmp = tempfile::tempdir().unwrap();
     let claude_dir = tmp.path().join(".claude");
     std::fs::create_dir_all(&claude_dir).unwrap();
@@ -1671,11 +1603,7 @@ fn bypass_permissions_blocked_by_policy_pin() {
 /// A bypass-only file under the pin still resolves (zero rules) so the skip keeps provenance and reaches inspect instead of an early `None`.
 #[test]
 fn bypass_permissions_blocked_pin_only_file_still_resolves() {
-<<<<<<< HEAD:crates/codegen/xai-grok-workspace/src/permission/resolution_tests.rs
-    let _home = IsolatedHome::new();
-=======
     let _home = isolated_home();
->>>>>>> upstream/main:crates/codegen/xai-grok-permission-rules/src/resolution_tests.rs
     let tmp = tempfile::tempdir().unwrap();
     let claude_dir = tmp.path().join(".claude");
     std::fs::create_dir_all(&claude_dir).unwrap();
@@ -1714,11 +1642,7 @@ fn bypass_permissions_blocked_pin_only_file_still_resolves() {
 /// The pin covers bypass only: acceptEdits (edits-only auto-approve) keeps its synthetic Allow Edit rule.
 #[test]
 fn accept_edits_unaffected_by_policy_pin() {
-<<<<<<< HEAD:crates/codegen/xai-grok-workspace/src/permission/resolution_tests.rs
-    let _home = IsolatedHome::new();
-=======
     let _home = isolated_home();
->>>>>>> upstream/main:crates/codegen/xai-grok-permission-rules/src/resolution_tests.rs
     let tmp = tempfile::tempdir().unwrap();
     let claude_dir = tmp.path().join(".claude");
     std::fs::create_dir_all(&claude_dir).unwrap();
@@ -2486,11 +2410,7 @@ fn default_mode_from_str_and_effects() {
 /// When every permission rule string fails to parse, skip-only resolution must not panic.
 #[test]
 fn skip_only_invalid_permissions_resolves_without_panic() {
-<<<<<<< HEAD:crates/codegen/xai-grok-workspace/src/permission/resolution_tests.rs
-    let _home = IsolatedHome::new();
-=======
     let _home = isolated_home();
->>>>>>> upstream/main:crates/codegen/xai-grok-permission-rules/src/resolution_tests.rs
     let tmp = tempfile::tempdir().unwrap();
     let claude_dir = tmp.path().join(".claude");
     std::fs::create_dir_all(&claude_dir).unwrap();
@@ -2534,11 +2454,7 @@ fn nested_wrong_type_does_not_fall_back_to_root_default_mode() {
 
 #[test]
 fn unrecognized_project_mode_claims_scope_over_global_accept_edits() {
-<<<<<<< HEAD:crates/codegen/xai-grok-workspace/src/permission/resolution_tests.rs
-    let _home = IsolatedHome::new();
-=======
     let _home = isolated_home();
->>>>>>> upstream/main:crates/codegen/xai-grok-permission-rules/src/resolution_tests.rs
     let tmp = tempfile::tempdir().unwrap();
     let repo = tmp.path().join("repo");
     let sub = repo.join("pkg");
@@ -2581,11 +2497,7 @@ fn unrecognized_project_mode_claims_scope_over_global_accept_edits() {
 
 #[test]
 fn managed_default_mode_dont_ask_outranks_user_accept_edits() {
-<<<<<<< HEAD:crates/codegen/xai-grok-workspace/src/permission/resolution_tests.rs
-    let home = IsolatedHome::new();
-=======
     let _home = isolated_home();
->>>>>>> upstream/main:crates/codegen/xai-grok-permission-rules/src/resolution_tests.rs
     let tmp = tempfile::tempdir().unwrap();
     let claude_dir = tmp.path().join(".claude");
     std::fs::create_dir_all(&claude_dir).unwrap();
@@ -2639,11 +2551,7 @@ fn managed_default_mode_dont_ask_outranks_user_accept_edits() {
 
 #[test]
 fn managed_default_mode_auto_sets_prompt_policy() {
-<<<<<<< HEAD:crates/codegen/xai-grok-workspace/src/permission/resolution_tests.rs
-    let home = IsolatedHome::new();
-=======
     let _home = isolated_home();
->>>>>>> upstream/main:crates/codegen/xai-grok-permission-rules/src/resolution_tests.rs
     let tmp = tempfile::tempdir().unwrap();
     let managed = ManagedSettings {
         default_mode: Some(DefaultPermissionMode::Auto),
@@ -2672,11 +2580,7 @@ fn managed_default_mode_auto_sets_prompt_policy() {
 
 #[test]
 fn managed_accept_edits_appends_synthetic_edit_rule() {
-<<<<<<< HEAD:crates/codegen/xai-grok-workspace/src/permission/resolution_tests.rs
-    let home = IsolatedHome::new();
-=======
     let _home = isolated_home();
->>>>>>> upstream/main:crates/codegen/xai-grok-permission-rules/src/resolution_tests.rs
     let tmp = tempfile::tempdir().unwrap();
     let managed = ManagedSettings {
         default_mode: Some(DefaultPermissionMode::AcceptEdits),
@@ -2707,11 +2611,7 @@ fn managed_accept_edits_appends_synthetic_edit_rule() {
 
 #[test]
 fn managed_bypass_under_pin_records_skip_without_catchall() {
-<<<<<<< HEAD:crates/codegen/xai-grok-workspace/src/permission/resolution_tests.rs
-    let home = IsolatedHome::new();
-=======
     let _home = isolated_home();
->>>>>>> upstream/main:crates/codegen/xai-grok-permission-rules/src/resolution_tests.rs
     let tmp = tempfile::tempdir().unwrap();
     let managed = ManagedSettings {
         default_mode: Some(DefaultPermissionMode::BypassPermissions),
@@ -2853,11 +2753,7 @@ fn root_default_mode_still_works_as_compat_fallback() {
 
 #[test]
 fn default_mode_known_values_no_warnings() {
-<<<<<<< HEAD:crates/codegen/xai-grok-workspace/src/permission/resolution_tests.rs
-    let _home = IsolatedHome::new();
-=======
     let _home = isolated_home();
->>>>>>> upstream/main:crates/codegen/xai-grok-permission-rules/src/resolution_tests.rs
     let tmp = tempfile::tempdir().unwrap();
     let claude_dir = tmp.path().join(".claude");
     std::fs::create_dir_all(&claude_dir).unwrap();
@@ -3047,11 +2943,7 @@ fn parse_bare_web_fetch_tool_name() {
 
 #[test]
 fn managed_config_toml_rules_resolve_as_non_admin_defaults() {
-<<<<<<< HEAD:crates/codegen/xai-grok-workspace/src/permission/resolution_tests.rs
-    let home = IsolatedHome::new();
-=======
     let _home = isolated_home();
->>>>>>> upstream/main:crates/codegen/xai-grok-permission-rules/src/resolution_tests.rs
     let system = tempfile::tempdir().unwrap();
     let user = tempfile::tempdir().unwrap();
     // Catch-all in the root-owned system layer, scoped allow in the user layer.
