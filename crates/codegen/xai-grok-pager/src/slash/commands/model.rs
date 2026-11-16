@@ -180,8 +180,8 @@ enum ChainedPhase {
 
 /// The sub-menu for `args_query`, or `None` while the user is still picking a model.
 fn chained_phase(models: &ModelState, args_query: &str) -> Option<ChainedPhase> {
-    let (id, key, rest) = longest_chained_prefix(models, args_query)?;
-    let model_id = id.clone();
+    let (model_id, len) = detect_chained_prefix(models, args_query)?;
+    let (key, rest) = args_query.split_at(len);
     let windows = models.context_window_options_for(&model_id);
     let reasoning = models
         .available
@@ -254,69 +254,61 @@ fn starts_a_window(windows: &[u64], partial: &str) -> bool {
     })
 }
 
-fn split_on_model_key<'a>(args: &'a str, key: &str) -> Option<&'a str> {
-    let rest = args.get(key.len()..)?;
-    if args
-        .get(..key.len())
-        .is_some_and(|prefix| prefix.eq_ignore_ascii_case(key))
-        && rest.starts_with(char::is_whitespace)
-    {
-        Some(rest)
-    } else {
-        None
->>>>>>> upstream
+/// Whether `query` is `token`, then whitespace, then anything.
+fn leads_with(query: &str, token: &str) -> bool {
+    query.len() > token.len() && query.is_char_boundary(token.len()) && {
+        // The `is_char_boundary` clause above runs first and short-circuits.
+        let (head, tail) = query.split_at(token.len());
+        head.eq_ignore_ascii_case(token) && tail.starts_with(char::is_whitespace)
     }
 }
 
-<<<<<<< fork
-/// The effort or route rows `args_query` leads into, if any. The longer typed
-/// token wins. On a tie the route phase wins: a shared name can equal another
-/// model's id, and the group row inserts that name.
-fn sub_phase_items(models: &ModelState, args_query: &str) -> Option<Vec<ArgItem>> {
-    let effort = detect_effort_phase(models, args_query);
-    let route = detect_route_phase(models, args_query);
-    match (effort, route) {
-        (Some((_, effort_len)), Some((group, route_len))) if route_len >= effort_len => {
-            Some(build_route_items(models, &group))
+/// The rows of the sub-menu that the typed args have reached.
+enum SubPhase {
+    Rows(Vec<ArgItem>),
+    /// The args already name everything the model takes.
+    Done,
+}
+
+/// The route, window or effort sub-menu `args_query` leads into, or `None` while the user is still picking a model.
+fn sub_phase(models: &ModelState, args_query: &str) -> Option<SubPhase> {
+    if let Some(group) = winning_route(models, args_query) {
+        return Some(SubPhase::Rows(build_route_items(models, &group)));
+    }
+    Some(match chained_phase(models, args_query)? {
+        ChainedPhase::Window { model_id, prefix } => {
+            SubPhase::Rows(build_window_items(models, &model_id, &prefix))
         }
-        (Some((id, len)), _) => Some(build_effort_items(models, &id, &args_query[..len])),
-        (None, Some((group, _))) => Some(build_route_items(models, &group)),
-        (None, None) => None,
+        ChainedPhase::Effort { model_id, prefix } => {
+            SubPhase::Rows(build_effort_items(models, &model_id, &prefix))
+        }
+        ChainedPhase::Done => SubPhase::Done,
+    })
+}
+
+/// The models behind the shared name `args_query` leads with, when the route phase beats the chained sub-menu.
+/// The longer typed token wins. On a tie the route phase wins: a shared name can equal another model's id, and the group row inserts that name.
+fn winning_route<'a>(models: &'a ModelState, args_query: &str) -> Option<Vec<&'a acp::ModelId>> {
+    let (group, route_len) = detect_route_phase(models, args_query)?;
+    match detect_chained_prefix(models, args_query) {
+        Some((_, chained_len)) if chained_len > route_len => None,
+        _ => Some(group),
     }
 }
 
-/// The model and the matched length when `args_query` is `"<reasoning-model>
-/// ..."`. Longest-name-first to disambiguate names that share a prefix.
-fn detect_effort_phase(models: &ModelState, args_query: &str) -> Option<(acp::ModelId, usize)> {
-    // A model is typed by its id, or by its name when no other model has it. A
-    // shared name leads to the route phase instead.
-    let mut candidates: Vec<(&acp::ModelId, &str)> = models
-||||||| base
-/// Longest reasoning-model name or id that prefixes `args`, and the text after it.
-fn longest_reasoning_prefix<'a>(
-    models: &'a ModelState,
-    args: &'a str,
-) -> Option<(&'a acp::ModelId, &'a str, &'a str)> {
-    let mut best: Option<(&acp::ModelId, &str, &str)> = None;
-    for (id, info) in models
-=======
 /// Whether picking this model chains into a sub-menu (windows or effort).
 fn has_chained_args(models: &ModelState, id: &acp::ModelId, info: &acp::ModelInfo) -> bool {
     supports_reasoning_effort(info) || models.context_window_options_for(id).len() > 1
 }
 
-/// The longest name or id that prefixes `args` among models with a sub-menu, and the text after it.
-fn longest_chained_prefix<'a>(
-    models: &'a ModelState,
-    args: &'a str,
-) -> Option<(&'a acp::ModelId, &'a str, &'a str)> {
-    let mut best: Option<(&acp::ModelId, &str, &str)> = None;
-    for (id, info) in models
->>>>>>> upstream
+/// The model and the matched length when `args_query` is `"<model with a sub-menu> ..."`.
+/// Longest-name-first to disambiguate names that share a prefix.
+fn detect_chained_prefix(models: &ModelState, args_query: &str) -> Option<(acp::ModelId, usize)> {
+    // A model is typed by its id, or by its name when no other model has it. A shared name leads to the route phase instead.
+    let mut candidates: Vec<(&acp::ModelId, &str)> = models
         .available
         .iter()
-<<<<<<< fork
-        .filter(|(_, info)| supports_reasoning_effort(info))
+        .filter(|(id, info)| has_chained_args(models, id, info))
         .flat_map(|(id, info)| {
             let name = (!name_is_shared(models, id)).then_some((id, info.name.as_str()));
             std::iter::once((id, id.0.as_ref())).chain(name)
@@ -363,31 +355,6 @@ fn pick_token(models: &ModelState, id: &acp::ModelId) -> String {
     match models.available.get(id) {
         Some(info) if models.resolve_by_name_or_id(&info.name).as_ref() == Some(id) => {
             info.name.clone()
-||||||| base
-        .filter(|(_, info)| supports_reasoning_effort(info))
-    {
-        let name = info.name.as_str();
-        let id_str = id.0.as_ref();
-        for key in [name, id_str] {
-            if best.is_some_and(|(_, prev, _)| prev.len() >= key.len()) {
-                continue;
-            }
-            if let Some(rest) = split_on_model_key(args, key) {
-                best = Some((id, key, rest));
-            }
-=======
-        .filter(|(id, info)| has_chained_args(models, id, info))
-    {
-        let name = info.name.as_str();
-        let id_str = id.0.as_ref();
-        for key in [name, id_str] {
-            if best.is_some_and(|(_, prev, _)| prev.len() >= key.len()) {
-                continue;
-            }
-            if let Some(rest) = split_on_model_key(args, key) {
-                best = Some((id, key, rest));
-            }
->>>>>>> upstream
         }
         _ => id.0.to_string(),
     }

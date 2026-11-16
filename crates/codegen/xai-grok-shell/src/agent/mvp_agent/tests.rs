@@ -3075,22 +3075,10 @@ fn write_plugin_manifest(dir: &std::path::Path, name: &str) {
     std::fs::create_dir_all(dir).unwrap();
     std::fs::write(dir.join("plugin.json"), format!(r#"{{"name": "{name}"}}"#)).unwrap();
 }
-<<<<<<< fork
 /// Kill-switch ordering through the production session-less `example.invalid/plugins/reload` path (no resident
-/// session, so the rebuild targets the launch dir). `resolve_effective_plugins_config` consults the
-/// folder-trust gate, whose cold-key backstop resolves WITHOUT remote settings and records a durable verdict.
-/// If the disk read ran before the real-remote resolve, a cold launch dir under an org
-||||||| base
-/// Kill-switch ordering through the production session-less `x.ai/plugins/reload` path (no resident
-/// session, so the rebuild targets the launch dir). `resolve_effective_plugins_config` consults the
-/// folder-trust gate, whose cold-key backstop resolves WITHOUT remote settings and records a durable
-/// verdict; if the disk read ran before the real-remote resolve, a cold launch dir under an org
-=======
-/// Kill-switch ordering through the production session-less `x.ai/plugins/reload` path (no resident
 /// session, so the rebuild targets the launch dir). The folder-trust gate's cold-key backstop
-/// resolves WITHOUT remote settings and records a durable verdict; if it ran before the real-remote
+/// resolves WITHOUT remote settings and records a durable verdict. If it ran before the real-remote
 /// resolve, a cold launch dir under an org
->>>>>>> upstream
 /// kill-switch (`folder_trust_enabled = Some(false)`) would be stamped with a kill-switch-blind deny
 /// that the store-only reconcile can never lift. Mirrors
 /// `kill_switched_cold_cwd_stays_allowed_through_plugins_config_read` for the shared rebuild.

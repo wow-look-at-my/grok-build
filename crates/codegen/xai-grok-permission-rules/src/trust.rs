@@ -345,10 +345,17 @@ impl TrustStore {
             }
             Err(e) => return Err(e),
         };
-        match toml::from_str::<TrustDocument>(&contents) {
-            Ok(doc) => Ok(StoreRead::Document(doc)),
-            Err(e) => Err(io::Error::new(io::ErrorKind::InvalidData, e)),
-        }
+        let parsed = match xai_grok_config::format::ConfigFormat::of(path) {
+            xai_grok_config::format::ConfigFormat::Json => {
+                serde_json::from_str::<TrustDocument>(&contents)
+                    .map_err(|e| io::Error::new(io::ErrorKind::InvalidData, e))
+            }
+            xai_grok_config::format::ConfigFormat::Toml => {
+                toml::from_str::<TrustDocument>(&contents)
+                    .map_err(|e| io::Error::new(io::ErrorKind::InvalidData, e))
+            }
+        };
+        parsed.map(StoreRead::Document)
     }
 
     /// Write `doc` to `path` atomically (unique temp, fsync, rename) with owner-only (`0600`) permissions. Uses a unique temp file in the destination directory so concurrent writers never share a temp path.
@@ -364,8 +371,22 @@ impl TrustStore {
         })?;
         std::fs::create_dir_all(parent)?;
 
-        let body = toml::to_string_pretty(doc)
-            .map_err(|e| io::Error::new(io::ErrorKind::InvalidData, e))?;
+        let value =
+            serde_json::to_value(doc).map_err(|e| io::Error::new(io::ErrorKind::InvalidData, e))?;
+        let body = match value {
+            serde_json::Value::Object(map) => {
+                xai_grok_config::format::to_config_json_string(&map, None)
+            }
+            _ => {
+                return Err(io::Error::new(
+                    io::ErrorKind::InvalidData,
+                    "trust store document is not an object",
+                ));
+            }
+        };
+        if let Some(result) = xai_grok_config::host_write::try_write(path, &body, Some(0o600)) {
+            return result;
+        }
 
         // Unique temp in the same directory (atomic rename requires same FS).
         let mut tmp = tempfile::NamedTempFile::new_in(parent)?;
@@ -396,23 +417,23 @@ fn git_derived_workspace_key(cwd: &Path) -> PathBuf {
         // Key on the source repo's git ROOT so every worktree of one repo shares ONE key regardless of the subdir grok -w was launched from
         // This matches the git-topology branch below
         // Fall back to the recorded path when the source repo is gone (a standalone worktree whose source was deleted still works)
-        let root = git2::Repository::discover(&source_repo)
+        let root = crate::git_repo::discover(&source_repo)
             .ok()
-            .and_then(|r| r.workdir().map(canonicalize_or_owned));
+            .and_then(|r| crate::git_repo::workdir(&r));
         return root.unwrap_or_else(|| canonicalize_or_owned(&source_repo));
     }
-    if let Ok(repo) = git2::Repository::discover(cwd) {
+    if let Ok(repo) = crate::git_repo::discover(cwd) {
         // Share one trust key across a repo's worktrees instead of re-prompting per worktree.
-        if repo.is_worktree()
-            && let Ok(main) = git2::Repository::open(repo.commondir())
-            && let Some(main_workdir) = main.workdir()
-            && canonicalize_or_owned(&main_workdir.join(".git"))
-                == canonicalize_or_owned(repo.commondir())
+        let common_dir = crate::git_repo::common_dir(&repo);
+        if crate::git_repo::is_linked_worktree(&repo)
+            && let Ok(main) = crate::git_repo::open(&common_dir)
+            && let Some(main_workdir) = crate::git_repo::workdir(&main)
+            && canonicalize_or_owned(&main_workdir.join(".git")) == common_dir
         {
-            return canonicalize_or_owned(main_workdir);
+            return main_workdir;
         }
-        if let Some(workdir) = repo.workdir() {
-            return canonicalize_or_owned(workdir);
+        if let Some(workdir) = crate::git_repo::workdir(&repo) {
+            return workdir;
         }
     }
     canonicalize_or_owned(cwd)
@@ -432,7 +453,7 @@ pub fn is_unsafe_trust_root(key: &Path) -> bool {
     !key.is_absolute() || key.parent().is_none() || is_home_dir(key)
 }
 
-/// `workspace_key` of the nearest existing ancestor (git2 discover fails on a missing path).
+/// `workspace_key` of the nearest existing ancestor (git discovery fails on a missing path).
 fn workspace_id(path: &Path) -> PathBuf {
     workspace_key(path.ancestors().find(|p| p.exists()).unwrap_or(path))
 }
