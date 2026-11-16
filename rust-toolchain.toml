@@ -1,5 +1,4 @@
 [toolchain]
-<<<<<<< HEAD
 # We use the latest stable, but bump it manually.
 # To avoid unnecessary churn and simplify regression detection
 # - bump one point version at a time
@@ -10,9 +9,6 @@
 # cargo clippy --all-targets --workspace
 # ```
 channel = "1.94.1"
-=======
-channel = "1.94.0"
->>>>>>> upstream/main
 components = ["rustfmt", "clippy"]
 profile = "default"
 targets = [

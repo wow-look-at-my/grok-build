@@ -199,11 +199,8 @@ html5ever = "0.38"
 markup5ever_rcdom = "0.38"
 http = "1"
 http-body-util = "0.1"
-<<<<<<< HEAD
-=======
 httparse = "1"
 humantime-serde = "1"
->>>>>>> upstream/main
 ignore = "0.4"
 image = { version = "0.25.10", default-features = false }
 indexmap = { version = "2", features = ["serde"] }
