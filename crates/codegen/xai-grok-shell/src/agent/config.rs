@@ -48,17 +48,9 @@ pub const DEFAULT_AGENT_TYPE: &str = "grok-build-plan";
 pub(crate) fn default_agent_type() -> String {
     DEFAULT_AGENT_TYPE.to_owned()
 }
-<<<<<<< fork
 /// Default base URL for the asset server (profile images, etc.).
 pub const ASSET_SERVER_URL_DEFAULT: &str = "https://assets.grok.invalid";
-pub const CLI_CHAT_PROXY_BASE_URL_DEFAULT: &str = "https://cli-chat-proxy.grok.invalid/v1";
-pub const XAI_API_BASE_URL_DEFAULT: &str = "https://api.example.invalid/v1";
-||||||| base
-pub const CLI_CHAT_PROXY_BASE_URL_DEFAULT: &str = "https://cli-chat-proxy.grok.com/v1";
-pub const XAI_API_BASE_URL_DEFAULT: &str = "https://api.x.ai/v1";
-=======
 pub use xai_grok_config::{CLI_CHAT_PROXY_BASE_URL_DEFAULT, EndpointsConfig};
->>>>>>> upstream
 const NO_INLINE_CITATIONS_RESPONSE_INCLUDE: &str = "no_inline_citations";
 /// One or more environment variable names that may hold a model API key.
 /// Serde `untagged`: accepts a string or an array in TOML/JSON.

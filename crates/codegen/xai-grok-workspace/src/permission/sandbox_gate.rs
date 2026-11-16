@@ -25,7 +25,6 @@ use xai_grok_sandbox::command::{
     BackendName, CallId, SandboxMode, Violation, canonical_path, is_same_path,
 };
 use xai_grok_telemetry::events::SandboxSettlement;
-use xai_grok_tools::implementations::codex::apply_patch::{Hunk, parse_patch};
 use xai_grok_tools::types::ToolInput;
 use xai_grok_tools::types::resources::resolve_model_path;
 use xai_grok_tools::types::tool::{ToolKind, ToolNamespace};
@@ -151,22 +150,6 @@ pub(crate) async fn refuse_mode_layer_write(
 }
 /// The files `input` writes, deletes or moves, resolved against `cwd` as its tool resolves them.
 fn written_paths(input: &ToolInput, cwd: &Path) -> Vec<PathBuf> {
-    if let ToolInput::ApplyPatch(patch) = input {
-        let Ok(parsed) = parse_patch(&patch.patch) else {
-            return Vec::new();
-        };
-        return parsed
-            .hunks
-            .iter()
-            .flat_map(|hunk| match hunk {
-                Hunk::AddFile { path, .. } | Hunk::DeleteFile { path } => vec![path],
-                Hunk::UpdateFile {
-                    path, move_path, ..
-                } => std::iter::once(path).chain(move_path).collect(),
-            })
-            .map(|path| cwd.join(path))
-            .collect();
-    }
     match AccessKind::from(input) {
         AccessKind::Edit(path) => vec![resolve_model_path(cwd, None, &path)],
         _ => Vec::new(),
