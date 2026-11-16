@@ -227,9 +227,9 @@ User-level configuration lives in `$GROK_HOME/config.json` (default `~/.grok/con
 | `mcp.managed.enabled` | `boolean` | `pin` | `user` | Fetch managed MCP configs at startup. Also GROK_MANAGED_MCPS_ENABLED. |
 | `mcp.managed.gateway_tools_enabled` | `boolean` | `yes` | `user` | Expose managed MCP gateway tools. Also GROK_MANAGED_MCP_GATEWAY_TOOLS_ENABLED. |
 | `mcp.max_output_bytes` | `number` | `yes` | `user` | Cap MCP tool output size in bytes. Project files may set this. |
-<<<<<<< fork
 | `mcp.servers.<name>.args` | `string[]` | `yes` | `user` | `mcp.servers.<name>` `args` on a stdio or HTTP MCP server. |
 | `mcp.servers.<name>.bearer_token_env_var` | `string` | `yes` | `user` | `mcp.servers.<name>` `bearer_token_env_var` on a stdio or HTTP MCP server. |
+| `mcp.servers.<name>.bearer_token_file` | `string` | `yes` | `user` | `mcp.servers.<name>` `bearer_token_file` on an HTTP MCP server: absolute or `~/` path to a bearer token, re-read on every request. |
 | `mcp.servers.<name>.command` | `string` | `yes` | `user` | `mcp.servers.<name>` `command` on a stdio or HTTP MCP server. |
 | `mcp.servers.<name>.cwd` | `string` | `yes` | `user` | `mcp.servers.<name>` `cwd` on a stdio or HTTP MCP server. |
 | `mcp.servers.<name>.enabled` | `boolean` | `yes` | `user` | `mcp.servers.<name>` `enabled` on a stdio or HTTP MCP server. |

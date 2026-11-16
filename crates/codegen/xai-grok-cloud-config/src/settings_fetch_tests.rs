@@ -28,7 +28,7 @@ async fn start_settings_server(
         }),
     );
 
-    let handle = tokio::spawn(async move {
+    let handle = xai_spawn::spawn(async move {
         axum::serve(listener, app)
             .await
             .expect("serve mock settings")
@@ -54,7 +54,7 @@ async fn settings_fetch_maps_status_to_outcome() {
         let (base, server) = start_settings_server(status, body.to_string()).await;
         let auth = auth.clone();
 
-        let outcome = tokio::task::spawn_blocking(move || {
+        let outcome = xai_spawn::spawn_blocking(move || {
             fetch_settings_blocking_with_attempts(&base, &auth, None, 1)
         })
         .await

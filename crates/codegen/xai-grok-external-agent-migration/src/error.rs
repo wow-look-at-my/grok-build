@@ -10,17 +10,14 @@ pub enum MigrationError {
         source: std::io::Error,
     },
 
-    #[error(
-        "{action}: existing config at {path} is not valid TOML ({source}). Fix the file (or move it aside) and retry."
-    )]
-    InvalidToml {
+    #[error("{action}: {source}. Fix the file (or move it aside) and retry.")]
+    InvalidConfig {
         action: &'static str,
-        path: PathBuf,
         #[source]
-        source: toml::de::Error,
+        source: std::io::Error,
     },
 
-    #[error("{section} is not a table")]
+    #[error("{section} is not an object")]
     NotATable { section: &'static str },
 
     #[error("{section} is not an array")]

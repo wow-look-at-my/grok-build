@@ -14,11 +14,12 @@ use super::hooks_cla::apply_hooks_to_dir;
 use super::mcp::merge_mcp_servers;
 use super::scope::find_project_root;
 use xai_grok_config::fs_atomic;
-use xai_grok_config::{USER_CONFIG_FILENAME, grok_home, user_config_file};
+use xai_grok_config::{grok_home, project_config_file_for_write, user_config_file};
 
 pub fn write_import_marker(grok_home: &Path) -> Result<(), MigrationError> {
-    let config_path = user_config_file(grok_home);
-    let mut root = read_toml_root(&config_path, "refusing to write import marker")?;
+    let config_path = user_config_file(grok_home)
+        .map_err(|source| MigrationError::io("migrate", grok_home, source))?;
+    let mut root = read_config_root(&config_path, "refusing to write import marker")?;
     let table = root.as_table_mut().ok_or(MigrationError::NotATable {
         section: "config root",
     })?;
@@ -27,11 +28,11 @@ pub fn write_import_marker(grok_home: &Path) -> Result<(), MigrationError> {
         .entry("claude_compat")
         .or_insert_with(|| TomlValue::Table(TomlMap::new()));
     let compat_table = compat.as_table_mut().ok_or(MigrationError::NotATable {
-        section: "[claude_compat]",
+        section: "`claude_compat`",
     })?;
     compat_table.insert("imported".to_string(), TomlValue::Boolean(true));
 
-    write_toml_root(&config_path, &root, ImportScope::Global)?;
+    write_config_root(&config_path, &root, ImportScope::Global)?;
     Ok(())
 }
 
@@ -39,8 +40,12 @@ pub fn apply_import(plan: &ImportPlan, cwd: &Path) -> Result<ImportResult, Migra
     let mut result = ImportResult::default();
 
     if !plan.global_items.is_empty() {
+        let grok_dir = grok_home();
+        let config_path = user_config_file(&grok_dir)
+            .map_err(|source| MigrationError::io("migrate", &grok_dir, source))?;
         result.global_count = apply_items_to_grok_dir(
-            &grok_home(),
+            &grok_dir,
+            &config_path,
             &plan.global_items,
             ImportScope::Global,
             &mut result.modified_files,
@@ -48,9 +53,13 @@ pub fn apply_import(plan: &ImportPlan, cwd: &Path) -> Result<ImportResult, Migra
     }
 
     if !plan.project_items.is_empty() {
-        let project_grok_dir = find_project_root(cwd).join(".grok");
+        let project_root = find_project_root(cwd);
+        let project_grok_dir = project_root.join(".grok");
+        let config_path = project_config_file_for_write(&project_root)
+            .map_err(|source| MigrationError::io("migrate", &project_grok_dir, source))?;
         result.project_count = apply_items_to_grok_dir(
             &project_grok_dir,
+            &config_path,
             &plan.project_items,
             ImportScope::Project,
             &mut result.modified_files,
@@ -62,12 +71,12 @@ pub fn apply_import(plan: &ImportPlan, cwd: &Path) -> Result<ImportResult, Migra
 
 fn apply_items_to_grok_dir(
     grok_dir: &Path,
+    config_path: &Path,
     items: &[ImportableItem],
     scope: ImportScope,
     modified_files: &mut Vec<String>,
 ) -> Result<usize, MigrationError> {
-    let config_path = grok_dir.join(USER_CONFIG_FILENAME);
-    let mut count = apply_items_to_config(&config_path, items, scope)?;
+    let mut count = apply_items_to_config(config_path, items, scope)?;
     if count > 0 {
         modified_files.push(config_path.to_string_lossy().to_string());
     }
@@ -87,20 +96,16 @@ fn apply_items_to_grok_dir(
     Ok(count)
 }
 
-// A config.toml that does not parse stays unchanged.
+// A config.json that does not parse stays unchanged.
 // Rewriting it would drop the sections this import does not write.
-fn read_toml_root(config_path: &Path, action: &'static str) -> Result<TomlValue, MigrationError> {
-    match std::fs::read_to_string(config_path) {
-        Ok(contents) => toml::from_str(&contents).map_err(|source| MigrationError::InvalidToml {
-            action,
-            path: config_path.to_path_buf(),
-            source,
-        }),
-        Err(error) if error.kind() == std::io::ErrorKind::NotFound => {
-            Ok(TomlValue::Table(TomlMap::new()))
-        }
-        Err(source) => Err(MigrationError::io("read", config_path, source)),
-    }
+fn read_config_root(config_path: &Path, action: &'static str) -> Result<TomlValue, MigrationError> {
+    let contents = match std::fs::read_to_string(config_path) {
+        Ok(contents) => contents,
+        Err(error) if error.kind() == std::io::ErrorKind::NotFound => String::new(),
+        Err(source) => return Err(MigrationError::io("read", config_path, source)),
+    };
+    xai_grok_config::parse_config_for_edit(config_path, &contents)
+        .map_err(|source| MigrationError::InvalidConfig { action, source })
 }
 
 // A global write follows a symlink at `path`.
@@ -131,7 +136,7 @@ fn apply_items_to_config(
     items: &[ImportableItem],
     scope: ImportScope,
 ) -> Result<usize, MigrationError> {
-    let mut root = read_toml_root(config_path, "refusing to import")?;
+    let mut root = read_config_root(config_path, "refusing to import")?;
     let table = root.as_table_mut().ok_or(MigrationError::NotATable {
         section: "config root",
     })?;
@@ -174,28 +179,25 @@ fn apply_items_to_config(
     }
 
     if count > 0 {
-        write_toml_root(config_path, &root, scope)?;
+        write_config_root(config_path, &root, scope)?;
         info!(
             path = %config_path.display(),
             count,
-            "Wrote imported settings to config.toml"
+            "Wrote imported settings to the config file"
         );
     }
 
     Ok(count)
 }
 
-fn write_toml_root(
+fn write_config_root(
     config_path: &Path,
     root: &TomlValue,
     scope: ImportScope,
 ) -> Result<(), MigrationError> {
-    let toml_str =
-        toml::to_string_pretty(root).map_err(|source| MigrationError::TomlSerialize {
-            path: config_path.to_path_buf(),
-            source,
-        })?;
-    write_scoped(config_path, &toml_str, scope)
+    let text = xai_grok_config::render_config(config_path, root)
+        .map_err(|source| MigrationError::io("render", config_path, source))?;
+    write_scoped(config_path, &text, scope)
 }
 
 fn merge_permissions(
@@ -206,7 +208,7 @@ fn merge_permissions(
         .entry("permission")
         .or_insert_with(|| TomlValue::Table(TomlMap::new()));
     let perm_table = permission.as_table_mut().ok_or(MigrationError::NotATable {
-        section: "[permission]",
+        section: "`permission`",
     })?;
 
     let mut allow_rules = Vec::new();
@@ -248,7 +250,7 @@ fn merge_env_vars(table: &mut TomlMap<String, TomlValue>, vars: &[(&str, &str)])
         .entry("env")
         .or_insert_with(|| TomlValue::Table(TomlMap::new()));
     let Some(env_table) = env.as_table_mut() else {
-        warn!("[env] in config.toml is not a table, skipping env import");
+        warn!("`env` in config.json is not an object, skipping env import");
         return 0;
     };
 
@@ -270,9 +272,9 @@ fn merge_paths(
     let paths = table
         .entry("paths")
         .or_insert_with(|| TomlValue::Table(TomlMap::new()));
-    let paths_table = paths
-        .as_table_mut()
-        .ok_or(MigrationError::NotATable { section: "[paths]" })?;
+    let paths_table = paths.as_table_mut().ok_or(MigrationError::NotATable {
+        section: "`extensions.paths`",
+    })?;
 
     let arr = paths_table
         .entry(key)
@@ -280,7 +282,7 @@ fn merge_paths(
     let existing = arr
         .as_array_mut()
         .ok_or_else(|| MigrationError::NotAnArray {
-            section: format!("paths.{key}"),
+            section: format!("extensions.paths.{key}"),
         })?;
     Ok(append_missing_strings(existing, new_paths.iter().copied()))
 }

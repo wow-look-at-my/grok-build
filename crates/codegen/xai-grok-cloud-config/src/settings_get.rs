@@ -202,7 +202,7 @@ fn warm_and_subscribe(
     let (tx, rx) = watch::channel(None);
     let task_tx = tx.clone();
     let task_query = query.clone();
-    let task = runtime.spawn(async move {
+    let task = xai_spawn::spawn_on(&runtime, async move {
         let outcome = load_settings(task_query, policy_repair_pending).await;
         // `send_replace` stores the value even when no receiver is alive
         task_tx.send_replace(Some(outcome));
@@ -277,7 +277,7 @@ pub async fn fetch_settings_live(
     let Some(auth) = query.auth.clone() else {
         return SettingsFetch::Retry;
     };
-    let loaded = tokio::task::spawn_blocking(move || {
+    let loaded = xai_spawn::spawn_blocking(move || {
         let fetched_at = chrono::Utc::now();
         let fetch = crate::fetch_settings_blocking(
             query.endpoint.origin(),
@@ -462,7 +462,7 @@ async fn load_settings(
     policy_repair_pending: PolicyRepairPending,
 ) -> SettingsOutcome {
     let loaded =
-        tokio::task::spawn_blocking(move || load_settings_blocking(query, policy_repair_pending))
+        xai_spawn::spawn_blocking(move || load_settings_blocking(query, policy_repair_pending))
             .await;
     match loaded {
         Ok(outcome) => outcome,
@@ -651,7 +651,7 @@ mod tests {
         let flag = published.clone();
         let task_tx = tx.clone();
 
-        let owner = tokio::spawn(async move {
+        let owner = xai_spawn::spawn(async move {
             tokio::time::sleep(Duration::from_millis(80)).await;
             flag.store(true, Ordering::SeqCst);
             task_tx.send_replace(Some(SettingsOutcome {
@@ -700,7 +700,7 @@ mod tests {
         let cancel = CancellationToken::new();
         let cancel_for_wait = cancel.clone();
         let rx = tx.subscribe();
-        let wait = tokio::spawn(async move {
+        let wait = xai_spawn::spawn(async move {
             super::observe(rx, Some(Duration::from_secs(30)), &cancel_for_wait).await
         });
 

@@ -2,18 +2,21 @@
 //!
 //! The auxiliary services (feedback, trace upload, managed config, telemetry) resolve to the cli-chat-proxy.
 //! Only API-key inference uses `xai_api_base_url`.
+//! An endpoint nobody configured resolves to a blank URL.
 use serde::{Deserialize, Serialize};
 use xai_grok_env::{PROD_CLI_CHAT_PROXY_BASE_URL, env_bool, env_string};
 pub const CLI_CHAT_PROXY_BASE_URL_DEFAULT: &str = PROD_CLI_CHAT_PROXY_BASE_URL;
-#[derive(Debug, Clone, Serialize, Deserialize)]
+#[derive(Debug, Clone, Serialize, schemars::JsonSchema)]
 #[serde(default)]
 pub struct EndpointsConfig {
-    /// When this is `None`, `proxy_url` returns `CLI_CHAT_PROXY_BASE_URL_DEFAULT`.
-    /// `Some` means someone configured it, even when the value is the default URL.
+    /// The cli-chat-proxy base URL. `None` means unset, and every URL derived from it is blank.
     #[serde(skip_serializing_if = "Option::is_none")]
     pub cli_chat_proxy_base_url: Option<String>,
-    /// Base URL for the public xAI API.
+    /// Base URL for the public xAI API. Blank unless configured.
     pub xai_api_base_url: String,
+    /// The only endpoints a model request may reach. Empty allows none. `GROK_ALLOWED_ENDPOINTS` adds to it.
+    #[serde(skip_serializing_if = "Vec::is_empty")]
+    pub allowed_endpoints: Vec<String>,
     /// An extra access header value for matching first-party hosts, used only with the optional non-production feature.
     #[serde(skip_serializing_if = "Option::is_none")]
     pub alpha_test_key: Option<String>,
@@ -22,7 +25,7 @@ pub struct EndpointsConfig {
     #[serde(skip_serializing_if = "Option::is_none")]
     pub models_base_url: Option<String>,
     /// Env: `GROK_MODELS_LIST_URL`. Overrides the default `{base}/models` list URL.
-    #[serde(alias = "models_endpoint", skip_serializing_if = "Option::is_none")]
+    #[serde(skip_serializing_if = "Option::is_none")]
     pub models_list_url: Option<String>,
     /// Env: `GROK_FEEDBACK_BASE_URL`. Where feedback submissions go.
     #[serde(skip_serializing_if = "Option::is_none")]
@@ -30,25 +33,6 @@ pub struct EndpointsConfig {
     /// Env: `GROK_TRACE_UPLOAD_URL`. Where trace uploads go.
     #[serde(skip_serializing_if = "Option::is_none")]
     pub trace_upload_url: Option<String>,
-    /// Env: `GROK_TRACE_UPLOAD_BUCKET`. A `gs://` or `s3://` bucket that receives uploads directly, without the proxy.
-    #[serde(skip_serializing_if = "Option::is_none")]
-    pub trace_upload_bucket: Option<String>,
-    /// Env: `GROK_TRACE_UPLOAD_REGION`. AWS region (S3 only).
-    #[serde(skip_serializing_if = "Option::is_none")]
-    pub trace_upload_region: Option<String>,
-    /// Env: `GROK_TRACE_UPLOAD_CREDENTIALS_FILE`. The path to a GCS service account key or an AWS credentials file.
-    #[serde(skip_serializing_if = "Option::is_none")]
-    pub trace_upload_credentials_file: Option<String>,
-    /// Inline credentials as JSON or INI, preferred over `trace_upload_credentials_file`.
-    #[serde(skip_serializing_if = "Option::is_none")]
-    pub trace_upload_credentials: Option<String>,
-    /// Env: `GROK_TRACE_UPLOAD_ENDPOINT_URL`. Custom S3-compatible endpoint.
-    #[serde(skip_serializing_if = "Option::is_none")]
-    pub trace_upload_endpoint_url: Option<String>,
-    /// Env: `GROK_DEPLOYMENT_KEY`. The management API key for an enterprise deployment.
-    /// Telemetry and service requests carry it to identify the deployment.
-    #[serde(skip_serializing_if = "Option::is_none")]
-    pub deployment_key: Option<String>,
     /// Env: `GROK_MANAGED_CONFIG_URL`. The managed config endpoint.
     /// The default is `{proxy_url()}/deployment/config`.
     #[serde(skip_serializing_if = "Option::is_none")]

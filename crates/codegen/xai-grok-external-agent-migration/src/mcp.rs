@@ -12,7 +12,7 @@ pub(super) fn merge_mcp_servers(
         .entry("mcp_servers")
         .or_insert_with(|| TomlValue::Table(TomlMap::new()));
     let mcp_table = mcp.as_table_mut().ok_or(MigrationError::NotATable {
-        section: "[mcp_servers]",
+        section: "`mcp.servers`",
     })?;
 
     let mut count = 0;
