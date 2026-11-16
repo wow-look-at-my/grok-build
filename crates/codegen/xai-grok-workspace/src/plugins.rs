@@ -13,7 +13,7 @@ use xai_grok_hooks::discovery::ClaudeImport;
 use xai_grok_hooks::trust::Trust;
 
 /// Plugin system configuration from `[plugins]` section in config.toml.
-#[derive(Clone, Debug, Default, Serialize, Deserialize)]
+#[derive(Clone, Debug, Default, Serialize, Deserialize, schemars::JsonSchema)]
 pub struct PluginsConfig {
     #[serde(default)]
     pub paths: Vec<String>,

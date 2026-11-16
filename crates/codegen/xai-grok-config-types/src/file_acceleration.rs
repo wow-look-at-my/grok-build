@@ -10,7 +10,7 @@ use serde::{Deserialize, Serialize};
 pub const ENV_FILE_ACCELERATION_ROUTES: &str = "GROK_FILE_ACCELERATION_ROUTES";
 
 /// `[file_acceleration]` in config.toml.
-#[derive(Debug, Clone, Default, PartialEq, Eq, Serialize, Deserialize)]
+#[derive(Debug, Clone, Default, PartialEq, Eq, Serialize, Deserialize, schemars::JsonSchema)]
 #[serde(default)]
 pub struct FileAccelerationConfig {
     /// See [`resolve_file_acceleration_routes`].

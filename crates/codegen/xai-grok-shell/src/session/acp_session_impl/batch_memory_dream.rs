@@ -192,6 +192,7 @@ impl SessionActor {
             disposition,
             observation_count: report.notes_settled(),
             topics_affected: report.topics_changed,
+            detail: None,
         }
     }
 }

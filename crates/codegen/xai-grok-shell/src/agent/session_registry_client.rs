@@ -132,7 +132,7 @@ pub struct DownloadResponse {
 #[error("{op} failed: {status}")]
 pub(crate) struct RegistryStatusError {
     op: &'static str,
-    status: reqwest::StatusCode,
+    status: xai_grok_net::StatusCode,
 }
 
 impl RegistryStatusError {
@@ -141,7 +141,7 @@ impl RegistryStatusError {
         self.status.is_client_error()
             && !matches!(
                 self.status,
-                reqwest::StatusCode::REQUEST_TIMEOUT | reqwest::StatusCode::TOO_MANY_REQUESTS
+                xai_grok_net::StatusCode::REQUEST_TIMEOUT | xai_grok_net::StatusCode::TOO_MANY_REQUESTS
             )
     }
 }

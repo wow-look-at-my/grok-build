@@ -147,6 +147,8 @@ impl ConfigModelOverride {
             query_params,
             env_http_headers,
             context_window,
+            context_windows,
+            notice,
             max_request_bytes,
             auto_compact_threshold_percent,
             system_prompt_label,
@@ -227,6 +229,8 @@ impl ConfigModelOverride {
             query_params: merged_query,
             env_http_headers: merged_env_headers,
             context_window: context_window.or(base.context_window),
+            context_windows: context_windows.or_else(|| base.context_windows.clone()),
+            notice: notice.or_else(|| base.notice.clone()),
             max_request_bytes: max_request_bytes.or(base.max_request_bytes),
             auto_compact_threshold_percent: auto_compact_threshold_percent
                 .or(base.auto_compact_threshold_percent),
