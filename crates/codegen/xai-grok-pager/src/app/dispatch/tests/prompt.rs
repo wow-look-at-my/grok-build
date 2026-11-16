@@ -1517,35 +1517,7 @@ fn prompt_response_resets_turn_state() {
     assert_eq!(agent_ref(&app, id).scrollback.len(), 1);
 }
 
-<<<<<<< fork
 /// Turn end with prompt suggestions enabled fires the `example.invalid/suggestPrompt` fetch (before the billing refresh).
-||||||| base
-/// Turn end with prompt suggestions enabled fires the `x.ai/suggestPrompt` fetch (before the billing refresh).
-=======
-/// A turn that ends through its prompt response returns freed pages exactly once, counted on the dispatching thread.
-#[test]
-fn prompt_response_releases_retained_memory_once() {
-    use crate::memory_release::test_support;
-    test_support::install_counting_hook();
-
-    let mut app = test_app_with_agent();
-    let id = AgentId(0);
-    app.agents.get_mut(&id).unwrap().session.state = AgentState::TurnRunning;
-    let before = test_support::calls();
-    dispatch(
-        Action::TaskComplete(TaskResult::PromptResponse {
-            agent_id: id,
-            result: Ok(acp::PromptResponse::new(acp::StopReason::EndTurn)),
-            http_status: None,
-            prompt_id: None,
-        }),
-        &mut app,
-    );
-    assert_eq!(test_support::calls(), before + 1);
-}
-
-/// Turn end with prompt suggestions enabled fires the `x.ai/suggestPrompt` fetch (before the billing refresh).
->>>>>>> upstream
 /// The loaded suggestion routes back into the agent's controller by id and generation.
 #[test]
 fn turn_end_fetches_prompt_suggestion_when_enabled() {
@@ -1785,12 +1757,10 @@ fn stale_prompt_suggestion_generation_is_discarded() {
         }),
         &mut app,
     );
-    assert!(
-        !agent_ref(&app, id)
-            .prompt
-            .prompt_suggestion
-            .has_suggestion()
-    );
+    assert!(!agent_ref(&app, id)
+        .prompt
+        .prompt_suggestion
+        .has_suggestion());
 }
 
 /// A suggestion that loads onto an idle, empty prompt is immediately visible: its `shown` impression is latched right at load.
@@ -3541,11 +3511,9 @@ fn switch_model_holds_prompt_until_complete() {
         }),
         &mut app,
     );
-    assert!(
-        effects
-            .iter()
-            .any(|e| matches!(e, Effect::SendPrompt { .. }))
-    );
+    assert!(effects
+        .iter()
+        .any(|e| matches!(e, Effect::SendPrompt { .. })));
     assert_eq!(agent_ref(&app, id).session.queue_len(), 0);
 }
 
@@ -4437,7 +4405,7 @@ fn cancelled_response_during_newer_wake_still_shows_cancel_marker() {
 /// Pending foreground-subagent UI: a confirmed held row stays reachable and actionable.
 #[test]
 fn plain_send_during_pending_subagent_wait_keeps_confirmed_queue_row_reachable() {
-    use crate::app::agent_view::{ActivePane, test_fixtures::simulate_subagent_wait};
+    use crate::app::agent_view::{test_fixtures::simulate_subagent_wait, ActivePane};
     use crate::app::app_view::InputOutcome;
     use crate::app::prompt_queue::QueueEntryWire;
     use crossterm::event::{Event, KeyCode, KeyEvent, KeyModifiers};
@@ -4977,11 +4945,9 @@ fn image_prompt_while_running_goes_to_server_queue() {
 
     let effects = dispatch(Action::SendPrompt("look at [Image #1]".into()), &mut app);
     let prompt_id = match effects.as_slice() {
-        [
-            Effect::SendPromptBlocks {
-                blocks, prompt_id, ..
-            },
-        ] => {
+        [Effect::SendPromptBlocks {
+            blocks, prompt_id, ..
+        }] => {
             assert!(
                 blocks
                     .iter()

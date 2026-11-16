@@ -2112,13 +2112,7 @@ If your model list endpoint differs from `{base_url}/models`, set `GROK_MODELS_L
 }
 ```
 
-<<<<<<< fork
-When using `endpoints` with partial model overrides, the `base_url` is inherited from the endpoints config. You do not need to specify it in each `models.definitions.*` entry.
-||||||| base
-When using `[endpoints]` with partial model overrides, the `base_url` is inherited from the endpoints config — you don't need to specify it in each `[model.*]` section.
-=======
-Each `[model.*]` section inherits `base_url` from the `[endpoints]` config. `XAI_API_KEY` is still required. A per-model `api_key`/`env_key` authenticates that model's inference requests. The startup model-list fetch still uses `XAI_API_KEY`.
->>>>>>> upstream
+When using `endpoints` with partial model overrides, the `base_url` is inherited from the endpoints config. You do not need to specify it in each `models.definitions.*` entry. `XAI_API_KEY` is still required. A per-model `api_key`/`env_key` authenticates that model's inference requests. The startup model-list fetch still uses `XAI_API_KEY`.
 
 **Auth behavior:** When `models_base_url` is set, Grok authenticates the model-list request with `XAI_API_KEY` (`Authorization: Bearer`). That request never uses your `grok login` session. With an external auth provider (`auth_provider_command`) and no `XAI_API_KEY`, it sends the provider's token instead. Otherwise, if `XAI_API_KEY` is unset, the fetch fails with an error asking you to set it. Inference requests to the custom host authenticate with each model's `api_key`/`env_key`.
 
