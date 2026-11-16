@@ -190,12 +190,6 @@ impl SessionRegistryClient {
                 xai_grok_login::credential_provider::ShellAuthCredentialProvider::new(
                     auth_manager.clone(),
                     self.credentials.alpha_test_key.clone(),
-<<<<<<< fork
-||||||| base
-                    std::sync::Arc::new(crate::managed_config::resolve_deployment_id),
-=======
-                    std::sync::Arc::new(xai_grok_cloud_config::managed_config::resolve_deployment_id),
->>>>>>> upstream
                 ),
             );
         self.credentials = self.credentials.with_auth_manager(auth_manager);
@@ -243,19 +237,9 @@ impl SessionRegistryClient {
 
     fn check_response(
         &self,
-<<<<<<< fork
         response: xai_grok_net::Response,
         stamp: Option<&xai_grok_auth::SentBearerSuffix>,
-        op: &str,
-||||||| base
-        response: reqwest::Response,
-        stamp: Option<&xai_grok_auth::StampedBearerSuffix>,
-        op: &str,
-=======
-        response: reqwest::Response,
-        stamp: Option<&xai_grok_auth::StampedBearerSuffix>,
         op: &'static str,
->>>>>>> upstream
     ) -> anyhow::Error {
         if response.status() == xai_grok_net::StatusCode::UNAUTHORIZED {
             self.record_401_attribution(op, stamp);
