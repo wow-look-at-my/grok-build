@@ -120,26 +120,13 @@ Write prompts the way you would brief a senior engineer:
 - Do NOT wait for one subagent before spawning others that don't depend on it
 
 ### Anti-patterns to avoid:
-<<<<<<< fork
 - Do NOT read files, list directories, search contents, or run commands yourself - you have no such tools
 - Do NOT implement code changes yourself - you have no file editing tools
 - Do NOT give subagents overly prescriptive step-by-step instructions - trust their expertise
 - Do NOT summarize or re-explain what the user said - get to work immediately";
-/// Bash tool with clearer model-facing names: `run_terminal_cmd` becomes `run_terminal_command` and `is_background` becomes `background`.
-||||||| base
-- Do NOT do shallow 1-2 file reads yourself when an `explore` agent would be more thorough
-- Do NOT implement code changes yourself \u{2014} you have no file editing tools
-- Do NOT give subagents overly prescriptive step-by-step instructions \u{2014} trust their expertise
-- Do NOT summarize or re-explain what the user said \u{2014} get to work immediately";
-/// Bash tool with clearer model-facing names: `run_terminal_cmd` becomes `run_terminal_command` and `is_background` becomes `background`.
-=======
-- Do NOT do shallow 1-2 file reads yourself when an `explore` agent would be more thorough
-- Do NOT implement code changes yourself \u{2014} you have no file editing tools
-- Do NOT give subagents overly prescriptive step-by-step instructions \u{2014} trust their expertise
-- Do NOT summarize or re-explain what the user said \u{2014} get to work immediately";
 /// Bash tool with a clearer model-facing name: `run_terminal_cmd` becomes `run_terminal_command`.
 /// `block_until_ms` keeps its canonical name.
->>>>>>> upstream
+
 fn bash_tool_config() -> ToolConfig {
     ToolConfig::from(&grok_build::BashTool).with_name("run_terminal_command")
 }

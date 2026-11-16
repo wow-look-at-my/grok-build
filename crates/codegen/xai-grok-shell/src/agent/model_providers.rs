@@ -33,7 +33,6 @@ pub struct ModelProviderConfig {
     pub auth_provider: Option<String>,
     pub auth: Option<xai_grok_config_types::AuthProviderConfig>,
     pub context_window: Option<u64>,
-<<<<<<< fork
     pub temperature: Option<f32>,
     pub top_p: Option<f32>,
     pub max_completion_tokens: Option<u32>,
@@ -367,7 +366,6 @@ impl ConfigModelOverride {
             auth_provider,
             auth,
             context_window,
-<<<<<<< fork
             temperature,
             top_p,
             max_completion_tokens,
@@ -397,10 +395,7 @@ impl ConfigModelOverride {
             context_window_source: _,
             pricing_lookup_enabled: _,
             extra_body,
-||||||| base
-=======
             context_windows,
->>>>>>> upstream
             max_request_bytes,
         } = provider;
 
@@ -416,8 +411,6 @@ impl ConfigModelOverride {
             merged.api_base_url = None;
         }
         merged.api_backend = merged.api_backend.or_else(|| api_backend.clone());
-<<<<<<< fork
-        merged.context_window = merged.context_window.or(*context_window);
         merged.temperature = merged.temperature.or(*temperature);
         merged.top_p = merged.top_p.or(*top_p);
         merged.max_completion_tokens = merged.max_completion_tokens.or(*max_completion_tokens);
@@ -445,27 +438,14 @@ impl ConfigModelOverride {
             .min_output_tokens_per_sec
             .or(*min_output_tokens_per_sec);
         merged.ttft_timeout_secs = merged.ttft_timeout_secs.or(*ttft_timeout_secs);
-||||||| base
-        merged.context_window = merged.context_window.or(*context_window);
-=======
->>>>>>> upstream
         merged.max_request_bytes = merged.max_request_bytes.or(*max_request_bytes);
-<<<<<<< fork
-        if merged.reasoning_efforts.is_empty() {
-            merged.reasoning_efforts = reasoning_efforts.clone();
-||||||| base
-        // Inherited wholesale only when the model sets none of its own.
-        if merged.extra_headers.is_empty() {
-            merged.extra_headers = extra_headers.clone();
-=======
         // Inherited wholesale only when the model sets none of its own.
         if merged.context_window.is_none() && merged.context_windows.is_none() {
             merged.context_window = *context_window;
             merged.context_windows = context_windows.clone();
         }
-        if merged.extra_headers.is_empty() {
-            merged.extra_headers = extra_headers.clone();
->>>>>>> upstream
+        if merged.reasoning_efforts.is_empty() {
+            merged.reasoning_efforts = reasoning_efforts.clone();
         }
         // Per KEY, not wholesale.
         inherit_headers(&mut merged.extra_headers, extra_headers);

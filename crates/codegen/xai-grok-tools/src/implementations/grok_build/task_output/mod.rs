@@ -1046,22 +1046,10 @@ mod tests {
             "renamed task_ids must appear:\n{rendered}"
         );
         assert!(
-<<<<<<< fork
-||||||| base
-            rendered.contains("max_wait"),
-            "renamed timeout_ms must appear:\n{rendered}"
-        );
-        assert!(
-=======
-            rendered.contains("max_wait"),
-            "renamed timeout_ms must appear:\n{rendered}"
-        );
-        assert!(
             rendered.contains("from wait_ms=0 commands"),
             "renamed bash block param must appear:\n{rendered}"
         );
         assert!(
->>>>>>> upstream
             rendered.contains("monitor"),
             "monitor tool name must appear:\n{rendered}"
         );

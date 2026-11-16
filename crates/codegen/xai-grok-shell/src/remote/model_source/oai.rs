@@ -1,18 +1,10 @@
 //! Reads the model list from an OpenAI-compatible `/v1/models`.
 use crate::agent::config::EndpointsConfig;
-<<<<<<< fork
-use crate::agent::remote_config::ModelFetchAuth;
+use crate::agent::remote_config::{ModelFetchAuth, external_provider_auth};
 use crate::remote::client::{
     BackendError, FetchModelsResult, allow_endpoint, models_list_url_for_base,
     parse_remote_model_value,
 };
-||||||| base
-use crate::agent::remote_config::ModelFetchAuth;
-use crate::remote::client::{BackendError, FetchModelsResult, parse_remote_model_value};
-=======
-use crate::agent::remote_config::{ModelFetchAuth, external_provider_auth};
-use crate::remote::client::{BackendError, FetchModelsResult, parse_remote_model_value};
->>>>>>> upstream
 use crate::remote::model_source::ModelSource;
 use serde::Deserialize;
 use xai_grok_login::GrokAuth;
@@ -84,35 +76,11 @@ impl OaiModelSource {
         tracing::info!("Fetching models from {}", self.endpoint.url);
         match self.endpoint.auth {
             EndpointAuth::ApiKey => {
-<<<<<<< fork
-                let wire = match crate::agent::auth_method::read_xai_api_key_env() {
-                    Ok(key) => xai_grok_net::Auth::ApiKey {
-                        key,
-                        scheme: xai_grok_net::KeyScheme::Bearer,
-                    },
-                    Err(_) => auth.map(GrokAuth::wire_auth).ok_or_else(|| {
-                        BackendError::Auth(
-                            "No API key for custom models endpoint. Set XAI_API_KEY.".into(),
-                        )
-                    })?,
+                let wire = xai_grok_net::Auth::ApiKey {
+                    key: list_fetch_api_key(auth)?,
+                    scheme: xai_grok_net::KeyScheme::Bearer,
                 };
                 Ok((wire, Vec::new()))
-||||||| base
-                let api_key = crate::agent::auth_method::read_xai_api_key_env()
-                    .or_else(|_| {
-                        auth.map(|a| a.key.clone())
-                            .ok_or(std::env::VarError::NotPresent)
-                    })
-                    .map_err(|_| {
-                        BackendError::Auth(
-                            "No API key for custom models endpoint. Set XAI_API_KEY.".into(),
-                        )
-                    })?;
-                request = request.header("Authorization", format!("Bearer {}", api_key));
-=======
-                let api_key = list_fetch_api_key(auth)?;
-                request = request.header("Authorization", format!("Bearer {}", api_key));
->>>>>>> upstream
             }
             EndpointAuth::Session => {
                 let auth = auth
@@ -185,15 +153,14 @@ impl OaiModelSource {
         Ok(FetchModelsResult { models, etag })
     }
 }
-<<<<<<< fork
 
 fn etag_of(headers: &xai_grok_net::header::HeaderMap) -> Option<String> {
     headers
         .get("etag")
         .and_then(|v| v.to_str().ok())
         .map(|s| s.to_string())
-||||||| base
-=======
+}
+
 /// A grok login session token must not reach a custom models endpoint.
 fn list_fetch_api_key(auth: Option<&GrokAuth>) -> Result<String, BackendError> {
     crate::agent::auth_method::read_xai_api_key_env()
@@ -205,7 +172,6 @@ fn list_fetch_api_key(auth: Option<&GrokAuth>) -> Result<String, BackendError> {
         .map_err(|_| {
             BackendError::Auth("No API key for custom models endpoint. Set XAI_API_KEY.".into())
         })
->>>>>>> upstream
 }
 #[derive(Debug, Clone, Copy, PartialEq, Eq)]
 enum EndpointAuth {

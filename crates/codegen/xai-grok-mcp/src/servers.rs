@@ -4229,7 +4229,6 @@ impl McpClient {
                     .map(|(key, value)| (key.as_str(), value.as_str())),
             )
         };
->>>>>>> upstream
         apply_user_agent_policy(&mut headers, server_name, &config.url);
         let mut options =
             xai_grok_net::ClientOptions::default().connect_timeout(HTTP_CONNECT_TIMEOUT);
@@ -4238,35 +4237,11 @@ impl McpClient {
             // through a proxy or follow a redirect off the machine.
             options = options.no_proxy().no_redirects();
         }
-<<<<<<< fork
         let client = Self::build_net_http_client(headers, options)?;
-        Ok(crate::mcp_http_client::McpHttpClient::new(
-            client,
-            server_name,
-            warn_budget,
-        ))
-||||||| base
-        // rmcp requires reqwest 0.13; the approved xai helper is typed for 0.12.
-        #[allow(clippy::disallowed_methods)]
-        let client = builder
-            .build()
-            .map_err(|e| McpError::ClientError(format!("Failed to build HTTP client: {e}")))?;
-        Ok(crate::mcp_http_client::McpHttpClient::new(
-            client,
-            server_name,
-            warn_budget,
-        ))
-=======
-        // rmcp requires reqwest 0.13; the approved xai helper is typed for 0.12.
-        #[allow(clippy::disallowed_methods)]
-        let client = builder
-            .build()
-            .map_err(|e| McpError::ClientError(format!("Failed to build HTTP client: {e}")))?;
         Ok(
             crate::mcp_http_client::McpHttpClient::new(client, server_name, warn_budget)
                 .with_bearer_token_file(config.bearer_token_file.clone()),
         )
->>>>>>> upstream
     }
 
     /// The configured credential headers leave `headers` and go on each request as an `Auth`.
