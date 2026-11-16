@@ -1311,10 +1311,10 @@ pub(super) async fn run_session(
                                 }
                             }
                         }
-                        SessionCommand::CompactSession { respond_to } => {
+                        SessionCommand::CompactSession { user_context, respond_to } => {
                             let s = session.clone();
                             xai_spawn::spawn_local(async move {
-                                s.compact_on_request(respond_to).await;
+                                s.compact_on_request(user_context, respond_to).await;
                             });
                         }
                         SessionCommand::ReloadPlugins { registry } => {

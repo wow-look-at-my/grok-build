@@ -523,6 +523,7 @@ pub enum SessionCommand {
         responds_to: oneshot::Sender<SessionInfoData>,
     },
     CompactSession {
+        user_context: Option<String>,
         respond_to: oneshot::Sender<acp::Result<()>>,
     },
     /// Reload plugin hooks and registry mid-session.

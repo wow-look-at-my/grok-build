@@ -1133,6 +1133,7 @@ impl SessionActor {
                 tokens_used: tokens_before,
                 context_window,
                 model_id: model_id.clone(),
+                user_context_provided: user_context.is_some(),
                 compaction_mode: match self.compaction.compaction_mode {
                     xai_chat_state::CompactionMode::Summary => {
                         xai_grok_telemetry::events::CompactionModeLabel::Summary
@@ -1148,7 +1149,7 @@ impl SessionActor {
                 is_subagent: self.startup_hints.is_subagent,
             },
         );
-        let user_context = self.goal_compaction_user_context().await;
+        let user_context = self.merge_goal_compaction_user_context(user_context).await;
         let compact_source = trigger_str;
         self.dispatch_hook(
             xai_grok_hooks::event::HookEventName::PreCompact,
@@ -1512,6 +1513,7 @@ impl SessionActor {
             self.persist_compaction_request_artifact(
                 request_chat_history,
                 compaction_tools,
+                user_context.as_deref(),
                 use_short_prompt,
                 &sampling_config.model,
                 trigger,
@@ -2617,6 +2619,7 @@ impl SessionActor {
         let result = self
             .run_compact_inner(
                 None,
+                None,
                 xai_grok_telemetry::events::CompactionTrigger::Auto,
                 lossy_input,
             )
@@ -2673,6 +2676,7 @@ impl SessionActor {
         &self,
         chat_history: Vec<ConversationItem>,
         tools: Vec<xai_grok_sampling_types::ToolSpec>,
+        user_context: Option<&str>,
         use_short_prompt: bool,
         model: &str,
         trigger: xai_grok_telemetry::events::CompactionTrigger,
@@ -2707,6 +2711,7 @@ impl SessionActor {
             trigger: trigger_str.to_owned(),
             prompt_variant: prompt_variant.to_owned(),
             model: model.to_owned(),
+            user_context: user_context.map(str::to_owned),
             chat_history,
             tools,
             summary: summary.map(str::to_owned),

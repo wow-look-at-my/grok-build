@@ -22,7 +22,6 @@ use crate::{ConfigSource, RemoteSettings, Resolved};
 pub enum CompatVendor {
     Cursor,
     Claude,
-    Codex,
 }
 #[derive(Debug, Clone, Copy, PartialEq, Eq, strum::AsRefStr, strum::IntoStaticStr)]
 #[strum(serialize_all = "snake_case")]
@@ -48,7 +47,6 @@ pub enum CompatRemoteKey {
     ClaudeMcps,
     ClaudeHooks,
     ClaudeSessions,
-    CodexSessions,
 }
 
 #[derive(Debug, Clone, Copy, PartialEq, Eq)]
@@ -89,19 +87,9 @@ impl CompatCell {
     pub const fn remote_key(self) -> Option<CompatRemoteKey> {
         self.remote_key
     }
-
-    /// Whether Grok currently implements this compatibility surface. Codex non-session cells remain
-    /// reserved in the registry so their config shape is stable, but runtime discovery does not
-    /// consume them.
-    pub const fn is_runtime_supported(self) -> bool {
-        match self.vendor {
-            CompatVendor::Cursor | CompatVendor::Claude => true,
-            CompatVendor::Codex => matches!(self.surface, CompatSurface::Sessions),
-        }
-    }
 }
 
-pub const COMPAT_CELLS: [CompatCell; 18] = [
+pub const COMPAT_CELLS: [CompatCell; 12] = [
     CompatCell::new(
         CompatVendor::Cursor,
         CompatSurface::Skills,
@@ -174,48 +162,12 @@ pub const COMPAT_CELLS: [CompatCell; 18] = [
         "GROK_CLAUDE_SESSIONS_ENABLED",
         Some(CompatRemoteKey::ClaudeSessions),
     ),
-    CompatCell::new(
-        CompatVendor::Codex,
-        CompatSurface::Skills,
-        "GROK_CODEX_SKILLS_ENABLED",
-        None,
-    ),
-    CompatCell::new(
-        CompatVendor::Codex,
-        CompatSurface::Rules,
-        "GROK_CODEX_RULES_ENABLED",
-        None,
-    ),
-    CompatCell::new(
-        CompatVendor::Codex,
-        CompatSurface::Agents,
-        "GROK_CODEX_AGENTS_ENABLED",
-        None,
-    ),
-    CompatCell::new(
-        CompatVendor::Codex,
-        CompatSurface::Mcps,
-        "GROK_CODEX_MCPS_ENABLED",
-        None,
-    ),
-    CompatCell::new(
-        CompatVendor::Codex,
-        CompatSurface::Hooks,
-        "GROK_CODEX_HOOKS_ENABLED",
-        None,
-    ),
-    CompatCell::new(
-        CompatVendor::Codex,
-        CompatSurface::Sessions,
-        "GROK_CODEX_SESSIONS_ENABLED",
-        Some(CompatRemoteKey::CodexSessions),
-    ),
 ];
 
-/// Per-vendor compat cells as parsed from `[compat.<vendor>]` TOML.
+/// Per-vendor compat cells as parsed from the `compat.<vendor>` config section.
 ///
 /// Resolution order is env override, this value, remote flag, default ON.
-#[derive(Debug, Clone, Default, Serialize, Deserialize, PartialEq)]
+#[derive(Debug, Clone, Default, Serialize, Deserialize, PartialEq, schemars::JsonSchema)]
 pub struct VendorCompatToml {
     pub skills: Option<bool>,
     pub rules: Option<bool>,
@@ -238,15 +190,13 @@ impl VendorCompatToml {
     }
 }
 
-/// The `[compat]` TOML section as parsed.
-#[derive(Debug, Clone, Default, Serialize, Deserialize, PartialEq)]
+/// The `compat` config section as parsed.
+#[derive(Debug, Clone, Default, Serialize, Deserialize, PartialEq, schemars::JsonSchema)]
 pub struct CompatConfigToml {
     #[serde(default)]
     pub cursor: VendorCompatToml,
     #[serde(default)]
     pub claude: VendorCompatToml,
-    #[serde(default)]
-    pub codex: VendorCompatToml,
 }
 
 impl CompatConfigToml {
@@ -254,7 +204,6 @@ impl CompatConfigToml {
         match cell.vendor() {
             CompatVendor::Cursor => self.cursor.value(cell.surface()),
             CompatVendor::Claude => self.claude.value(cell.surface()),
-            CompatVendor::Codex => self.codex.value(cell.surface()),
         }
     }
 }
@@ -329,7 +278,6 @@ pub struct CompatHooks {
 pub struct CompatSessions {
     pub cursor: bool,
     pub claude: bool,
-    pub codex: bool,
 }
 
 /// The `GROK_<VENDOR>_<SURFACE>_ENABLED` values set in the environment, which outrank every other
@@ -359,13 +307,11 @@ impl CompatEnv {
     }
 }
 
-/// Resolved `[compat]` configuration threaded into compatibility consumers. Every cell defaults on.
-/// Codex's non-session cells are reserved and are not consumed by discovery.
+/// Resolved `compat` configuration threaded into compatibility consumers. Every cell defaults on.
 #[derive(Debug, Clone, Copy, PartialEq, Eq, Default)]
 pub struct CompatConfig {
     pub cursor: VendorCompat,
     pub claude: VendorCompat,
-    pub codex: VendorCompat,
 }
 
 impl CompatConfig {
@@ -373,7 +319,6 @@ impl CompatConfig {
         match cell.vendor() {
             CompatVendor::Cursor => self.cursor.value(cell.surface()),
             CompatVendor::Claude => self.claude.value(cell.surface()),
-            CompatVendor::Codex => self.codex.value(cell.surface()),
         }
     }
 
@@ -388,7 +333,6 @@ impl CompatConfig {
         CompatSessions {
             cursor: self.cursor.sessions,
             claude: self.claude.sessions,
-            codex: self.codex.sessions,
         }
     }
 
@@ -396,7 +340,6 @@ impl CompatConfig {
         match cell.vendor() {
             CompatVendor::Cursor => self.cursor.set(cell.surface(), value),
             CompatVendor::Claude => self.claude.set(cell.surface(), value),
-            CompatVendor::Codex => self.codex.set(cell.surface(), value),
         }
     }
 
@@ -486,7 +429,6 @@ fn remote_compat_value(
         CompatRemoteKey::ClaudeMcps => remote.claude_mcps_enabled,
         CompatRemoteKey::ClaudeHooks => remote.claude_hooks_enabled,
         CompatRemoteKey::ClaudeSessions => remote.claude_sessions_enabled,
-        CompatRemoteKey::CodexSessions => remote.codex_sessions_enabled,
     }
 }
 

@@ -40,7 +40,6 @@ fn remote_settings_with(key: CompatRemoteKey, value: bool) -> RemoteSettings {
         CompatRemoteKey::ClaudeMcps => remote.claude_mcps_enabled = Some(value),
         CompatRemoteKey::ClaudeHooks => remote.claude_hooks_enabled = Some(value),
         CompatRemoteKey::ClaudeSessions => remote.claude_sessions_enabled = Some(value),
-        CompatRemoteKey::CodexSessions => remote.codex_sessions_enabled = Some(value),
     }
     remote
 }
@@ -58,7 +57,6 @@ fn resolve_compat_toml_sessions_disable_independently() {
     for (vendor, section) in [
         (CompatVendor::Cursor, "cursor"),
         (CompatVendor::Claude, "claude"),
-        (CompatVendor::Codex, "codex"),
     ] {
         let config = parse_compat(&format!("[compat.{section}]\nsessions = false"));
         assert_session_one_disabled(
@@ -74,10 +72,9 @@ fn resolve_compat_sessions_fails_closed_per_vendor() {
         r#"
 [compat.cursor]
 sessions = "malformed"
+hooks = "unrelated malformed field"
 [compat.claude]
 sessions = false
-[compat.codex]
-hooks = "unrelated malformed field"
 "#,
     )
     .unwrap();
@@ -88,7 +85,6 @@ hooks = "unrelated malformed field"
         CompatSessions {
             cursor: false,
             claude: false,
-            codex: true,
         },
         resolved
     );
@@ -107,7 +103,7 @@ sessions = true
     )
     .unwrap();
     let remote = RemoteSettings {
-        codex_sessions_enabled: Some(false),
+        claude_sessions_enabled: Some(false),
         ..RemoteSettings::default()
     };
 
@@ -121,7 +117,6 @@ sessions = true
         CompatSessions {
             cursor: false,
             claude: true,
-            codex: false,
         },
         resolved
     );
@@ -224,7 +219,7 @@ hooks = true
         Ok(None),
         compat_config_cell(
             Some(&effective_config),
-            cell(CompatVendor::Codex, CompatSurface::Sessions)
+            cell(CompatVendor::Claude, CompatSurface::Sessions)
         )
     );
     assert_eq!(
@@ -241,7 +236,6 @@ fn resolve_compat_sessions_load_failure_fails_closed() {
         CompatSessions {
             cursor: false,
             claude: false,
-            codex: false,
         },
         resolved
     );
@@ -249,15 +243,14 @@ fn resolve_compat_sessions_load_failure_fails_closed() {
 
 #[test]
 fn resolve_compat_sessions_load_failure_allows_env_override() {
-    let env = env_with(&[("GROK_CODEX_SESSIONS_ENABLED", true)]);
+    let env = env_with(&[("GROK_CLAUDE_SESSIONS_ENABLED", true)]);
 
     let resolved = resolve_compat_sessions(None, &env, None);
 
     assert_eq!(
         CompatSessions {
             cursor: false,
-            claude: false,
-            codex: true,
+            claude: true,
         },
         resolved
     );
@@ -281,7 +274,6 @@ fn resolve_compat_sessions_valid_empty_uses_remote_and_defaults() {
         CompatSessions {
             cursor: true,
             claude: false,
-            codex: true,
         },
         resolved
     );
@@ -323,7 +315,6 @@ fn resolve_compat_env_sessions_disable_independently() {
     for (vendor, env_var) in [
         (CompatVendor::Cursor, "GROK_CURSOR_SESSIONS_ENABLED"),
         (CompatVendor::Claude, "GROK_CLAUDE_SESSIONS_ENABLED"),
-        (CompatVendor::Codex, "GROK_CODEX_SESSIONS_ENABLED"),
     ] {
         assert_session_one_disabled(
             resolve_compat_config(
@@ -337,8 +328,8 @@ fn resolve_compat_env_sessions_disable_independently() {
 }
 
 #[test]
-fn resolve_compat_precedence_and_reserved_codex_hook() {
-    let config = parse_compat("[compat.cursor]\nsessions = false\n[compat.codex]\nhooks = false");
+fn resolve_compat_precedence() {
+    let config = parse_compat("[compat.cursor]\nsessions = false\n[compat.claude]\nhooks = false");
     let remote = RemoteSettings {
         cursor_sessions_enabled: Some(true),
         ..RemoteSettings::default()
@@ -346,17 +337,16 @@ fn resolve_compat_precedence_and_reserved_codex_hook() {
 
     let resolved = resolve_compat_config(&config, &CompatEnv::default(), Some(&remote));
     assert!(!resolved.cursor.sessions);
-    assert!(!resolved.codex.hooks);
+    assert!(!resolved.claude.hooks);
     assert!(resolved.cursor.hooks);
-    assert!(resolved.claude.hooks);
 
     let env = env_with(&[
         ("GROK_CURSOR_SESSIONS_ENABLED", true),
-        ("GROK_CODEX_HOOKS_ENABLED", true),
+        ("GROK_CLAUDE_HOOKS_ENABLED", true),
     ]);
     let resolved = resolve_compat_config(&config, &env, Some(&remote));
     assert!(resolved.cursor.sessions);
-    assert!(resolved.codex.hooks);
+    assert!(resolved.claude.hooks);
 }
 
 #[test]
@@ -384,12 +374,6 @@ fn registry_and_defaults_cover_every_cell() {
             ("claude", "mcps", Some(ClaudeMcps)),
             ("claude", "hooks", Some(ClaudeHooks)),
             ("claude", "sessions", Some(ClaudeSessions)),
-            ("codex", "skills", None),
-            ("codex", "rules", None),
-            ("codex", "agents", None),
-            ("codex", "mcps", None),
-            ("codex", "hooks", None),
-            ("codex", "sessions", Some(CodexSessions)),
         ]
     );
 
@@ -402,39 +386,11 @@ fn registry_and_defaults_cover_every_cell() {
             Into::<&'static str>::into(cell.surface())
         );
     }
-    for vendor in [defaults.cursor, defaults.claude, defaults.codex] {
+    for vendor in [defaults.cursor, defaults.claude] {
         assert!(vendor.skills && vendor.rules && vendor.agents);
         assert!(vendor.mcps && vendor.hooks);
         assert!(vendor.sessions);
     }
-
-    assert_eq!(
-        COMPAT_CELLS
-            .into_iter()
-            .filter(|cell| cell.is_runtime_supported())
-            .map(|cell| {
-                (
-                    Into::<&'static str>::into(cell.vendor()),
-                    Into::<&'static str>::into(cell.surface()),
-                )
-            })
-            .collect::<Vec<_>>(),
-        [
-            ("cursor", "skills"),
-            ("cursor", "rules"),
-            ("cursor", "agents"),
-            ("cursor", "mcps"),
-            ("cursor", "hooks"),
-            ("cursor", "sessions"),
-            ("claude", "skills"),
-            ("claude", "rules"),
-            ("claude", "agents"),
-            ("claude", "mcps"),
-            ("claude", "hooks"),
-            ("claude", "sessions"),
-            ("codex", "sessions"),
-        ]
-    );
 }
 
 #[test]
@@ -530,19 +486,15 @@ fn agents_home_dirs_gates_each_vendor() {
 #[test]
 fn toml_struct_deserializes_partial_cells() {
     let parsed: CompatConfigToml =
-        toml::from_str("[cursor]\nskills = false\nsessions = true\n[codex]\nsessions = true\n")
-            .unwrap();
+        toml::from_str("[cursor]\nskills = false\nsessions = true\n").unwrap();
     assert_eq!(Some(false), parsed.cursor.skills);
     assert_eq!(None, parsed.cursor.rules);
     assert_eq!(Some(true), parsed.cursor.sessions);
     assert_eq!(VendorCompatToml::default(), parsed.claude);
-    assert_eq!(Some(true), parsed.codex.sessions);
-    assert_eq!(None, parsed.codex.skills);
 
     let parsed: CompatConfigToml = toml::from_str("[claude]\nmcps = false\n").unwrap();
     assert_eq!(Some(false), parsed.claude.mcps);
     assert_eq!(None, parsed.claude.hooks);
     assert_eq!(None, parsed.claude.sessions);
     assert_eq!(VendorCompatToml::default(), parsed.cursor);
-    assert_eq!(VendorCompatToml::default(), parsed.codex);
 }

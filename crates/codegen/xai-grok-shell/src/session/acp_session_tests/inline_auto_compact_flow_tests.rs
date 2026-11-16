@@ -1399,7 +1399,9 @@ async fn a_mid_turn_compact_is_armed_rather_than_run() {
                 state.running_task = Some(running_task_stub("running"));
             }
             let (tx, mut rx) = tokio::sync::oneshot::channel();
-            actor.compact_on_request(tx).await;
+            actor
+                .compact_on_request(Some("keep the auth notes".to_string()), tx)
+                .await;
             assert!(
                 actor.has_pending_manual_compact(),
                 "the request must be armed for the turn's next boundary"
@@ -1410,7 +1412,7 @@ async fn a_mid_turn_compact_is_armed_rather_than_run() {
             );
             // A second request neither displaces the armed one nor reports a success it will not get.
             let (tx2, mut rx2) = tokio::sync::oneshot::channel();
-            actor.compact_on_request(tx2).await;
+            actor.compact_on_request(None, tx2).await;
             assert!(
                 matches!(rx2.try_recv(), Ok(Err(_))),
                 "a second /compact is refused out loud, not silently discarded"
@@ -1439,7 +1441,7 @@ async fn an_idle_compact_runs_inline_and_arms_nothing() {
                 create_test_actor(10_000, 200_000, 85, gateway_tx, persistence_tx).await,
             );
             let (tx, rx) = tokio::sync::oneshot::channel();
-            actor.compact_on_request(tx).await;
+            actor.compact_on_request(None, tx).await;
             assert!(
                 !actor.has_pending_manual_compact(),
                 "an idle /compact must not arm a mid-turn request"

@@ -48,7 +48,6 @@ fn a_missing_policy_file_compromises_that_home() {
             principal: Some("team-a"),
             had_managed_config: false,
             had_requirements: true,
-            key_fingerprint: None,
             fail_closed: true,
         },
     );

@@ -2118,16 +2118,8 @@ pub(super) fn apply_session_event(
                         detail,
                     },
                 ));
-<<<<<<< fork
-            } else {
-                session.defer_compaction(*tokens_before, *tokens_after, *elapsed_ms, detail);
-||||||| base
-            } else {
-                session.defer_compaction(*tokens_before, *tokens_after, *elapsed_ms);
-=======
             } else if !manual_compact_in_flight(session) {
-                session.defer_compaction(*tokens_before, *tokens_after, *elapsed_ms);
->>>>>>> upstream
+                session.defer_compaction(*tokens_before, *tokens_after, *elapsed_ms, detail);
             }
             true
         }
