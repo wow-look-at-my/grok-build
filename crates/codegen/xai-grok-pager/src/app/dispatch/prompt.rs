@@ -1372,15 +1372,9 @@ pub(super) fn dispatch_send_bash_command(app: &mut AppView, command: String) -> 
     let ActiveView::Agent(id) = app.active_view else {
         return vec![];
     };
-<<<<<<< fork
-||||||| base
-    let leader_mode = app.leader_mode;
-=======
     if refuse_if_load_failed(app, id) {
         return vec![];
     }
-    let leader_mode = app.leader_mode;
->>>>>>> upstream
     let Some(agent) = app.agents.get_mut(&id) else {
         return vec![];
     };

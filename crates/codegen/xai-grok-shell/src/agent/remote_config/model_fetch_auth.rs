@@ -54,99 +54,6 @@ impl ModelFetchAuth {
     }
 }
 
-<<<<<<< fork
-#[derive(serde::Serialize, serde::Deserialize, PartialEq, Eq, Clone, Debug)]
-#[serde(rename_all = "snake_case")]
-pub(crate) enum CacheAuthMethod {
-    Session,
-    ApiKey,
-}
-
-/// The full disk-cache scope for the model catalog, resolved atomically from the
-/// effective fetch inputs so the load, the write, and the commit gate all agree.
-/// `identity` captures the credential that actually fetches in each mode and
-/// scope change rather than a silent cross-read.
-#[derive(Clone, PartialEq, Eq)]
-pub(in crate::agent::remote_config) struct ModelsCacheScope {
-    pub(in crate::agent::remote_config) auth_method: CacheAuthMethod,
-    pub(in crate::agent::remote_config) origin: String,
-    pub(in crate::agent::remote_config) identity: String,
-}
-
-impl ModelsCacheScope {
-    pub(in crate::agent::remote_config) fn resolve(
-        endpoints: &config::EndpointsConfig,
-        fetch_auth: ModelFetchAuth,
-        auth: Option<&GrokAuth>,
-    ) -> Self {
-        let origin = active_model_source(endpoints, fetch_auth).cache_origin();
-        let alpha = endpoints.alpha_test_key.as_deref();
-        let identity = match fetch_auth {
-            // Session identity matches the settings cache so a session boot keeps
-            // hitting its existing entry; the empty fallback (no credential) still
-            // misses safely.
-            ModelFetchAuth::Session => auth
-                .map(|a| SettingsCacheManager::identity(a, alpha))
-                .unwrap_or_default(),
-            ModelFetchAuth::ApiKey => {
-                let key = read_xai_api_key_env().unwrap_or_default();
-                scope_hash(&["models-api-key", key.as_str(), alpha.unwrap_or("")])
-            }
-            // Custom endpoints authenticate with `XAI_API_KEY` or fall back to the session bearer (oai.rs).
-            // A BYOK key is stable so it scopes two keys apart; the session bearer rotates, so key the
-            // session case on the stable account identity (like the settings cache) to survive refresh.
-            ModelFetchAuth::CustomEndpoint => match read_xai_api_key_env().ok() {
-                Some(key) => scope_hash(&[
-||||||| base
-#[derive(serde::Serialize, serde::Deserialize, PartialEq, Eq, Clone, Debug)]
-#[serde(rename_all = "snake_case")]
-pub(crate) enum CacheAuthMethod {
-    Session,
-    ApiKey,
-    Deployment,
-}
-
-/// The full disk-cache scope for the model catalog, resolved atomically from the
-/// effective fetch inputs so the load, the write, and the commit gate all agree.
-/// `identity` captures the credential that actually fetches in each mode and
-/// scope change rather than a silent cross-read.
-#[derive(Clone, PartialEq, Eq)]
-pub(in crate::agent::remote_config) struct ModelsCacheScope {
-    pub(in crate::agent::remote_config) auth_method: CacheAuthMethod,
-    pub(in crate::agent::remote_config) origin: String,
-    pub(in crate::agent::remote_config) identity: String,
-}
-
-impl ModelsCacheScope {
-    pub(in crate::agent::remote_config) fn resolve(
-        endpoints: &config::EndpointsConfig,
-        fetch_auth: ModelFetchAuth,
-        auth: Option<&GrokAuth>,
-    ) -> Self {
-        let origin = active_model_source(endpoints, fetch_auth).cache_origin();
-        let alpha = endpoints.alpha_test_key.as_deref();
-        let identity = match fetch_auth {
-            // Session identity matches the settings cache so a session boot keeps
-            // hitting its existing entry; the empty fallback (no credential) still
-            // misses safely.
-            ModelFetchAuth::Session => auth
-                .map(|a| SettingsCacheManager::identity(a, alpha))
-                .unwrap_or_default(),
-            ModelFetchAuth::ApiKey => {
-                let key = read_xai_api_key_env().unwrap_or_default();
-                scope_hash(&["models-api-key", key.as_str(), alpha.unwrap_or("")])
-            }
-            ModelFetchAuth::Deployment => scope_hash(&[
-                "models-deployment",
-                endpoints.deployment_key.as_deref().unwrap_or(""),
-                alpha.unwrap_or(""),
-            ]),
-            // Custom endpoints authenticate with `XAI_API_KEY` or fall back to the session bearer (oai.rs).
-            // A BYOK key is stable so it scopes two keys apart; the session bearer rotates, so key the
-            // session case on the stable account identity (like the settings cache) to survive refresh.
-            ModelFetchAuth::CustomEndpoint => match read_xai_api_key_env().ok() {
-                Some(key) => scope_hash(&[
-=======
 pub(in crate::agent::remote_config) fn resolve_models_cache_scope(
     endpoints: &config::EndpointsConfig,
     fetch_auth: ModelFetchAuth,
@@ -165,11 +72,6 @@ pub(in crate::agent::remote_config) fn resolve_models_cache_scope(
             let key = read_xai_api_key_env().unwrap_or_default();
             scope_hash(&["models-api-key", key.as_str(), alpha.unwrap_or("")])
         }
-        ModelFetchAuth::Deployment => scope_hash(&[
-            "models-deployment",
-            endpoints.deployment_key.as_deref().unwrap_or(""),
-            alpha.unwrap_or(""),
-        ]),
         // Custom endpoints authenticate with `XAI_API_KEY`, else an external provider token.
         // Any other login identity never scopes this cache.
         ModelFetchAuth::CustomEndpoint => {
@@ -180,7 +82,6 @@ pub(in crate::agent::remote_config) fn resolve_models_cache_scope(
                     xai_grok_cloud_config::settings_cache_identity(provider, alpha).as_str(),
                 ]),
                 (key, _) => scope_hash(&[
->>>>>>> upstream
                     "models-custom-endpoint",
                     origin.as_str(),
                     key.unwrap_or_default().as_str(),
@@ -188,43 +89,11 @@ pub(in crate::agent::remote_config) fn resolve_models_cache_scope(
                 ]),
             }
         }
-<<<<<<< fork
-    }
-
-    /// Re-resolve the scope for the commit gate under the fetch-time mode (so the
-    /// origin reflects what was actually fetched), while reading LIVE disk auth
-    /// for the identity. Re-deriving the mode from live auth would flip the origin
-    /// api.example.invalid) in the just-logged-in / sign-out. Window and wrongly abandon a
-    /// abandon a good catalog; the identity still owns real credential changes.
-    pub(in crate::agent::remote_config) fn resolve_live(
-        fetch_auth: ModelFetchAuth,
-        commit_config: Option<&GrokComConfig>,
-    ) -> Self {
-        let endpoints = super::resolve_startup_endpoints();
-        let auth = super::resolve_disk_auth(commit_config.cloned());
-        Self::resolve(&endpoints, fetch_auth, auth.as_ref())
-||||||| base
-    }
-
-    /// Re-resolve the scope for the commit gate under the fetch-time mode (so the
-    /// origin reflects what was actually fetched), while reading LIVE disk auth
-    /// for the identity. Re-deriving the mode from live auth would flip the origin
-    /// (e.g. proxy to api.x.ai) in the just-logged-in / sign-out window and wrongly
-    /// abandon a good catalog; the identity still owns real credential changes.
-    pub(in crate::agent::remote_config) fn resolve_live(
-        fetch_auth: ModelFetchAuth,
-        commit_config: Option<&GrokComConfig>,
-    ) -> Self {
-        let endpoints = super::resolve_startup_endpoints();
-        let auth = super::resolve_disk_auth(commit_config.cloned());
-        Self::resolve(&endpoints, fetch_auth, auth.as_ref())
-=======
     };
     ModelsCacheScope {
         auth_method: fetch_auth.cache_auth_method(),
         origin,
         identity,
->>>>>>> upstream
     }
 }
 

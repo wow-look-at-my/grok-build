@@ -116,9 +116,7 @@ fn prefetch_from_result(
         Ok(FetchModelsResult { models, etag }) if !models.is_empty() => {
             let api_base_url_override = match fetch_auth {
                 ModelFetchAuth::ApiKey => Some(endpoints.xai_api_base_url.clone()),
-                ModelFetchAuth::Session
-                | ModelFetchAuth::Deployment
-                | ModelFetchAuth::CustomEndpoint => None,
+                ModelFetchAuth::Session | ModelFetchAuth::CustomEndpoint => None,
             };
             let map = build_prefetched_map(models, api_base_url_override);
             tracing::info!(count = map.len(), etag = ?etag, "Prefetched models");

@@ -719,12 +719,11 @@ impl SessionActor {
     /// a success for work that has not started.
     pub(crate) async fn compact_on_request(
         self: &Arc<Self>,
-        user_context: Option<String>,
         respond_to: tokio::sync::oneshot::Sender<Result<(), acp::Error>>,
     ) {
         let turn_in_flight = self.state.lock().await.running_task.is_some();
         if !turn_in_flight {
-            let _ = respond_to.send(self.run_compact(user_context).await);
+            let _ = respond_to.send(self.run_compact().await);
             return;
         }
         if let Some(already_armed) = self.compaction.pending_manual_compact.take() {
@@ -734,19 +733,18 @@ impl SessionActor {
                 .set(Some(already_armed));
             let _ = respond_to.send(Err(acp::Error::internal_error().data(
                 "a /compact is already armed for this turn; it runs at the next \
-                 safe point. This request's instructions were not applied.",
+                 safe point.",
             )));
             return;
         }
         tracing::info!(
             session_id = %self.session_info.id.0,
-            has_instructions = user_context.is_some(),
             "/compact armed mid-turn; runs at the turn's next pre-sampling boundary"
         );
         self.compaction
             .pending_manual_compact
             .set(Some(PendingManualCompact {
-                instructions: user_context,
+                instructions: None,
                 respond_to,
             }));
     }
@@ -782,7 +780,7 @@ impl SessionActor {
             reason: "Requested with /compact".to_string(),
         })
         .await;
-        let result = self.run_compact(pending.instructions).await;
+        let result = self.run_compact().await;
         if let Err(e) = &result {
             // The client is mid-turn, so it is not in the command state that renders this request's own reply.
             tracing::error!(error = %e, "mid-turn /compact failed");
