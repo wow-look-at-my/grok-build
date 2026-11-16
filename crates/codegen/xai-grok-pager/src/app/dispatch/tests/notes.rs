@@ -297,43 +297,7 @@ fn btw_response_toasts_skipped_image_numbers() {
 #[test]
 fn btw_no_session_toasts() {
     let id = AgentId(0);
-<<<<<<< fork
 
-||||||| base
-
-    let mut minimal = test_app_with_agent();
-    minimal.screen_mode = crate::app::ScreenMode::Minimal;
-    minimal.agents.get_mut(&id).unwrap().session.session_id = None;
-    assert!(
-        dispatch(
-            Action::SendBtw {
-                question: "q".into(),
-                images: Vec::new(),
-            },
-            &mut minimal,
-        )
-        .is_empty()
-    );
-    assert!(test_agent(&minimal, id).toast.is_none());
-    assert!(last_system_text(&minimal, id).contains("No active session"));
-
-=======
-    let mut minimal = test_app_with_agent();
-    minimal.screen_mode = crate::app::ScreenMode::Minimal;
-    minimal.agents.get_mut(&id).unwrap().session.session_id = None;
-    assert!(
-        dispatch(
-            Action::SendBtw {
-                question: "q".into(),
-                images: Vec::new(),
-            },
-            &mut minimal,
-        )
-        .is_empty()
-    );
-    assert!(test_agent(&minimal, id).toast.is_none());
-    assert!(last_system_text(&minimal, id).contains("No active session"));
->>>>>>> upstream
     let mut fullscreen = test_app_with_agent();
     fullscreen.agents.get_mut(&id).unwrap().session.session_id = None;
     assert!(
