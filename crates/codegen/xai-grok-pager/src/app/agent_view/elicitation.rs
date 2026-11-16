@@ -443,10 +443,8 @@ impl AgentView {
                 format!("Cancelled MCP “{server}” request for input to show a newer one.")
             }
         };
-        crate::app::mode_switch::push_block_behind_live_stream(
-            &mut self.scrollback,
-            crate::scrollback::block::RenderBlock::system(text),
-        );
+        self.scrollback
+            .push_block(crate::scrollback::block::RenderBlock::system(text));
     }
 
     fn finish_elicitation(

@@ -756,7 +756,8 @@ pub(super) fn maybe_drain_queue(agent: &mut AgentView, notices: &mut Vec<String>
             }
         }
         QueueEntryKind::Command => {
-            let token = crate::slash::parse_invocation(&queued.text).map_or("", |inv| inv.token);
+            let invocation = crate::slash::parse_invocation(&queued.text);
+            let token = invocation.as_ref().map_or("", |inv| inv.token);
             let (command, started, effect) = match token {
                 "flush" => (
                     AgentCommand::MemoryFlush,

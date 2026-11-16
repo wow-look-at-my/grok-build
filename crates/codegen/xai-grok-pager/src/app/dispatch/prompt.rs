@@ -226,24 +226,14 @@ pub(in crate::app::dispatch) const LOAD_FAILED_NOTICE: &str =
 
 /// A tab whose session never opened has nothing to send to, so its prompt or command would queue forever.
 fn refuse_if_load_failed(app: &mut AppView, id: AgentId) -> bool {
-    let minimal = app.screen_mode.is_minimal();
-    app.agents
-        .get_mut(&id)
-        .is_some_and(|agent| refuse_on_failed_tab(agent, minimal))
+    app.agents.get_mut(&id).is_some_and(refuse_on_failed_tab)
 }
 
-/// Minimal mode shows no toasts, so the notice goes to the scrollback there.
-fn refuse_on_failed_tab(agent: &mut AgentView, minimal: bool) -> bool {
+fn refuse_on_failed_tab(agent: &mut AgentView) -> bool {
     if !agent.load_failed {
         return false;
     }
-    if minimal {
-        agent
-            .scrollback
-            .push_block(RenderBlock::system(LOAD_FAILED_NOTICE.to_owned()));
-    } else {
-        agent.show_toast(LOAD_FAILED_NOTICE);
-    }
+    agent.show_toast(LOAD_FAILED_NOTICE);
     true
 }
 
@@ -923,7 +913,7 @@ pub(super) fn dispatch_send_prompt_submission(
             CommandResult::QueueCommand(_)
                 | CommandResult::InjectSkill { .. }
                 | CommandResult::PassThrough(_)
-        ) && refuse_on_failed_tab(agent, app.screen_mode.is_minimal())
+        ) && refuse_on_failed_tab(agent)
         {
             return effects;
         }
@@ -1769,9 +1759,6 @@ pub(super) fn handle_prompt_response(
 
         let was_bash_turn = agent.bash_turn;
         finish_turn_view(agent, TurnEnd::Completed);
-        // Worker threads go idle holding this turn's freed pages, and jemalloc on macOS has no decay thread to return them.
-        // Here, not in `finish_turn_view`: that also runs on the animation tick, where purges must wait for the frame to draw.
-        crate::memory_release::release_retained_memory("turn-end");
 
         // In-turn reviews die with their ext method. A post-turn review is the waiting UI and stays.
         // Cancelled or failed turns do not open approve/build for an in-progress or rejected plan.

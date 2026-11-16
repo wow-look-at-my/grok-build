@@ -151,6 +151,8 @@ pub(crate) fn window_arg_items(
                 match_text: format!("{sort_prefix} {insert_text}"),
                 insert_text,
                 description: format!("{default_prefix}{window} tokens"),
+                loaded_in_vram: None,
+                favorite: false,
             }
         })
         .collect()
