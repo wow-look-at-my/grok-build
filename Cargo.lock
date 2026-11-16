@@ -11526,7 +11526,6 @@ name = "xai-grok-cloud-config"
 version = "0.1.0"
 dependencies = [
  "axum",
- "blake3",
  "chrono",
  "fs2",
  "futures",
@@ -11534,7 +11533,6 @@ dependencies = [
  "hmac 0.12.1",
  "indexmap",
  "prod-mc-cli-chat-proxy-types",
- "reqwest 0.12.24",
  "serde",
  "serde_json",
  "serial_test",
@@ -11552,8 +11550,10 @@ dependencies = [
  "xai-grok-extra-ca",
  "xai-grok-http",
  "xai-grok-login",
+ "xai-grok-net",
  "xai-grok-telemetry",
  "xai-grok-version",
+ "xai-spawn",
 ]
 
 [[package]]
@@ -11599,7 +11599,9 @@ dependencies = [
  "which",
  "xai-dirs",
  "xai-grok-env",
+ "xai-grok-extra-ca",
  "xai-grok-version",
+ "xai-tool-types",
  "xai-tty-utils",
 ]
 

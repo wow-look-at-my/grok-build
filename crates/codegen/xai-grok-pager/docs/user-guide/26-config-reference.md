@@ -271,16 +271,8 @@ User-level configuration lives in `$GROK_HOME/config.json` (default `~/.grok/con
 | Key | Type / Values | Requirements | Managed | Details |
 | --- | --- | --- | --- | --- |
 | `models.agent_type` | `string` | `yes` | `user` | Fallback agent_type for models without a per-model override. |
-<<<<<<< fork
-| `models.allowed_models` | `string[]` | `pin` | `user` | Glob allowlist for the model picker, default, and `-m`. Empty means no restriction. |
+| `models.allowed_models` | `string[]` | `pin` | `user` | Glob allowlist for the model picker, default, and `-m`, ignored outside requirements when `auth_provider_command` and a custom models endpoint are set. Empty means no restriction. |
 | `models.auth_providers.<name>` | `table` | `yes` | `user` | Named credential helper used by `[model.<id>] auth_provider`. |
-||||||| base
-| `models.allowed_models` | `string[]` | `pin` | `user` | Glob allowlist for the model picker, default, and `-m`. Empty means no restriction. |
-| `models.default` | `string` | `pin` | `user` | Model used for new sessions. Also `GROK_DEFAULT_MODEL`, `--model`, `-m`. |
-=======
-| `models.allowed_models` | `string[]` | `pin` | `user` | Glob allowlist for the model picker, default, and `-m`, ignored outside `requirements.toml` when `auth_provider_command` and a custom models endpoint are set. Empty means no restriction. |
-| `models.default` | `string` | `pin` | `user` | Model used for new sessions. Also `GROK_DEFAULT_MODEL`, `--model`, `-m`. |
->>>>>>> upstream
 | `models.default_reasoning_effort` | `string` | `yes` | `user` | Default reasoning effort for the default model when the model supports it. |
 | `models.default` | `string` | `pin` | `user` | Model used for new sessions. Also `GROK_DEFAULT_MODEL`, `--model`, `-m`. |
 | `models.definitions.<id>.agent_type` | `string` | `yes` | `user` | Agent definition type associated with this model. |
@@ -306,7 +298,6 @@ User-level configuration lives in `$GROK_HOME/config.json` (default `~/.grok/con
 | `models.definitions.<id>.model_provider` | `string` | `yes` | `user` | Named `models.providers.<name>` provider id for this model. |
 | `models.definitions.<id>.model` | `string` | `yes` | `user` | Model id sent to the API. |
 | `models.definitions.<id>.name` | `string` | `yes` | `user` | Label shown in the model picker. |
-| `models.definitions.<id>.notice` | `table` (`severity` = `info / warning / critical`, `text`, `label`) | `yes` | `user` | Message shown above the prompt while this model is selected, cleared for this model by a blank `text`. |
 | `models.definitions.<id>.query_params` | `map<string,string>` | `yes` | `user` | Extra query parameters on this model's requests. |
 | `models.definitions.<id>.rate_limit_retry_threshold` | `number` | `yes` | `user` | Total-attempt ceiling for rate-limited requests, capped by the resolved `max_retries`; when configured, it disables the separate subagent 429 wait loop. |
 | `models.definitions.<id>.reasoning_effort` | `string` | `yes` | `user` | Deprecated per-model effort; prefer `reasoning_efforts`. |

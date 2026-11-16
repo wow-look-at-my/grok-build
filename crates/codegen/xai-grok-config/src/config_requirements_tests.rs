@@ -201,19 +201,10 @@ mixpanel_token = \"mix-secret\"
         ("endpoints.models_list_url", "https://models.example/list"),
         ("endpoints.trace_upload_url", "https://traces.example"),
         ("endpoints.feedback_base_url", "https://feedback.example"),
-        ("endpoints.deployment_key", "[redacted]"),
         ("telemetry.events_url", "https://events.example"),
         ("telemetry.events_api_key", "[redacted]"),
         ("telemetry.mixpanel_enabled", "true"),
         ("telemetry.mixpanel_token", "[redacted]"),
-        ("endpoints.trace_upload_bucket", "trace-bucket"),
-        ("endpoints.trace_upload_region", "us-east-1"),
-        ("endpoints.trace_upload_credentials_file", "/var/creds"),
-        (
-            "endpoints.trace_upload_endpoint_url",
-            "https://upload.example",
-        ),
-        ("endpoints.trace_upload_credentials", "[redacted]"),
     ]
     .map(|(path, shown)| (path, shown.to_owned()));
     assert_eq!(expected_pushes.as_slice(), pushes.as_slice());
@@ -257,21 +248,9 @@ mixpanel_token = \"mix-secret\"
                 "endpoints.feedback_base_url",
                 Some("https://feedback.example")
             ),
-            ("endpoints.deployment_key", Some("deploy-secret")),
             ("telemetry.events_url", Some("https://events.example")),
             ("telemetry.events_api_key", Some("events-secret")),
             ("telemetry.mixpanel_token", Some("mix-secret")),
-            ("endpoints.trace_upload_bucket", Some("trace-bucket")),
-            ("endpoints.trace_upload_region", Some("us-east-1")),
-            (
-                "endpoints.trace_upload_credentials_file",
-                Some("/var/creds"),
-            ),
-            (
-                "endpoints.trace_upload_endpoint_url",
-                Some("https://upload.example"),
-            ),
-            ("endpoints.trace_upload_credentials", Some("upload-secret"),),
         ],
         [
             ("cli.channel", channel.as_deref()),
@@ -290,30 +269,9 @@ mixpanel_token = \"mix-secret\"
             ("endpoints.models_list_url", models_list_url.as_deref()),
             ("endpoints.trace_upload_url", trace_upload_url.as_deref()),
             ("endpoints.feedback_base_url", feedback_base_url.as_deref()),
-            ("endpoints.deployment_key", deployment_key.as_deref()),
             ("telemetry.events_url", events_url.as_deref()),
             ("telemetry.events_api_key", events_api_key.as_deref()),
             ("telemetry.mixpanel_token", mixpanel_token.as_deref()),
-            (
-                "endpoints.trace_upload_bucket",
-                trace_upload_bucket.as_deref(),
-            ),
-            (
-                "endpoints.trace_upload_region",
-                trace_upload_region.as_deref(),
-            ),
-            (
-                "endpoints.trace_upload_credentials_file",
-                trace_upload_credentials_file.as_deref(),
-            ),
-            (
-                "endpoints.trace_upload_endpoint_url",
-                trace_upload_endpoint_url.as_deref(),
-            ),
-            (
-                "endpoints.trace_upload_credentials",
-                trace_upload_credentials.as_deref(),
-            ),
         ]
     );
 }
