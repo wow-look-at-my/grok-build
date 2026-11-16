@@ -5,112 +5,32 @@ use serde::{Deserialize, Serialize};
 use std::time::Duration;
 use xai_grok_login::backend::{ActiveAuthBackend, AuthBackend};
 use xai_grok_login::{GrokAuth, GrokComConfig};
-<<<<<<< fork
-||||||| base
-const GROK_CODE_BACKEND_URL: &str = "https://code.grok.com";
-=======
 use xai_grok_sampling_types::{MODEL_NOTICE_META_KEY, ModelNotice};
 
-const GROK_CODE_BACKEND_URL: &str = "https://code.grok.com";
-
->>>>>>> upstream
 const DEFAULT_TIMEOUT: Duration = Duration::from_secs(30);
-<<<<<<< fork
 const GROK_CODE_WEB_URL: &str = "https://grok.invalid";
-||||||| base
-const GROK_CODE_WEB_URL: &str = "https://grok.com";
-=======
-const GROK_CODE_WEB_URL: &str = "https://grok.com";
 
->>>>>>> upstream
 pub fn share_url(permission_id: &str) -> String {
     let web_url =
         std::env::var("GROK_CODE_WEB_URL").unwrap_or_else(|_| GROK_CODE_WEB_URL.to_string());
     format!("{}/build/share/{}", web_url, permission_id)
 }
-<<<<<<< fork
-fn add_cli_chat_proxy_headers_blocking(
-    builder: xai_grok_net::BlockingRequest,
-    auth: &GrokAuth,
-    alpha_test_key: Option<&str>,
-    url: &str,
-) -> xai_grok_net::BlockingRequest {
-    let mut builder = builder
-        .header("X-XAI-Token-Auth", GrokComConfig::default().token_header)
-        .header("x-userid", &auth.user_id)
-        .header("x-grok-client-version", xai_grok_version::version());
-    if let Some(email) = &auth.email {
-        builder = builder.header("x-email", email);
-    }
-    let _ = (alpha_test_key, url);
-    builder
-        .header(
-            "x-grok-client-identifier",
-            crate::http::process_client_identifier(),
-        )
-        .header(
-            crate::http::CLIENT_MODE_HEADER,
-            crate::http::process_client_mode(),
-        )
-}
-||||||| base
-fn add_cli_chat_proxy_headers_blocking(
-    builder: reqwest::blocking::RequestBuilder,
-    auth: &GrokAuth,
-    alpha_test_key: Option<&str>,
-    url: &str,
-) -> reqwest::blocking::RequestBuilder {
-    let mut builder = builder
-        .header("Authorization", format!("Bearer {}", &auth.key))
-        .header("X-XAI-Token-Auth", GrokComConfig::default().token_header)
-        .header("x-userid", &auth.user_id)
-        .header("x-grok-client-version", xai_grok_version::VERSION);
-    if let Some(email) = &auth.email {
-        builder = builder.header("x-email", email);
-    }
-    let _ = (alpha_test_key, url);
-    builder
-        .header(
-            "x-grok-client-identifier",
-            crate::http::process_client_identifier(),
-        )
-        .header(
-            crate::http::CLIENT_MODE_HEADER,
-            crate::http::process_client_mode(),
-        )
-}
-=======
 
->>>>>>> upstream
 async fn parse_json_response<T: serde::de::DeserializeOwned>(
     response: xai_grok_net::Response,
 ) -> Result<T, BackendError> {
     let bytes = response.bytes().await?;
     serde_json::from_slice(&bytes).map_err(BackendError::from)
 }
-<<<<<<< fork
+
 /// A GET to `url` with the login token and the bundle-fetch headers.
 async fn bundle_fetch_request(
     client: &xai_grok_net::HttpClient,
-||||||| base
-async fn add_bundle_fetch_headers(
-    builder: reqwest::RequestBuilder,
-=======
-
-async fn add_bundle_fetch_headers(
-    builder: reqwest::RequestBuilder,
->>>>>>> upstream
     auth_manager: Option<&std::sync::Arc<xai_grok_login::AuthManager>>,
     alpha_test_key: Option<&str>,
     url: &str,
-<<<<<<< fork
 ) -> xai_grok_net::Request {
-||||||| base
-) -> reqwest::RequestBuilder {
-=======
-) -> reqwest::RequestBuilder {
     // Every caller here targets cli-chat-proxy, an xAI host, so a session from another authority must not resolve
->>>>>>> upstream
     let resolved_auth = match auth_manager {
         Some(am) if ActiveAuthBackend::default().is_xai_authority() => am.auth().await.ok(),
         _ => None,
@@ -120,7 +40,7 @@ async fn add_bundle_fetch_headers(
         resolved_auth.as_ref().map(|auth| auth.key.clone()),
     );
     credentials.alpha_test_key = alpha_test_key.map(str::to_owned);
-<<<<<<< fork
+
     let mut request_auth = credentials.request_auth(url);
     if let Some(auth) = &resolved_auth {
         request_auth.auth = auth.wire_auth();
@@ -128,24 +48,8 @@ async fn add_bundle_fetch_headers(
     let mut builder = request_auth
         .headers_on(client.get(url, request_auth.auth.clone()))
         .header("x-grok-client-version", xai_grok_version::version());
+
     if let Some(auth) = &resolved_auth {
-||||||| base
-    let mut builder = credentials
-        .apply(builder, url)
-        .header("x-grok-client-version", xai_grok_version::VERSION);
-    if deployment_key.is_none()
-        && let Some(auth) = &resolved_auth
-    {
-=======
-
-    let mut builder = credentials
-        .apply(builder, url)
-        .header("x-grok-client-version", xai_grok_version::VERSION);
-
-    if deployment_key.is_none()
-        && let Some(auth) = &resolved_auth
-    {
->>>>>>> upstream
         builder = builder.header("x-userid", &auth.user_id);
         if let Some(email) = &auth.email {
             builder = builder.header("x-email", email);

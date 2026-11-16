@@ -61,11 +61,11 @@ fn fetch_settings_blocking_with_attempts(
     SettingsFetch::Retry
 }
 fn add_cli_chat_proxy_headers_blocking(
-    builder: reqwest::blocking::RequestBuilder,
+    builder: request::blocking::RequestBuilder,
     auth: &GrokAuth,
     alpha_test_key: Option<&str>,
     url: &str,
-) -> reqwest::blocking::RequestBuilder {
+) -> request::blocking::RequestBuilder {
     let mut builder = builder
         .header("Authorization", format!("Bearer {}", &auth.key))
         .header("X-XAI-Token-Auth", GrokComConfig::default().token_header)
@@ -87,7 +87,7 @@ fn add_cli_chat_proxy_headers_blocking(
 }
 /// Returns the final outcome of one `/settings` attempt, or `Continue` when another attempt may succeed.
 fn classify_settings_response(
-    response: reqwest::Result<reqwest::blocking::Response>,
+    response: request::Result<request::blocking::Response>,
     attempt: u32,
 ) -> ControlFlow<SettingsFetch> {
     match response {
@@ -109,7 +109,7 @@ fn classify_settings_response(
             );
             ControlFlow::Continue(())
         }
-        Ok(resp) if resp.status() == reqwest::StatusCode::UNAUTHORIZED => {
+        Ok(resp) if resp.status() == request::StatusCode::UNAUTHORIZED => {
             tracing::warn!(
                 status = resp.status().as_u16(),
                 "Settings fetch rejected (401)"

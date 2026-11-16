@@ -594,13 +594,7 @@ async fn write_toml_table_if_changed(
     .await
 }
 
-<<<<<<< fork
 /// Flip sticky project `enabled = false` to true.
-||||||| base
-/// Flip sticky project `enabled = false` to true with toml_edit (comments kept).
-=======
-/// Uses `toml_edit` so the shared project file keeps its comments and layout.
->>>>>>> upstream
 async fn clear_sticky_project_disabled_at(
     path: &std::path::Path,
     server_name: &str,
@@ -608,14 +602,6 @@ async fn clear_sticky_project_disabled_at(
     flip_sticky_project_enabled_at(path, server_name, false, true).await
 }
 
-<<<<<<< fork
-/// Flip sticky project `enabled = true` to false.
-/// Inverse of [`clear_sticky_project_disabled_at`].
-||||||| base
-/// Flip sticky project `enabled = true` to false with toml_edit (comments kept).
-/// Inverse of [`clear_sticky_project_disabled_at`].
-=======
->>>>>>> upstream
 async fn set_sticky_project_disabled_at(path: &std::path::Path, server_name: &str) -> Result<bool> {
     flip_sticky_project_enabled_at(path, server_name, true, false).await
 }
@@ -693,15 +679,7 @@ fn set_mcp_server_enabled_field(
     }
 }
 
-<<<<<<< fork
-/// Upsert an MCP server entry in `~/.grok/config.json`.
-/// Also removes the server from `disabled_mcp_servers` if present (a newly defined server should start enabled).
-||||||| base
-/// Upsert an MCP server entry in `~/.grok/config.toml`.
-/// Also removes the server from `disabled_mcp_servers` if present (a newly defined server should start enabled).
-=======
 /// Also removes the server from `disabled_mcp_servers`, so a newly defined server starts enabled.
->>>>>>> upstream
 pub(crate) async fn save_mcp_server_config(
     server_name: &str,
     config: &McpServerConfig,
@@ -709,16 +687,6 @@ pub(crate) async fn save_mcp_server_config(
     save_mcp_server_config_at(&config_path(), server_name, config).await
 }
 
-<<<<<<< fork
-/// Upsert an MCP server entry in the config file at `path`.
-///
-/// project-scoped `.grok/config.json`.
-||||||| base
-/// Upsert an MCP server entry in the config file at `path`.
-///
-/// Same behavior as [`save_mcp_server_config`] but targets an explicit config file, e.g. a project-scoped `.grok/config.toml`.
-=======
->>>>>>> upstream
 pub async fn save_mcp_server_config_at(
     path: &std::path::Path,
     server_name: &str,
@@ -750,30 +718,12 @@ pub async fn save_mcp_server_config_at(
     Ok(())
 }
 
-<<<<<<< fork
-/// Delete an MCP server entry from `~/.grok/config.json`.
-/// Removes `[mcp_servers.<name>]`, cleans up `disabled_mcp_servers` and `[disabled_mcp_tools.<name>]` entries.
-/// Returns `true` if the entry existed.
-||||||| base
-/// Delete an MCP server entry from `~/.grok/config.toml`.
-/// Removes `[mcp_servers.<name>]`, cleans up `disabled_mcp_servers` and `[disabled_mcp_tools.<name>]` entries.
-/// Returns `true` if the entry existed.
-=======
->>>>>>> upstream
 pub(crate) async fn delete_mcp_server_config(server_name: &str) -> Result<bool> {
     delete_mcp_server_config_at(&config_path(), server_name).await
 }
 
-<<<<<<< fork
-/// Delete an MCP server entry from the config file at `path`. Same behavior as [`delete_mcp_server_config`] but targets an explicit config file, e.g. a project-scoped `.grok/config.json`.
-/// OAuth credential cleanup is keyed by server name against the global credential store. It therefore also drops credentials a same-named server in another config file uses.
-||||||| base
-/// Delete an MCP server entry from the config file at `path`. Same behavior as [`delete_mcp_server_config`] but targets an explicit config file, e.g. a project-scoped `.grok/config.toml`.
-/// OAuth credential cleanup is keyed by server name against the global credential store. It therefore also drops credentials a same-named server in another config file uses.
-=======
 /// OAuth credential cleanup is keyed by server name against the global credential store.
 /// It therefore also drops credentials a same-named server in another config file uses.
->>>>>>> upstream
 pub async fn delete_mcp_server_config_at(
     path: &std::path::Path,
     server_name: &str,
@@ -833,12 +783,6 @@ pub async fn delete_mcp_server_config_at(
     Ok(wrote)
 }
 
-<<<<<<< fork
-/// Load disabled_tools for all MCP servers from `mcp.disabled_tools` in config.json.
-||||||| base
-/// Load disabled_tools for all MCP servers from `[disabled_mcp_tools]` in config.toml.
-=======
->>>>>>> upstream
 pub(crate) fn get_all_mcp_disabled_tools(
     _cwd: &std::path::Path,
 ) -> std::collections::HashMap<String, std::collections::HashSet<String>> {

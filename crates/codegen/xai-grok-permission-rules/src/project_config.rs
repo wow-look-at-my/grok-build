@@ -36,33 +36,19 @@ pub fn find_mcp_json_files_in(chain_dirs: &[PathBuf]) -> Vec<PathBuf> {
         .collect()
 }
 
-<<<<<<< HEAD:crates/codegen/xai-grok-workspace/src/project_config.rs
-/// True when `config_path` is the `$GROK_HOME` config file (user tier, not project), JSON or legacy TOML.
-fn is_user_grok_config_file(config_path: &Path) -> bool {
-    let Some(user_home) = xai_grok_config::user_grok_home() else {
-        return false;
-    };
-=======
-/// True when `config_path` is `<grok_home>/config.toml` (user tier, not project).
+/// True when `config_path` is the `<grok_home>` config file (user tier, not project), JSON or legacy TOML.
 fn is_user_grok_config_file(config_path: &Path, grok_home: Option<&Path>) -> bool {
     let Some(grok_home) = grok_home else {
         return false;
     };
-    let user_config = grok_home.join("config.toml");
-    if config_path == user_config.as_path() {
-        return true;
-    }
->>>>>>> upstream/main:crates/codegen/xai-grok-permission-rules/src/project_config.rs
-    let Ok(canonical_config) = dunce::canonicalize(config_path) else {
-        return false;
-    };
+    let canonical_config = dunce::canonicalize(config_path).ok();
     ["config.json", "config.toml"].into_iter().any(|name| {
-        let user_config = user_home.join(name);
+        let user_config = grok_home.join(name);
         if config_path == user_config.as_path() {
             return true;
         }
         let canonical_user = dunce::canonicalize(&user_config).unwrap_or(user_config);
-        canonical_config == canonical_user
+        canonical_config.as_ref() == Some(&canonical_user)
     })
 }
 
@@ -92,15 +78,10 @@ pub fn find_project_configs_in(chain_dirs: &[PathBuf], grok_home: Option<&Path>)
     chain_dirs
         .iter()
         .rev()
-<<<<<<< HEAD:crates/codegen/xai-grok-workspace/src/project_config.rs
         .map(|dir| xai_grok_config::project_config_file(dir))
-        .filter(|config_path| config_path.is_file() && !is_user_grok_config_file(config_path))
-=======
-        .map(|dir| dir.join(".grok").join("config.toml"))
         .filter(|config_path| {
             config_path.is_file() && !is_user_grok_config_file(config_path, grok_home)
         })
->>>>>>> upstream/main:crates/codegen/xai-grok-permission-rules/src/project_config.rs
         .collect()
 }
 
