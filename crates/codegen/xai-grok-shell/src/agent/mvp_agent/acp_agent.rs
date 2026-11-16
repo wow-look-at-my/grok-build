@@ -97,7 +97,6 @@ impl MvpAgent {
         res
     }
 }
-<<<<<<< fork
 /// True when a text block of `prompt` sets `ENABLE_FIREHOSE_META` to `true`.
 /// `/debug` sets it, so the process that runs the session logs its repro.
 fn prompt_requests_firehose(prompt: &[acp::ContentBlock]) -> bool {
@@ -110,8 +109,7 @@ fn prompt_requests_firehose(prompt: &[acp::ContentBlock]) -> bool {
             .unwrap_or(false),
         _ => false,
     })
-||||||| base
-=======
+}
 /// Rejects a `_meta.contextWindow` that is malformed or that the model does not support.
 fn resolve_switch_window(
     meta: Option<&acp::Meta>,

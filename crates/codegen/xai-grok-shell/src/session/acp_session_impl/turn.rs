@@ -2271,19 +2271,11 @@ impl SessionActor {
             }
             let inject_start = std::time::Instant::now();
             let storage = self.memory.storage()?;
-<<<<<<< fork
             let context = xai_spawn::spawn_blocking(move || {
-                crate::session::helpers::memory_context::format_v2_memory_context(&storage)
-||||||| base
-            let context = tokio::task::spawn_blocking(move || {
-                crate::session::helpers::memory_context::format_v2_memory_context(&storage)
-=======
-            let context = tokio::task::spawn_blocking(move || {
                 crate::session::helpers::memory_context::format_v2_memory_context(
                     &storage,
                     compact_index,
                 )
->>>>>>> upstream
             })
             .await
             .map_err(|error| error.to_string())
@@ -3106,21 +3098,6 @@ impl SessionActor {
             request.x_grok_agent_id = Some(xai_grok_telemetry::id::agent_id());
             request.x_grok_transient_retry =
                 (transient_retry_attempts > 0).then(|| transient_retry_attempts.to_string());
-<<<<<<< fork
-||||||| base
-            if request.x_grok_deployment_id.is_none() {
-                request.x_grok_deployment_id = crate::managed_config::resolve_deployment_id(
-                    crate::managed_config::resolve_deployment_key().as_deref(),
-                );
-            }
-=======
-            if request.x_grok_deployment_id.is_none() {
-                request.x_grok_deployment_id =
-                    xai_grok_cloud_config::managed_config::resolve_deployment_id(
-                        xai_grok_cloud_config::managed_config::resolve_deployment_key().as_deref(),
-                    );
-            }
->>>>>>> upstream
             if structured_output_native {
                 request.json_schema = json_schema.clone();
             }

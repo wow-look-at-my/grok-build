@@ -191,6 +191,8 @@ struct ServedCall {
     call_id: String,
     pending_check: Option<TextCheck>,
     picked: PickedToolCall,
+    narration: Option<String>,
+    reasoning: Option<String>,
 }
 
 /// What a request gets, decided without touching `Progress`; `record` then applies it.
@@ -210,24 +212,12 @@ enum NextStep {
     },
     Call {
         entry_index: usize,
-<<<<<<< fork
-        call_id: String,
-        pending_check: Option<TextCheck>,
-        picked: PickedToolCall,
-        narration: Option<String>,
-        reasoning: Option<String>,
-||||||| base
-        call_id: String,
-        pending_check: Option<TextCheck>,
-        picked: PickedToolCall,
-=======
         call: ServedCall,
     },
     /// Every unanswered call of a parallel turn, in order.
     ParallelCalls {
         entry_index: usize,
         calls: Vec<ServedCall>,
->>>>>>> upstream
     },
     Reply {
         entry_index: usize,
@@ -300,41 +290,21 @@ fn render(
             };
             (reply, Some(observed), violation.into_iter().collect())
         }
-<<<<<<< fork
-        NextStep::Call {
-            call_id,
-            picked,
-            narration,
-            reasoning,
-            ..
-        } => (
-            match narration {
+        NextStep::Call { call, .. } => (
+            match call.narration {
                 Some(narration) => ModelReply::NarratedToolCall {
                     narration,
-                    reasoning,
-                    call_id,
-                    call: picked,
+                    reasoning: call.reasoning,
+                    call_id: call.call_id,
+                    call: call.picked,
                 },
-                None if reasoning.is_some() => {
+                None if call.reasoning.is_some() => {
                     panic!("a tool call that thinks must also be narrated")
                 }
                 None => ModelReply::ToolCall {
-                    call_id,
-                    call: picked,
+                    call_id: call.call_id,
+                    call: call.picked,
                 },
-||||||| base
-        NextStep::Call {
-            call_id, picked, ..
-        } => (
-            ModelReply::ToolCall {
-                call_id,
-                call: picked,
-=======
-        NextStep::Call { call, .. } => (
-            ModelReply::ToolCall {
-                call_id: call.call_id,
-                call: call.picked,
->>>>>>> upstream
             },
             held,
             Vec::new(),
@@ -594,42 +564,18 @@ impl ReplayingScript {
             text: entry.reply.clone(),
             usage: entry.usage,
         };
-<<<<<<< fork
-        let arguments = call.resolved_arguments(&request.results);
-        Some(match call.tool.pick(&request.offered, &arguments) {
-            Some(picked) => NextStep::Call {
-                entry_index: index,
-                call_id,
-                pending_check: call.result_check.clone(),
-                picked,
-                narration: call.narration.clone(),
-                reasoning: call.reasoning.clone(),
-            },
-            None => NextStep::NotOffered {
-                entry_index: index,
-                violation: ScriptViolation::ToolNotOffered {
-||||||| base
-        Some(match call.tool.pick(&request.offered, &call.arguments) {
-            Some(picked) => NextStep::Call {
-                entry_index: index,
-                call_id,
-                pending_check: call.result_check.clone(),
-                picked,
-            },
-            None => NextStep::NotOffered {
-                entry_index: index,
-                violation: ScriptViolation::ToolNotOffered {
-=======
         let serve = |(call_id, call): (String, &MockToolCall)| {
-            let arguments = substitute_task_id(&call.arguments, &request.results);
+            let arguments =
+                substitute_task_id(&call.resolved_arguments(&request.results), &request.results);
             match call.tool.pick(&request.offered, &arguments) {
                 Some(picked) => Ok(ServedCall {
                     call_id,
                     pending_check: call.result_check.clone(),
                     picked,
+                    narration: call.narration.clone(),
+                    reasoning: call.reasoning.clone(),
                 }),
                 None => Err(ScriptViolation::ToolNotOffered {
->>>>>>> upstream
                     conversation: request.conversation.number(),
                     call_id,
                     tool: call.tool.clone(),

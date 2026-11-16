@@ -333,12 +333,7 @@ async fn etag_refresh_is_bounded_and_single_flighted() {
 }
 #[tokio::test(start_paused = true)]
 async fn first_catalog_wait_unblocks_on_fetch_and_skips_dead_dwell() {
-<<<<<<< fork
     // A custom models endpoint: a fetch can succeed without a session, so the wait dwells regardless of any API key in the environment
-||||||| base
-    // Deployment auth: a fetch can succeed without a session, so the wait dwells regardless of any API key in the environment
-=======
->>>>>>> upstream
     let mgr = cold_manager(
         config_from_toml("[endpoints]\nmodels_base_url = \"https://models.example/v1\""),
         Arc::new(SlowEndpoint {
@@ -487,7 +482,6 @@ fn stale_fetch_result_is_discarded_after_identity_change() {
 fn config_from_toml(toml: &str) -> config::Config {
     config::Config::new_from_toml_cfg(&toml::from_str(toml).unwrap()).unwrap()
 }
-<<<<<<< fork
 
 /// The user's setup: a provider with a URL, a manual `[model.*]` block on it,
 /// and the provider's autodetected listing merged in. Every model it offers
@@ -682,10 +676,6 @@ async fn a_session_waits_for_the_provider_listing() {
         .unwrap();
 }
 
-||||||| base
-
-=======
->>>>>>> upstream
 #[test]
 fn model_show_model_fingerprint_reads_catalog_flag() {
     let mgr = test_manager();
@@ -731,7 +721,6 @@ fn reasoning_effort_helpers_resolve_wire_name_to_catalog_key() {
     assert_eq!(mgr.model_default_reasoning_effort("missing-model"), None);
     assert!(mgr.model_reasoning_efforts("missing-model").is_empty());
 }
-<<<<<<< fork
 
 /// The no-thinking ladder against the catalog shapes that produce it. An
 /// autodetected gateway alias publishes no reasoning metadata at all, which
@@ -802,10 +791,6 @@ fn a_no_thinking_call_resolves_through_the_ladder_for_every_catalog_shape() {
     );
 }
 
-||||||| base
-
-=======
->>>>>>> upstream
 #[test]
 fn default_model_honors_allowlist_when_no_default_set() {
     let cfg = config_from_toml(
@@ -2226,78 +2211,6 @@ fn resolve_falls_back_to_session_when_nothing_set() {
 }
 #[test]
 #[serial]
-<<<<<<< fork
-||||||| base
-fn resolve_deployment_key_when_no_session_or_api_key() {
-    let _unset = EnvGuard::unset("XAI_API_KEY");
-    let _unset_legacy = EnvGuard::unset("GROK_CODE_XAI_API_KEY");
-    let endpoints = config::EndpointsConfig {
-        deployment_key: Some("deploy-key".to_owned()),
-        ..config::EndpointsConfig::default()
-    };
-    assert_eq!(
-        ModelFetchAuth::resolve(&endpoints, false),
-        ModelFetchAuth::Deployment,
-    );
-}
-
-#[test]
-#[serial]
-fn resolve_deployment_key_outranks_ambient_api_key() {
-    let _key = EnvGuard::set("XAI_API_KEY", "stray-env-key");
-    let endpoints = config::EndpointsConfig {
-        deployment_key: Some("deploy-key".to_owned()),
-        ..config::EndpointsConfig::default()
-    };
-    assert_eq!(
-        ModelFetchAuth::resolve(&endpoints, false),
-        ModelFetchAuth::Deployment,
-        "managed deployment_key should outrank an ambient XAI_API_KEY",
-    );
-    assert_eq!(
-        ModelFetchAuth::resolve(&endpoints, true),
-        ModelFetchAuth::Session,
-        "an active session should still win over a managed deployment",
-    );
-}
-
-#[test]
-#[serial]
-=======
-fn resolve_deployment_key_when_no_session_or_api_key() {
-    let _unset = EnvGuard::unset("XAI_API_KEY");
-    let _unset_legacy = EnvGuard::unset("GROK_CODE_XAI_API_KEY");
-    let endpoints = config::EndpointsConfig {
-        deployment_key: Some("deploy-key".to_owned()),
-        ..config::EndpointsConfig::default()
-    };
-    assert_eq!(
-        ModelFetchAuth::resolve(&endpoints, false),
-        ModelFetchAuth::Deployment,
-    );
-}
-#[test]
-#[serial]
-fn resolve_deployment_key_outranks_ambient_api_key() {
-    let _key = EnvGuard::set("XAI_API_KEY", "stray-env-key");
-    let endpoints = config::EndpointsConfig {
-        deployment_key: Some("deploy-key".to_owned()),
-        ..config::EndpointsConfig::default()
-    };
-    assert_eq!(
-        ModelFetchAuth::resolve(&endpoints, false),
-        ModelFetchAuth::Deployment,
-        "managed deployment_key should outrank an ambient XAI_API_KEY",
-    );
-    assert_eq!(
-        ModelFetchAuth::resolve(&endpoints, true),
-        ModelFetchAuth::Session,
-        "an active session should still win over a managed deployment",
-    );
-}
-#[test]
-#[serial]
->>>>>>> upstream
 fn prefetch_env_none_when_remote_fetch_disabled_despite_credentials() {
     let _key = EnvGuard::set("XAI_API_KEY", "stray-env-key");
     let endpoints = config::EndpointsConfig {
@@ -2521,7 +2434,6 @@ fn resolve_catalog_key_last_slug_match_wins() {
     let key = resolve_catalog_key(&models, &persisted).expect("slug must resolve");
     assert_eq!(key.0.as_ref(), "user-grok-build");
 }
-<<<<<<< fork
 
 /// Providers serve `opus`. The user set a limit on `beta/opus`, so that
 /// block is configured and `resolve_catalog_key` prefers it for the bare id.
@@ -2590,10 +2502,6 @@ fn route_context_window_reads_the_session_providers_limit() {
     );
 }
 
-||||||| base
-
-=======
->>>>>>> upstream
 #[test]
 fn selectable_catalog_key_for_persisted_none_when_resolved_not_available() {
     let mut models = IndexMap::new();

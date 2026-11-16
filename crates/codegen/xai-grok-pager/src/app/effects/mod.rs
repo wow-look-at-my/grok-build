@@ -3036,13 +3036,7 @@ pub(crate) fn execute(
                         refresh,
                     };
                     let req = acp::ExtRequest::new(
-<<<<<<< fork
-                        "example.invalid/skills/list",
-||||||| base
-                        "x.ai/skills/list",
-=======
                         SKILLS_LIST_METHOD,
->>>>>>> upstream
                         serde_json::value::to_raw_value(&params)
                             .expect("serialize skills/list params")
                             .into(),
@@ -3121,13 +3115,7 @@ pub(crate) fn execute(
                     "cwd": ".",
                 });
                     let req = acp::ExtRequest::new(
-<<<<<<< fork
-                        "example.invalid/skills/toggle",
-||||||| base
-                        "x.ai/skills/toggle",
-=======
                         xai_grok_shell::extensions::skills::SKILLS_TOGGLE_METHOD,
->>>>>>> upstream
                         serde_json::value::to_raw_value(&params)
                             .expect("serialize skills/toggle params")
                             .into(),
@@ -4813,115 +4801,6 @@ pub(crate) fn execute(
             let tx = acp_tx.clone();
             tasks
                 .spawn(async move {
-<<<<<<< fork
-                    let request = acp::ExtRequest::new(
-                        "example.invalid/rewind/points",
-                        serde_json::value::to_raw_value(
-                                &serde_json::json!({
-                        "sessionId": session_id.0.to_string()
-                    }),
-                            )
-                            .expect("serialize rewind/points params")
-                            .into(),
-                    );
-                    match acp_send(request, &tx).await {
-                        Ok(resp) => {
-                            let wrapper: serde_json::Value = serde_json::from_str(
-                                    resp.0.get(),
-                                )
-                                .unwrap_or_default();
-                            if let Some(err) = wrapper
-                                .get("error")
-                                .filter(|v| !v.is_null())
-                            {
-                                return TaskResult::RewindPointsFailed {
-                                    agent_id,
-                                    error: err.as_str().unwrap_or("unknown error").to_string(),
-                                };
-                            }
-                            let result_val = wrapper
-                                .get("result")
-                                .cloned()
-                                .unwrap_or(wrapper.clone());
-                            match serde_json::from_value::<
-                                crate::views::rewind::RewindPointsResponse,
-                            >(result_val) {
-                                Ok(r) => {
-                                    TaskResult::RewindPointsLoaded {
-                                        agent_id,
-                                        points: r.rewind_points,
-                                    }
-                                }
-                                Err(e) => {
-                                    TaskResult::RewindPointsFailed {
-                                        agent_id,
-                                        error: format!("invalid response: {e}"),
-                                    }
-                                }
-                            }
-                        }
-                        Err(e) => {
-                            TaskResult::RewindPointsFailed {
-                                agent_id,
-                                error: sanitize_user_error(&e.to_string()),
-                            }
-                        }
-                    }
-||||||| base
-                    let request = acp::ExtRequest::new(
-                        "x.ai/rewind/points",
-                        serde_json::value::to_raw_value(
-                                &serde_json::json!({
-                        "sessionId": session_id.0.to_string()
-                    }),
-                            )
-                            .expect("serialize rewind/points params")
-                            .into(),
-                    );
-                    match acp_send(request, &tx).await {
-                        Ok(resp) => {
-                            let wrapper: serde_json::Value = serde_json::from_str(
-                                    resp.0.get(),
-                                )
-                                .unwrap_or_default();
-                            if let Some(err) = wrapper
-                                .get("error")
-                                .filter(|v| !v.is_null())
-                            {
-                                return TaskResult::RewindPointsFailed {
-                                    agent_id,
-                                    error: err.as_str().unwrap_or("unknown error").to_string(),
-                                };
-                            }
-                            let result_val = wrapper
-                                .get("result")
-                                .cloned()
-                                .unwrap_or(wrapper.clone());
-                            match serde_json::from_value::<
-                                crate::views::rewind::RewindPointsResponse,
-                            >(result_val) {
-                                Ok(r) => {
-                                    TaskResult::RewindPointsLoaded {
-                                        agent_id,
-                                        points: r.rewind_points,
-                                    }
-                                }
-                                Err(e) => {
-                                    TaskResult::RewindPointsFailed {
-                                        agent_id,
-                                        error: format!("invalid response: {e}"),
-                                    }
-                                }
-                            }
-                        }
-                        Err(e) => {
-                            TaskResult::RewindPointsFailed {
-                                agent_id,
-                                error: sanitize_user_error(&e.to_string()),
-                            }
-                        }
-                    }
-=======
                     fetch_rewind_points(&tx, agent_id, session_id).await
                 });
         }
@@ -4930,7 +4809,6 @@ pub(crate) fn execute(
             tasks
                 .spawn(async move {
                     cancel_then_fetch_rewind_points(&tx, agent_id, session_id).await
->>>>>>> upstream
                 });
         }
         Effect::RewindExecute { agent_id, session_id, target_prompt_index } => {
@@ -5672,7 +5550,7 @@ async fn fetch_rewind_points(
     session_id: acp::SessionId,
 ) -> TaskResult {
     let request = acp::ExtRequest::new(
-        "x.ai/rewind/points",
+        "example.invalid/rewind/points",
         serde_json::value::to_raw_value(
                 &serde_json::json!({
             "sessionId": session_id.0.to_string()

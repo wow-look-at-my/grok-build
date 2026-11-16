@@ -372,19 +372,7 @@ pub(super) fn subagent_ext_replay(
             "update": update,
             "_meta": { "isReplay": true, "eventId": event_id },
         });
-<<<<<<< fork
-    acp::ExtNotification::new(
-        "example.invalid/session/update",
-        std::sync::Arc::from(serde_json::value::to_raw_value(&params).unwrap()),
-    )
-||||||| base
-    acp::ExtNotification::new(
-        "x.ai/session/update",
-        std::sync::Arc::from(serde_json::value::to_raw_value(&params).unwrap()),
-    )
-=======
-    acp_fixtures::ext_notification("x.ai/session/update", &params)
->>>>>>> upstream
+    acp_fixtures::ext_notification("example.invalid/session/update", &params)
 }
 pub(super) fn make_exit_plan_ext(
     plan_content: Option<&str>,
@@ -401,36 +389,14 @@ pub(super) fn make_exit_plan_ext_with_tool_call_id(
     xai_acp_lib::AcpArgs<acp::ExtRequest>,
     tokio::sync::oneshot::Receiver<xai_acp_lib::AcpResult<acp::ExtResponse>>,
 ) {
-<<<<<<< fork
-    let raw = serde_json::value::to_raw_value(
-            &serde_json::json!({
-            "sessionId": "sess-1",
-            "toolCallId": tool_call_id,
-            "planContent": plan_content,
-        }),
-        )
-        .unwrap();
-    let request = acp::ExtRequest::new("example.invalid/exit_plan_mode", raw.into());
-||||||| base
-    let raw = serde_json::value::to_raw_value(
-            &serde_json::json!({
-            "sessionId": "sess-1",
-            "toolCallId": tool_call_id,
-            "planContent": plan_content,
-        }),
-        )
-        .unwrap();
-    let request = acp::ExtRequest::new("x.ai/exit_plan_mode", raw.into());
-=======
     let request = acp_fixtures::ext_request(
-        "x.ai/exit_plan_mode",
+        "example.invalid/exit_plan_mode",
         &serde_json::json!({
                 "sessionId": "sess-1",
                 "toolCallId": tool_call_id,
                 "planContent": plan_content,
             }),
     );
->>>>>>> upstream
     let (tx, rx) = tokio::sync::oneshot::channel();
     (
         xai_acp_lib::AcpArgs {
@@ -475,19 +441,7 @@ pub(super) fn queue_changed_ext(session_id: &str, ids: &[&str]) -> acp::ExtNotif
         })
         .collect();
     let params = serde_json::json!({ "sessionId": session_id, "entries": entries });
-<<<<<<< fork
-    acp::ExtNotification::new(
-        "example.invalid/queue/changed",
-        std::sync::Arc::from(serde_json::value::to_raw_value(&params).unwrap()),
-    )
-||||||| base
-    acp::ExtNotification::new(
-        "x.ai/queue/changed",
-        std::sync::Arc::from(serde_json::value::to_raw_value(&params).unwrap()),
-    )
-=======
-    acp_fixtures::ext_notification("x.ai/queue/changed", &params)
->>>>>>> upstream
+    acp_fixtures::ext_notification("example.invalid/queue/changed", &params)
 }
 /// Build a `example.invalid/queue/changed` notification carrying `runningPromptId`.
 pub(super) fn queue_changed_running(
@@ -536,19 +490,7 @@ pub(super) fn queue_changed_running_ex(
     if let Some(segs) = running_combined_texts {
         json_set(&mut params, "runningCombinedTexts", serde_json::json!(segs));
     }
-<<<<<<< fork
-    acp::ExtNotification::new(
-        "example.invalid/queue/changed",
-        std::sync::Arc::from(serde_json::value::to_raw_value(&params).unwrap()),
-    )
-||||||| base
-    acp::ExtNotification::new(
-        "x.ai/queue/changed",
-        std::sync::Arc::from(serde_json::value::to_raw_value(&params).unwrap()),
-    )
-=======
-    acp_fixtures::ext_notification("x.ai/queue/changed", &params)
->>>>>>> upstream
+    acp_fixtures::ext_notification("example.invalid/queue/changed", &params)
 }
 /// Fixture: p1 runs locally; promoted queued bash b1's adoption is stashed.
 pub(super) fn app_with_running_p1_and_stashed_b1() -> AppView {
@@ -644,15 +586,7 @@ pub(super) fn make_fired_notif(
         },
         meta: None,
     };
-<<<<<<< fork
-    let raw = serde_json::value::to_raw_value(&notif).unwrap();
-    acp::ExtNotification::new("example.invalid/scheduled_task_fired", std::sync::Arc::from(raw))
-||||||| base
-    let raw = serde_json::value::to_raw_value(&notif).unwrap();
-    acp::ExtNotification::new("x.ai/scheduled_task_fired", std::sync::Arc::from(raw))
-=======
-    acp_fixtures::ext_notification("x.ai/scheduled_task_fired", &notif)
->>>>>>> upstream
+    acp_fixtures::ext_notification("example.invalid/scheduled_task_fired", &notif)
 }
 pub(super) fn make_fired_notif_with_subagent(
     session_id: &str,
@@ -670,15 +604,7 @@ pub(super) fn make_fired_notif_with_subagent(
         },
         meta: None,
     };
-<<<<<<< fork
-    let raw = serde_json::value::to_raw_value(&notif).unwrap();
-    acp::ExtNotification::new("example.invalid/scheduled_task_fired", std::sync::Arc::from(raw))
-||||||| base
-    let raw = serde_json::value::to_raw_value(&notif).unwrap();
-    acp::ExtNotification::new("x.ai/scheduled_task_fired", std::sync::Arc::from(raw))
-=======
-    acp_fixtures::ext_notification("x.ai/scheduled_task_fired", &notif)
->>>>>>> upstream
+    acp_fixtures::ext_notification("example.invalid/scheduled_task_fired", &notif)
 }
 /// Set up an app with two agents; the active view points to agent 1, but agent 0 owns the scheduled task.
 /// Handlers that gate on `active_view` will mutate the wrong agent (or silently no-op).
@@ -719,29 +645,9 @@ pub(super) fn announcements_update_notif(
     r#gen: u64,
     announcements: &[xai_grok_announcements::RemoteAnnouncement],
 ) -> acp::ExtNotification {
-<<<<<<< fork
-    acp::ExtNotification::new(
-        "example.invalid/announcements/update",
-        std::sync::Arc::from(
-            serde_json::value::to_raw_value(
-                    &serde_json::json!({ "gen": r#gen, "announcements": announcements }),
-                )
-                .unwrap(),
-        ),
-||||||| base
-    acp::ExtNotification::new(
-        "x.ai/announcements/update",
-        std::sync::Arc::from(
-            serde_json::value::to_raw_value(
-                    &serde_json::json!({ "gen": r#gen, "announcements": announcements }),
-                )
-                .unwrap(),
-        ),
-=======
     acp_fixtures::ext_notification(
-        "x.ai/announcements/update",
+        "example.invalid/announcements/update",
         &serde_json::json!({ "gen": r#gen, "announcements": announcements }),
->>>>>>> upstream
     )
 }
 /// Id of the item the banner slot currently selects (`None` means the banner is closed).
@@ -769,15 +675,7 @@ pub(super) fn make_created_ext_notif(
         },
         meta: None,
     };
-<<<<<<< fork
-    let raw = serde_json::value::to_raw_value(&notif).unwrap();
-    acp::ExtNotification::new("example.invalid/scheduled_task_created", std::sync::Arc::from(raw))
-||||||| base
-    let raw = serde_json::value::to_raw_value(&notif).unwrap();
-    acp::ExtNotification::new("x.ai/scheduled_task_created", std::sync::Arc::from(raw))
-=======
-    acp_fixtures::ext_notification("x.ai/scheduled_task_created", &notif)
->>>>>>> upstream
+    acp_fixtures::ext_notification("example.invalid/scheduled_task_created", &notif)
 }
 pub(super) fn make_deleted_ext_notif(
     session_id: &str,
@@ -804,15 +702,7 @@ pub(super) fn make_deleted_ext_notif_with_reason(
         },
         meta: is_replay.then(crate::acp::meta::ReplayMetaStamp::replayed),
     };
-<<<<<<< fork
-    let raw = serde_json::value::to_raw_value(&notif).unwrap();
-    acp::ExtNotification::new("example.invalid/scheduled_task_deleted", std::sync::Arc::from(raw))
-||||||| base
-    let raw = serde_json::value::to_raw_value(&notif).unwrap();
-    acp::ExtNotification::new("x.ai/scheduled_task_deleted", std::sync::Arc::from(raw))
-=======
-    acp_fixtures::ext_notification("x.ai/scheduled_task_deleted", &notif)
->>>>>>> upstream
+    acp_fixtures::ext_notification("example.invalid/scheduled_task_deleted", &notif)
 }
 pub(super) fn make_token_notification_message(
     session_id: &str,
@@ -987,19 +877,7 @@ pub(super) fn xai_model_switch_notif(
         },
         meta: Some(serde_json::json!({ "eventId": event_id })),
     };
-<<<<<<< fork
-    acp::ExtNotification::new(
-        "example.invalid/session/update",
-        std::sync::Arc::from(serde_json::value::to_raw_value(&payload).unwrap()),
-    )
-||||||| base
-    acp::ExtNotification::new(
-        "x.ai/session/update",
-        std::sync::Arc::from(serde_json::value::to_raw_value(&payload).unwrap()),
-    )
-=======
-    acp_fixtures::ext_notification("x.ai/session/update", &payload)
->>>>>>> upstream
+    acp_fixtures::ext_notification("example.invalid/session/update", &payload)
 }
 pub(super) fn xai_unhandled_notif(
     session_id: &str,
@@ -1010,19 +888,7 @@ pub(super) fn xai_unhandled_notif(
         update: XaiSessionUpdate::MemoryFlushStarted,
         meta: Some(serde_json::json!({ "eventId": event_id })),
     };
-<<<<<<< fork
-    acp::ExtNotification::new(
-        "example.invalid/session/update",
-        std::sync::Arc::from(serde_json::value::to_raw_value(&payload).unwrap()),
-    )
-||||||| base
-    acp::ExtNotification::new(
-        "x.ai/session/update",
-        std::sync::Arc::from(serde_json::value::to_raw_value(&payload).unwrap()),
-    )
-=======
-    acp_fixtures::ext_notification("x.ai/session/update", &payload)
->>>>>>> upstream
+    acp_fixtures::ext_notification("example.invalid/session/update", &payload)
 }
 /// Build an `agent_message_chunk` notification carrying both `totalTokens` and an explicit `eventId`, for context/dedup interaction tests.
 pub(super) fn make_token_notification_with_event(
@@ -1052,33 +918,13 @@ pub(super) fn make_token_notification_with_event(
 }
 /// Build an `example.invalid/session/prompt_complete` ext-notification for `session_id`.
 pub(super) fn prompt_complete_ext(session_id: &str) -> acp::ExtNotification {
-<<<<<<< fork
-    let raw = serde_json::value::to_raw_value(
-            &serde_json::json!({
-            "sessionId": session_id,
-            "stopReason": "end_turn",
-        }),
-        )
-        .unwrap();
-    acp::ExtNotification::new("example.invalid/session/prompt_complete", std::sync::Arc::from(raw))
-||||||| base
-    let raw = serde_json::value::to_raw_value(
-            &serde_json::json!({
-            "sessionId": session_id,
-            "stopReason": "end_turn",
-        }),
-        )
-        .unwrap();
-    acp::ExtNotification::new("x.ai/session/prompt_complete", std::sync::Arc::from(raw))
-=======
     acp_fixtures::ext_notification(
-        "x.ai/session/prompt_complete",
+        "example.invalid/session/prompt_complete",
         &serde_json::json!({
                 "sessionId": session_id,
                 "stopReason": "end_turn",
             }),
     )
->>>>>>> upstream
 }
 /// Insert a fresh agent at `id` with an optional pre-assigned session id.
 pub(super) fn insert_agent(app: &mut AppView, id: AgentId, session_id: Option<&str>) {
@@ -1097,15 +943,7 @@ pub(super) fn prompt_complete_ext_with_reason(
     if let Some(r) = agent_result {
         json_set(&mut payload, "agentResult", serde_json::json!(r));
     }
-<<<<<<< fork
-    let raw = serde_json::value::to_raw_value(&payload).unwrap();
-    acp::ExtNotification::new("example.invalid/session/prompt_complete", std::sync::Arc::from(raw))
-||||||| base
-    let raw = serde_json::value::to_raw_value(&payload).unwrap();
-    acp::ExtNotification::new("x.ai/session/prompt_complete", std::sync::Arc::from(raw))
-=======
-    acp_fixtures::ext_notification("x.ai/session/prompt_complete", &payload)
->>>>>>> upstream
+    acp_fixtures::ext_notification("example.invalid/session/prompt_complete", &payload)
 }
 /// Failed `example.invalid/session/prompt_complete` carrying the typed `errorKind`.
 /// Built through the typed [`PromptCompletePayload`] so the test wire shape can never drift from what `handle_prompt_complete` parses.
@@ -1472,19 +1310,7 @@ pub(super) fn xai_turn_completed_notif(
         },
         meta: Some(serde_json::json!({ "isReplay": is_replay })),
     };
-<<<<<<< fork
-    acp::ExtNotification::new(
-        "example.invalid/session/update",
-        std::sync::Arc::from(serde_json::value::to_raw_value(&payload).unwrap()),
-    )
-||||||| base
-    acp::ExtNotification::new(
-        "x.ai/session/update",
-        std::sync::Arc::from(serde_json::value::to_raw_value(&payload).unwrap()),
-    )
-=======
-    acp_fixtures::ext_notification("x.ai/session/update", &payload)
->>>>>>> upstream
+    acp_fixtures::ext_notification("example.invalid/session/update", &payload)
 }
 /// Replay `TurnCompleted` with optional elapsed, agent_result, and extra `_meta`.
 pub(super) fn xai_turn_completed_replay(
@@ -1514,19 +1340,7 @@ pub(super) fn xai_turn_completed_replay(
         },
         meta: Some(meta),
     };
-<<<<<<< fork
-    acp::ExtNotification::new(
-        "example.invalid/session/update",
-        std::sync::Arc::from(serde_json::value::to_raw_value(&payload).unwrap()),
-    )
-||||||| base
-    acp::ExtNotification::new(
-        "x.ai/session/update",
-        std::sync::Arc::from(serde_json::value::to_raw_value(&payload).unwrap()),
-    )
-=======
-    acp_fixtures::ext_notification("x.ai/session/update", &payload)
->>>>>>> upstream
+    acp_fixtures::ext_notification("example.invalid/session/update", &payload)
 }
 /// Failed `TurnCompleted` carrying `agent_result` plus the typed `error_kind` field.
 /// Callers pass an `agent_result` with no canonical truncation text.
@@ -1551,19 +1365,7 @@ pub(super) fn xai_turn_completed_failed_with_error_kind(
         },
         meta: Some(serde_json::json!({ "isReplay": is_replay })),
     };
-<<<<<<< fork
-    acp::ExtNotification::new(
-        "example.invalid/session/update",
-        std::sync::Arc::from(serde_json::value::to_raw_value(&payload).unwrap()),
-    )
-||||||| base
-    acp::ExtNotification::new(
-        "x.ai/session/update",
-        std::sync::Arc::from(serde_json::value::to_raw_value(&payload).unwrap()),
-    )
-=======
-    acp_fixtures::ext_notification("x.ai/session/update", &payload)
->>>>>>> upstream
+    acp_fixtures::ext_notification("example.invalid/session/update", &payload)
 }
 /// Live `TurnCompleted` stamped with `_meta.cancelTrigger` (send-now / ctrl_c).
 pub(super) fn xai_turn_completed_notif_with_cancel_trigger(
@@ -1590,19 +1392,7 @@ pub(super) fn xai_turn_completed_notif_with_cancel_trigger(
             }),
         ),
     };
-<<<<<<< fork
-    acp::ExtNotification::new(
-        "example.invalid/session/update",
-        std::sync::Arc::from(serde_json::value::to_raw_value(&payload).unwrap()),
-    )
-||||||| base
-    acp::ExtNotification::new(
-        "x.ai/session/update",
-        std::sync::Arc::from(serde_json::value::to_raw_value(&payload).unwrap()),
-    )
-=======
-    acp_fixtures::ext_notification("x.ai/session/update", &payload)
->>>>>>> upstream
+    acp_fixtures::ext_notification("example.invalid/session/update", &payload)
 }
 /// A live durable `TurnCompleted`, optionally stamped with the shell completion clock (`agentTimestampMs`) the wake marker's elapsed reads.
 pub(super) fn xai_wake_turn_completed_notif(
@@ -1627,19 +1417,7 @@ pub(super) fn xai_wake_turn_completed_notif(
         },
         meta: Some(meta),
     };
-<<<<<<< fork
-    acp::ExtNotification::new(
-        "example.invalid/session/update",
-        std::sync::Arc::from(serde_json::value::to_raw_value(&payload).unwrap()),
-    )
-||||||| base
-    acp::ExtNotification::new(
-        "x.ai/session/update",
-        std::sync::Arc::from(serde_json::value::to_raw_value(&payload).unwrap()),
-    )
-=======
-    acp_fixtures::ext_notification("x.ai/session/update", &payload)
->>>>>>> upstream
+    acp_fixtures::ext_notification("example.invalid/session/update", &payload)
 }
 /// Build a `HookExecution` update (one successful run) on the `example.invalid/session/update` rail, optionally stamped `isReplay`.
 /// `prompt_id == None` models pre-attribution shells.

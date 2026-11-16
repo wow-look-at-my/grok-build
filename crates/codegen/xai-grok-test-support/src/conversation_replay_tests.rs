@@ -155,7 +155,6 @@ fn calls_are_answered_in_order_until_their_results_arrive_then_the_reply() {
 }
 
 #[test]
-<<<<<<< fork
 fn a_call_takes_an_argument_from_an_earlier_result() {
     let from_shell = MockToolCall::new(Tool::Read, json!({ "target_file": "SAVED_PATH" }))
         .argument_from_result("SAVED_PATH", "call_mock_1_1", r"written to: (\S+)\.")
@@ -181,8 +180,10 @@ fn a_call_takes_an_argument_from_an_earlier_result() {
             json!({ "target_file": "/s/abc/mcp/x.json" })
         ),
         second
-||||||| base
-=======
+    );
+}
+
+#[test]
 fn parallel_calls_are_answered_in_one_response_and_the_reply_waits_for_every_result() {
     let respond = chat_scripts(vec![
         Conversation::nth(1)
@@ -225,7 +226,6 @@ fn parallel_calls_are_answered_in_one_response_and_the_reply_waits_for_every_res
             reply("ALL-DONE"),
         ],
         [first, partial, complete]
->>>>>>> upstream
     );
 }
 

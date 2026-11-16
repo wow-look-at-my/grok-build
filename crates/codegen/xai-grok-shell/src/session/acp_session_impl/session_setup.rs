@@ -548,14 +548,8 @@ impl SessionActor {
         let mut config_changed = false;
         let mut updated_config = current_config.clone();
         if current_config.context_window != new_context_window
-<<<<<<< fork
             && !window_pinned
-            && self.compaction.context_window_override.is_none()
-||||||| base
-            && self.compaction.context_window_override.is_none()
-=======
             && !self.is_context_window_fixed(current_config.context_window)
->>>>>>> upstream
         {
             tracing::info!(
                 old_context_window = current_config.context_window.get(),
@@ -599,17 +593,11 @@ impl SessionActor {
         let mut new_max_completion_tokens = current_config.max_completion_tokens;
         if let Some(new_cw) = metadata.context_window.and_then(std::num::NonZeroU64::new)
             && current_config.context_window != new_cw
-<<<<<<< fork
-            && self.compaction.context_window_override.is_none()
+            && !self.is_context_window_fixed(current_config.context_window)
             && self
                 .models_manager
                 .pinned_route_context_window(&current_config.model, &current_config.base_url)
                 .is_none()
-||||||| base
-            && self.compaction.context_window_override.is_none()
-=======
-            && !self.is_context_window_fixed(current_config.context_window)
->>>>>>> upstream
         {
             if new_cw < current_config.context_window {
                 tracing::warn!(
