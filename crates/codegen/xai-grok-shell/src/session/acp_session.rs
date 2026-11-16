@@ -218,14 +218,10 @@ use extensions::*;
 #[path = "acp_session_impl/memory_dream.rs"]
 mod memory_dream;
 use memory_dream::*;
-<<<<<<< fork
 #[path = "acp_session_impl/goal_hold.rs"]
 mod goal_hold;
-||||||| base
-=======
 #[path = "acp_session_impl/batch_memory_dream.rs"]
 mod batch_memory_dream;
->>>>>>> upstream
 #[path = "acp_session_impl/goal_support.rs"]
 mod goal_support;
 #[path = "acp_session_impl/memory_capture.rs"]
