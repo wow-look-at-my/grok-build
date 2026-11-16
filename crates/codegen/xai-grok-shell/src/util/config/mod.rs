@@ -16,7 +16,8 @@ mod worktree;
 
 pub use announcements::*;
 pub use campaigns::{
-    CampaignModelsDefault, campaign_driven_models_default, persist_models_default,
+    CampaignModelsDefault, campaign_driven_models_default, load_effective_config,
+    load_effective_config_disk_only, load_effective_config_with_layers, persist_models_default,
     sync_campaign_fields,
 };
 pub use consent::*;
@@ -31,10 +32,8 @@ pub use settings_writes::*;
 pub use tips::*;
 pub use worktree::*;
 pub use xai_grok_config::effective_config::{
-    EffectiveConfigLayers, load_effective_config, load_effective_config_with_layers,
-    remote_campaigns_from_settings, set_remote_campaigns_from_settings,
+    EffectiveConfigLayers, remote_campaigns_from_settings, set_remote_campaigns_from_settings,
 };
-pub use xai_grok_config::load_effective_config_disk_only;
 // These types live in `xai-grok-config`; the re-export keeps `crate::util::config::{RemoteSettings, GoalRoleModel}` working
 pub use xai_grok_config_types::{
     CampaignOverride, ConsentGate, ContextualHintsRemote, DisplayRefreshSettings,

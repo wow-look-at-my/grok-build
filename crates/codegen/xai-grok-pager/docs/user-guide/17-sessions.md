@@ -165,7 +165,10 @@ When **Confirm before rewind** is on (default in `/settings`), every pick asks f
 
 ```
 /compact
+/compact [context]
 ```
+
+The optional `context` argument lets you give more instructions about what to preserve during compaction.
 
 ### Auto-Compact
 

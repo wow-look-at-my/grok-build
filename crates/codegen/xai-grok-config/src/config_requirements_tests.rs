@@ -118,12 +118,6 @@ models_base_url = \"https://models.example\"
 models_list_url = \"https://models.example/list\"
 trace_upload_url = \"https://traces.example\"
 feedback_base_url = \"https://feedback.example\"
-deployment_key = \"deploy-secret\"
-trace_upload_bucket = \"trace-bucket\"
-trace_upload_region = \"us-east-1\"
-trace_upload_credentials_file = \"/var/creds\"
-trace_upload_endpoint_url = \"https://upload.example\"
-trace_upload_credentials = \"upload-secret\"
 
 [telemetry]
 events_url = \"https://events.example\"
@@ -150,15 +144,9 @@ mixpanel_token = \"mix-secret\"
     let mut models_list_url = Some("other".to_owned());
     let mut trace_upload_url = Some("other".to_owned());
     let mut feedback_base_url = Some("other".to_owned());
-    let mut deployment_key = Some("other".to_owned());
     let mut events_url = Some("other".to_owned());
     let mut events_api_key = Some("other".to_owned());
     let mut mixpanel_token = Some("other".to_owned());
-    let mut trace_upload_bucket = Some("other".to_owned());
-    let mut trace_upload_region = Some("other".to_owned());
-    let mut trace_upload_credentials_file = Some("other".to_owned());
-    let mut trace_upload_endpoint_url = Some("other".to_owned());
-    let mut trace_upload_credentials = Some("other".to_owned());
 
     let mut pushes = Vec::new();
     let mut push = |path: &'static str, shown: String| pushes.push((path, shown));
@@ -188,16 +176,10 @@ mixpanel_token = \"mix-secret\"
         &mut UploadTelemetryPins {
             trace_upload_url: &mut trace_upload_url,
             feedback_base_url: &mut feedback_base_url,
-            deployment_key: &mut deployment_key,
             events_url: &mut events_url,
             events_api_key: &mut events_api_key,
             mixpanel_enabled: &mut mixpanel_enabled,
             mixpanel_token: &mut mixpanel_token,
-            trace_upload_bucket: &mut trace_upload_bucket,
-            trace_upload_region: &mut trace_upload_region,
-            trace_upload_credentials_file: &mut trace_upload_credentials_file,
-            trace_upload_endpoint_url: &mut trace_upload_endpoint_url,
-            trace_upload_credentials: &mut trace_upload_credentials,
         },
         &mut push,
     );

@@ -137,18 +137,6 @@ pub struct EndpointRequirements {
     pub trace_upload_url: Option<String>,
     #[serde(default, deserialize_with = "de_string")]
     pub feedback_base_url: Option<String>,
-    #[serde(default, deserialize_with = "de_string")]
-    pub deployment_key: Option<String>,
-    #[serde(default, deserialize_with = "de_string")]
-    pub trace_upload_bucket: Option<String>,
-    #[serde(default, deserialize_with = "de_string")]
-    pub trace_upload_region: Option<String>,
-    #[serde(default, deserialize_with = "de_string")]
-    pub trace_upload_credentials_file: Option<String>,
-    #[serde(default, deserialize_with = "de_string")]
-    pub trace_upload_endpoint_url: Option<String>,
-    #[serde(default, deserialize_with = "de_string")]
-    pub trace_upload_credentials: Option<String>,
 }
 
 #[derive(Debug, Clone, Default, PartialEq, Eq, Deserialize)]
@@ -328,13 +316,6 @@ impl RequirementsToml {
             push,
         );
         write_text(
-            pins.deployment_key,
-            self.endpoints.deployment_key.as_deref(),
-            "endpoints.deployment_key",
-            true,
-            push,
-        );
-        write_text(
             pins.events_url,
             self.telemetry.events_url.as_deref(),
             "telemetry.events_url",
@@ -358,41 +339,6 @@ impl RequirementsToml {
             pins.mixpanel_token,
             self.telemetry.mixpanel_token.as_deref(),
             "telemetry.mixpanel_token",
-            true,
-            push,
-        );
-        write_text(
-            pins.trace_upload_bucket,
-            self.endpoints.trace_upload_bucket.as_deref(),
-            "endpoints.trace_upload_bucket",
-            false,
-            push,
-        );
-        write_text(
-            pins.trace_upload_region,
-            self.endpoints.trace_upload_region.as_deref(),
-            "endpoints.trace_upload_region",
-            false,
-            push,
-        );
-        write_text(
-            pins.trace_upload_credentials_file,
-            self.endpoints.trace_upload_credentials_file.as_deref(),
-            "endpoints.trace_upload_credentials_file",
-            false,
-            push,
-        );
-        write_text(
-            pins.trace_upload_endpoint_url,
-            self.endpoints.trace_upload_endpoint_url.as_deref(),
-            "endpoints.trace_upload_endpoint_url",
-            false,
-            push,
-        );
-        write_text(
-            pins.trace_upload_credentials,
-            self.endpoints.trace_upload_credentials.as_deref(),
-            "endpoints.trace_upload_credentials",
             true,
             push,
         );
@@ -426,16 +372,10 @@ pub struct ServiceTogglePins<'a> {
 pub struct UploadTelemetryPins<'a> {
     pub trace_upload_url: &'a mut Option<String>,
     pub feedback_base_url: &'a mut Option<String>,
-    pub deployment_key: &'a mut Option<String>,
     pub events_url: &'a mut Option<String>,
     pub events_api_key: &'a mut Option<String>,
     pub mixpanel_enabled: &'a mut bool,
     pub mixpanel_token: &'a mut Option<String>,
-    pub trace_upload_bucket: &'a mut Option<String>,
-    pub trace_upload_region: &'a mut Option<String>,
-    pub trace_upload_credentials_file: &'a mut Option<String>,
-    pub trace_upload_endpoint_url: &'a mut Option<String>,
-    pub trace_upload_credentials: &'a mut Option<String>,
 }
 
 fn write_opt(

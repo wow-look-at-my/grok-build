@@ -7,7 +7,6 @@ use crate::Commit;
 pub enum CacheAuthMethod {
     Session,
     ApiKey,
-    Deployment,
 }
 
 #[derive(Clone, PartialEq, Eq)]

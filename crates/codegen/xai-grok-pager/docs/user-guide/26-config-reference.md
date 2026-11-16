@@ -251,147 +251,20 @@ User-level configuration lives in `$GROK_HOME/config.json` (default `~/.grok/con
 
 | Key | Type / Values | Requirements | Managed | Details |
 | --- | --- | --- | --- | --- |
-<<<<<<< fork
 | `memory.enabled` | `boolean` | `pin` | `user` | Memory switch. Also `GROK_MEMORY`. `false` turns memory off unless `memory_v2.enabled = true`. With v2 off, `true` turns legacy memory on. |
 | `memory.v2.archived_retention_days` | `number` | — | `user` | Retains archived memory-v2 observation files for this many days. Default: `30`. |
 | `memory.v2.automatic_dream_enabled` | `boolean` | — | `user` | Enables event-driven memory-v2 Dream. Default: `true`. |
+| `memory.v2.batch_dream_enabled` | `boolean` | — | `user` | Runs active memory-v2 Dream as batch Dream, which folds notes into topics in batches with the full topic catalog; a local value wins over remote `memory_v2.batch_dream_enabled`, then defaults to `false`. |
+| `memory.v2.batch_dream_max_batch_note_bytes` | `number` | — | `user` | Caps note bytes in one batch Dream batch, default `98304`, clamped to `16384`–`262144`. A local value wins over remote `memory_v2.batch_dream_max_batch_note_bytes`. |
+| `memory.v2.batch_dream_max_calls_per_batch` | `number` | — | `user` | Caps model calls per batch Dream batch, default `6`, clamped to `2`–`16`. A local value wins over remote `memory_v2.batch_dream_max_calls_per_batch`. |
+| `memory.v2.batch_dream_max_run_secs` | `number` | — | `user` | Caps one batch Dream run in seconds, default `1800`, clamped to `60`–`3600`; unfinished notes stay in the inbox. A local value wins over remote `memory_v2.batch_dream_max_run_secs`. |
+| `memory.v2.compact_index_enabled` | `boolean` | — | `user` | Injects a titles-only memory index into the system prompt (no topic descriptions, no pending observations) so more topics fit the 8 KiB budget; titled entries are ordered by how often the agent has read each topic, and the on-disk `MEMORY.md` is rendered the same way. A local value wins over the remote `memory_v2.compact_index_enabled`. Default: `false`. |
 | `memory.v2.capture_enabled` | `boolean` | — | `user` | Enables memory-v2 extraction and observation capture. Default: `true`. |
 | `memory.v2.capture_status_enabled` | `boolean` | — | `user` | Shows memory-v2 capture lifecycle messages in the UI for debugging. Successful captures are expandable and include generated content plus links to committed observation files. Telemetry and debug logs are always recorded. Default: `false`. |
 | `memory.v2.enabled` | `boolean` | `pin` | `user` | Memory-v2 switch. True or absent selects v2. `false` selects the legacy pipeline, which then follows `memory.enabled`. Default: `true`. |
 | `memory.v2.file_writes_enabled` | `boolean` | — | `user` | Enables all memory-v2 file mutation; `false` fails closed before scaffold creation. Default: `true`. |
 | `memory.v2.job_retention_days` | `number` | — | `user` | Retains terminal memory-v2 capture-job metadata for this many days. Default: `14`. |
 | `memory.v2.manual_dream_enabled` | `boolean` | — | `user` | Enables explicitly requested memory-v2 Dream. Default: `true`. |
-||||||| base
-| `memory.enabled` | `boolean` | `pin` | `user` | Legacy memory switch. Also `GROK_MEMORY`; superseded when the v2 gate is enabled. |
-| `memory_v2.enabled` | `boolean` | `pin` | `user` | Primary memory-v2 switch. When true, v2 takes precedence over legacy `memory.enabled`. When false or absent, legacy enablement is resolved normally. Default: `false`. |
-| `memory_v2.rollout` | `"off"`, `"record_only"`, `"shadow"`, `"active"` | — | `user` | Advanced staged-rollout control for new v2 sessions. Default: `"active"` after enabling v2. Most users should leave this unset. |
-| `memory_v2.capture_status_enabled` | `boolean` | — | `user` | Shows memory-v2 capture lifecycle messages in the UI for debugging. Successful captures are expandable and include generated content plus links to committed observation files. Telemetry and debug logs are always recorded. Default: `false`. |
-| `memory_v2.capture_enabled` | `boolean` | — | `user` | Enables memory-v2 extraction and observation capture. Default: `true`. |
-| `memory_v2.automatic_dream_enabled` | `boolean` | — | `user` | Enables event-driven memory-v2 Dream. Default: `true`. |
-| `memory_v2.manual_dream_enabled` | `boolean` | — | `user` | Enables explicitly requested memory-v2 Dream. Default: `true`. |
-| `memory_v2.file_writes_enabled` | `boolean` | — | `user` | Enables all memory-v2 file mutation; `false` fails closed before scaffold creation. Default: `true`. |
-| `memory_v2.archived_retention_days` | `number` | — | `user` | Retains archived memory-v2 observation files for this many days. Default: `30`. |
-| `memory_v2.job_retention_days` | `number` | — | `user` | Retains terminal memory-v2 capture-job metadata for this many days. Default: `14`. |
-
-### `model`
-
-| Key | Type / Values | Requirements | Managed | Details |
-| --- | --- | --- | --- | --- |
-| `model.<id>` | `table` | `yes` | `user` | Per-model override or BYOK definition. Prefer `env_key` over inline `api_key`. |
-| `model.<id>.agent_type` | `string` | `yes` | `user` | Agent definition type associated with this model. |
-| `model.<id>.api_backend` | `chat_completions / responses / messages` | `yes` | `user` | Wire protocol for this model. |
-| `model.<id>.api_base_url` | `string` | `yes` | `user` | Alternate API base used with XAI_API_KEY resolution. |
-| `model.<id>.api_key` | `string` | `yes` | `user` | Inline API key. Prefer `env_key`. Not a secret to put in a shared repo. |
-| `model.<id>.auth_provider` | `string` | `yes` | `user` | Name of a `[auth_provider.<name>]` helper that mints this model's bearer token. |
-| `model.<id>.auto_compact_threshold_percent` | `integer` | `yes` | `user` | Per-model auto-compact threshold (0-100). |
-| `model.<id>.base_url` | `string` | `yes` | `user` | Provider endpoint base URL. |
-| `model.<id>.compaction_at_tokens` | `number / table` | `yes` | `user` | Token threshold that triggers compaction for this model. |
-| `model.<id>.compactions_remaining` | `string / table` | `yes` | `user` | How compaction leftover context is sent. Alias `send_compactions_remaining`. |
-| `model.<id>.context_window` | `number` | `yes` | `user` | Context window tokens; drives auto-compact timing. |
-| `model.<id>.description` | `string` | `yes` | `user` | Optional description shown in the picker. |
-| `model.<id>.env_http_headers` | `map<string,string>` | `yes` | `user` | HTTP headers populated from environment variables when set. |
-| `model.<id>.env_key` | `string / string[]` | `yes` | `user` | Environment variable name(s) holding the provider API key. |
-| `model.<id>.extra_headers` | `map<string,string>` | `yes` | `user` | Per-request headers for this model. |
-| `model.<id>.hidden` | `boolean` | `yes` | `user` | Hide this model from the picker. Still usable via `-m`. |
-| `model.<id>.inference_idle_timeout_secs` | `number` | `yes` | `user` | Idle timeout for streaming inference on this model. |
-| `model.<id>.max_completion_tokens` | `number` | `yes` | `user` | Per-model max completion tokens. |
-| `model.<id>.max_request_bytes` | `number` | `yes` | `user` | Provider request-body cap that inline images are evicted to stay under. Unset inherits the `[model_providers.<id>]` value, then the `api_backend` default: 30 MB for `messages`, 50 MiB otherwise. |
-| `model.<id>.max_retries` | `number` | `yes` | `user` | Inference retries for this model. |
-| `model.<id>.model` | `string` | `yes` | `user` | Model id sent to the API. |
-| `model.<id>.model_family` | `string` | `yes` | `user` | Family id used for compaction and capability grouping. |
-| `model.<id>.model_provider` | `string` | `yes` | `user` | Named `[model_providers.<name>]` provider id for this model. |
-| `model.<id>.mtls_cert_dir` | `string` | `yes` | `user` | Directory containing the model endpoint's mTLS identity as `client.crt` and `client.key`, or `tls.crt` and `tls.key`; configuration is rejected unless the same model has one HTTPS `base_url` and no `api_base_url`, and requests do not follow redirects. |
-| `model.<id>.name` | `string` | `yes` | `user` | Label shown in the model picker. |
-| `model.<id>.query_params` | `map<string,string>` | `yes` | `user` | Extra query parameters on this model's requests. |
-| `model.<id>.rate_limit_retry_threshold` | `number` | `yes` | `user` | Total-attempt ceiling for rate-limited requests, capped by the resolved `max_retries`; when configured, it disables the separate subagent 429 wait loop. |
-| `model.<id>.reasoning_effort` | `string` | `yes` | `user` | Deprecated per-model effort; prefer `reasoning_efforts`. |
-| `model.<id>.reasoning_efforts` | `array of tables` | `yes` | `user` | Allowed reasoning-effort values for this model. When omitted, the menu comes from the endpoint's `/v1/models` row (`reasoning_efforts`, or `capabilities.reasoning_effort` when that is absent). |
-| `model.<id>.reasoning_summary` | `none / auto / concise / detailed` | `yes` | `user` | Responses API `reasoning.summary` for this model; default `concise`. `none` omits the field for endpoints that reject it (e.g. AWS Bedrock Mantle). |
-| `model.<id>.show_model_fingerprint` | `boolean` | `yes` | `user` | Show the provider model fingerprint in the UI when present. |
-| `model.<id>.stream_tool_calls` | `boolean` | `yes` | `user` | Per-model tool-call streaming request shape. |
-| `model.<id>.subagent_rate_limit_max_attempts` | `number` | `yes` | `user` | Maximum subagent 429 wait-loop attempts when `rate_limit_retry_threshold` is unset; default 8, maximum 32, and `0` disables the wait loop. |
-| `model.<id>.supported_in_api` | `boolean` | `yes` | `user` | Whether this catalog entry is offered as a public API model. |
-| `model.<id>.supports_backend_search` | `boolean` | `yes` | `user` | Whether the endpoint supports Grok-hosted server-side search tools. |
-| `model.<id>.supports_reasoning_effort` | `boolean` | `yes` | `user` | Deprecated; prefer `reasoning_efforts`. An explicit `false` keeps the model out of any menu it would otherwise inherit from the endpoint or from a same-model catalog entry. |
-| `model.<id>.system_prompt_label` | `string` | `yes` | `user` | Per-model system-prompt identity label. |
-| `model.<id>.temperature` | `number` | `yes` | `user` | Per-model sampling temperature. |
-| `model.<id>.top_p` | `number` | `yes` | `user` | Per-model top_p. |
-| `model.<id>.use_concise` | `boolean` | `yes` | `user` | Use the concise tool-description pack for this model. |
-
-### `model_providers`
-
-| Key | Type / Values | Requirements | Managed | Details |
-| --- | --- | --- | --- | --- |
-| `model_providers.<name>` | `table` | `yes` | `user` | Named custom model provider definition. |
-=======
-| `memory.enabled` | `boolean` | `pin` | `user` | Legacy memory switch. Also `GROK_MEMORY`; superseded when the v2 gate is enabled. |
-| `memory_v2.enabled` | `boolean` | `pin` | `user` | Primary memory-v2 switch. When true, v2 takes precedence over legacy `memory.enabled`. When false or absent, legacy enablement is resolved normally. Default: `false`. |
-| `memory_v2.rollout` | `"off"`, `"record_only"`, `"shadow"`, `"active"` | — | `user` | Advanced staged-rollout control for new v2 sessions. Default: `"active"` after enabling v2. Most users should leave this unset. |
-| `memory_v2.capture_status_enabled` | `boolean` | — | `user` | Shows memory-v2 capture lifecycle messages in the UI for debugging. Successful captures are expandable and include generated content plus links to committed observation files. Telemetry and debug logs are always recorded. Default: `false`. |
-| `memory_v2.capture_enabled` | `boolean` | — | `user` | Enables memory-v2 extraction and observation capture. Default: `true`. |
-| `memory_v2.automatic_dream_enabled` | `boolean` | — | `user` | Enables event-driven memory-v2 Dream. Default: `true`. |
-| `memory_v2.manual_dream_enabled` | `boolean` | — | `user` | Enables explicitly requested memory-v2 Dream. Default: `true`. |
-| `memory_v2.batch_dream_enabled` | `boolean` | — | `user` | Runs active memory-v2 Dream as batch Dream, which folds notes into topics in batches with the full topic catalog; a local value wins over remote `memory_v2.batch_dream_enabled`, then defaults to `false`. |
-| `memory_v2.batch_dream_max_run_secs` | `number` | — | `user` | Caps one batch Dream run in seconds, default `1800`, clamped to `60`–`3600`; unfinished notes stay in the inbox. A local value wins over remote `memory_v2.batch_dream_max_run_secs`. |
-| `memory_v2.batch_dream_max_calls_per_batch` | `number` | — | `user` | Caps model calls per batch Dream batch, default `6`, clamped to `2`–`16`. A local value wins over remote `memory_v2.batch_dream_max_calls_per_batch`. |
-| `memory_v2.batch_dream_max_batch_note_bytes` | `number` | — | `user` | Caps note bytes in one batch Dream batch, default `98304`, clamped to `16384`–`262144`. A local value wins over remote `memory_v2.batch_dream_max_batch_note_bytes`. |
-| `memory_v2.compact_index_enabled` | `boolean` | — | `user` | Injects a titles-only memory index into the system prompt (no topic descriptions, no pending observations) so more topics fit the 8 KiB budget; titled entries are ordered by how often the agent has read each topic, and the on-disk `MEMORY.md` is rendered the same way. A local value wins over the remote `memory_v2.compact_index_enabled`. Default: `false`. |
-| `memory_v2.file_writes_enabled` | `boolean` | — | `user` | Enables all memory-v2 file mutation; `false` fails closed before scaffold creation. Default: `true`. |
-| `memory_v2.archived_retention_days` | `number` | — | `user` | Retains archived memory-v2 observation files for this many days. Default: `30`. |
-| `memory_v2.job_retention_days` | `number` | — | `user` | Retains terminal memory-v2 capture-job metadata for this many days. Default: `14`. |
-
-### `model`
-
-| Key | Type / Values | Requirements | Managed | Details |
-| --- | --- | --- | --- | --- |
-| `model.<id>` | `table` | `yes` | `user` | Per-model override or BYOK definition. Prefer `env_key` over inline `api_key`. |
-| `model.<id>.agent_type` | `string` | `yes` | `user` | Agent definition type associated with this model. |
-| `model.<id>.api_backend` | `chat_completions / responses / messages` | `yes` | `user` | Wire protocol for this model. |
-| `model.<id>.api_base_url` | `string` | `yes` | `user` | Alternate API base used with XAI_API_KEY resolution. |
-| `model.<id>.api_key` | `string` | `yes` | `user` | Inline API key. Prefer `env_key`. Not a secret to put in a shared repo. |
-| `model.<id>.auth_provider` | `string` | `yes` | `user` | Name of a `[auth_provider.<name>]` helper that mints this model's bearer token. |
-| `model.<id>.auto_compact_threshold_percent` | `integer` | `yes` | `user` | Per-model auto-compact threshold (0-100). |
-| `model.<id>.base_url` | `string` | `yes` | `user` | Provider endpoint base URL. |
-| `model.<id>.compaction_at_tokens` | `number / table` | `yes` | `user` | Token threshold that triggers compaction for this model. |
-| `model.<id>.compactions_remaining` | `string / table` | `yes` | `user` | How compaction leftover context is sent. Alias `send_compactions_remaining`. |
-| `model.<id>.context_window` | `number` | `yes` | `user` | Context window tokens; drives auto-compact timing. |
-| `model.<id>.description` | `string` | `yes` | `user` | Optional description shown in the picker. |
-| `model.<id>.env_http_headers` | `map<string,string>` | `yes` | `user` | HTTP headers populated from environment variables when set. |
-| `model.<id>.env_key` | `string / string[]` | `yes` | `user` | Environment variable name(s) holding the provider API key. |
-| `model.<id>.extra_headers` | `map<string,string>` | `yes` | `user` | Per-request headers for this model. |
-| `model.<id>.hidden` | `boolean` | `yes` | `user` | Hide this model from the picker. Still usable via `-m`. |
-| `model.<id>.inference_idle_timeout_secs` | `number` | `yes` | `user` | Idle timeout for streaming inference on this model. |
-| `model.<id>.max_completion_tokens` | `number` | `yes` | `user` | Per-model max completion tokens. |
-| `model.<id>.max_request_bytes` | `number` | `yes` | `user` | Provider request-body cap that inline images are evicted to stay under. Unset inherits the `[model_providers.<id>]` value, then the `api_backend` default: 30 MB for `messages`, 50 MiB otherwise. |
-| `model.<id>.max_retries` | `number` | `yes` | `user` | Inference retries for this model. |
-| `model.<id>.model` | `string` | `yes` | `user` | Model id sent to the API. |
-| `model.<id>.model_family` | `string` | `yes` | `user` | Family id used for compaction and capability grouping. |
-| `model.<id>.model_provider` | `string` | `yes` | `user` | Named `[model_providers.<name>]` provider id for this model. |
-| `model.<id>.mtls_cert_dir` | `string` | `yes` | `user` | Directory containing the model endpoint's mTLS identity as `client.crt` and `client.key`, or `tls.crt` and `tls.key`; configuration is rejected unless the same model has one HTTPS `base_url` and no `api_base_url`, and requests do not follow redirects. |
-| `model.<id>.name` | `string` | `yes` | `user` | Label shown in the model picker. |
-| `model.<id>.notice` | `table` (`severity` = `info / warning / critical`, `text`, `label`) | `yes` | `user` | Message shown above the prompt while this model is selected, cleared for this model by a blank `text`. |
-| `model.<id>.query_params` | `map<string,string>` | `yes` | `user` | Extra query parameters on this model's requests. |
-| `model.<id>.rate_limit_retry_threshold` | `number` | `yes` | `user` | Total-attempt ceiling for rate-limited requests, capped by the resolved `max_retries`; when configured, it disables the separate subagent 429 wait loop. |
-| `model.<id>.reasoning_effort` | `string` | `yes` | `user` | Deprecated per-model effort; prefer `reasoning_efforts`. |
-| `model.<id>.reasoning_efforts` | `array of tables` | `yes` | `user` | Allowed reasoning-effort values for this model. When omitted, the menu comes from the endpoint's `/v1/models` row (`reasoning_efforts`, or `capabilities.reasoning_effort` when that is absent). |
-| `model.<id>.reasoning_summary` | `none / auto / concise / detailed` | `yes` | `user` | Responses API `reasoning.summary` for this model; default `concise`. `none` omits the field for endpoints that reject it (e.g. AWS Bedrock Mantle). |
-| `model.<id>.show_model_fingerprint` | `boolean` | `yes` | `user` | Show the provider model fingerprint in the UI when present. |
-| `model.<id>.stream_tool_calls` | `boolean` | `yes` | `user` | Per-model tool-call streaming request shape. |
-| `model.<id>.subagent_rate_limit_max_attempts` | `number` | `yes` | `user` | Maximum subagent 429 wait-loop attempts when `rate_limit_retry_threshold` is unset; default 8, maximum 32, and `0` disables the wait loop. |
-| `model.<id>.supported_in_api` | `boolean` | `yes` | `user` | Whether this catalog entry is offered as a public API model. |
-| `model.<id>.supports_backend_search` | `boolean` | `yes` | `user` | Whether the endpoint supports Grok-hosted server-side search tools. |
-| `model.<id>.supports_reasoning_effort` | `boolean` | `yes` | `user` | Deprecated; prefer `reasoning_efforts`. An explicit `false` keeps the model out of any menu it would otherwise inherit from the endpoint or from a same-model catalog entry. |
-| `model.<id>.system_prompt_label` | `string` | `yes` | `user` | Per-model system-prompt identity label. |
-| `model.<id>.temperature` | `number` | `yes` | `user` | Per-model sampling temperature. |
-| `model.<id>.top_p` | `number` | `yes` | `user` | Per-model top_p. |
-| `model.<id>.use_concise` | `boolean` | `yes` | `user` | Use the concise tool-description pack for this model. |
-
-### `model_providers`
-
-| Key | Type / Values | Requirements | Managed | Details |
-| --- | --- | --- | --- | --- |
-| `model_providers.<name>` | `table` | `yes` | `user` | Named custom model provider definition. |
->>>>>>> upstream
 
 ### `models`
 
@@ -433,6 +306,7 @@ User-level configuration lives in `$GROK_HOME/config.json` (default `~/.grok/con
 | `models.definitions.<id>.model_provider` | `string` | `yes` | `user` | Named `models.providers.<name>` provider id for this model. |
 | `models.definitions.<id>.model` | `string` | `yes` | `user` | Model id sent to the API. |
 | `models.definitions.<id>.name` | `string` | `yes` | `user` | Label shown in the model picker. |
+| `models.definitions.<id>.notice` | `table` (`severity` = `info / warning / critical`, `text`, `label`) | `yes` | `user` | Message shown above the prompt while this model is selected, cleared for this model by a blank `text`. |
 | `models.definitions.<id>.query_params` | `map<string,string>` | `yes` | `user` | Extra query parameters on this model's requests. |
 | `models.definitions.<id>.rate_limit_retry_threshold` | `number` | `yes` | `user` | Total-attempt ceiling for rate-limited requests, capped by the resolved `max_retries`; when configured, it disables the separate subagent 429 wait loop. |
 | `models.definitions.<id>.reasoning_effort` | `string` | `yes` | `user` | Deprecated per-model effort; prefer `reasoning_efforts`. |

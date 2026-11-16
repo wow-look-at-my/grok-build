@@ -1,32 +1,29 @@
-//! `/compact` takes no arguments.
+//! `/compact` takes an optional context argument.
 //! `run` returns `CommandResult::QueueCommand` so the dispatch layer enqueues it as `QueueEntryKind::Command`.
 
 use crate::slash::command::{CommandExecCtx, CommandResult, SlashCommand, slash_meta};
 
-const NO_ARGS: &str = "/compact takes no arguments.";
-
-/// Compact the conversation history.
+/// Compact the conversation history, optionally with a focus context.
 pub struct CompactCommand;
 
 impl SlashCommand for CompactCommand {
     slash_meta! {
         name: "compact",
         description: "Compact conversation history",
-        usage: "/compact",
+        usage: "/compact compaction instructions",
+        takes_args: true,
+        args_required: false,
         session_scoped: true,
-    }
-
-    /// Refusing here, before the send path runs, also keeps an edited queue row in place
-    /// (`EditedCommandGate` pre-checks this hook).
-    fn submission_refusal(&self, args: &str, _voice_owns_prompt: bool) -> Option<&'static str> {
-        (!args.trim().is_empty()).then_some(NO_ARGS)
+        arg_placeholder: "compaction instructions",
     }
 
     fn run(&self, _ctx: &mut CommandExecCtx, args: &str) -> CommandResult {
-        if args.trim().is_empty() {
-            CommandResult::QueueCommand("/compact".to_string())
+        // Re-emit as queue command, preserving the full text.
+        let text = if args.trim().is_empty() {
+            "/compact".to_string()
         } else {
-            CommandResult::Error(NO_ARGS.to_string())
-        }
+            format!("/compact {}", args)
+        };
+        CommandResult::QueueCommand(text)
     }
 }
