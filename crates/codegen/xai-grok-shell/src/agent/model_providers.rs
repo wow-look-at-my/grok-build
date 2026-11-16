@@ -70,10 +70,7 @@ pub struct ModelProviderConfig {
     /// Extra top-level fields merged into every request body this provider serves.
     #[schemars(with = "IndexMap<String, serde_json::Value>")]
     pub extra_body: IndexMap<String, toml::Value>,
-||||||| base
-=======
     pub context_windows: Option<Vec<NonZeroU64>>,
->>>>>>> upstream
     /// Request-body cap of this endpoint; inherited by models that set none of their own.
     pub max_request_bytes: Option<NonZeroU64>,
 }

@@ -4209,31 +4209,10 @@ impl McpClient {
         config: &HttpConfig,
         server_name: &str,
         warn_budget: crate::mcp_http_client::WarnBudget,
-<<<<<<< fork
     ) -> Result<
         crate::mcp_http_client::McpHttpClient<crate::net_http_client::NetHttpClient>,
         McpError,
     > {
-        let mut headers = parse_config_headers(
-            server_name,
-            "transport",
-            config
-                .headers
-                .iter()
-                .map(|(key, value)| (key.as_str(), value.as_str())),
-        );
-||||||| base
-    ) -> Result<crate::mcp_http_client::McpHttpClient<reqwest::Client>, McpError> {
-        let mut headers = parse_config_headers(
-            server_name,
-            "transport",
-            config
-                .headers
-                .iter()
-                .map(|(key, value)| (key.as_str(), value.as_str())),
-        );
-=======
-    ) -> Result<crate::mcp_http_client::McpHttpClient<reqwest::Client>, McpError> {
         let mut headers = if config.bearer_token_file.is_some() {
             parse_config_headers(
                 server_name,

@@ -8,64 +8,7 @@ fn agent_ref(app: &AppView, id: AgentId) -> &AgentView {
     };
     agent
 }
-<<<<<<< fork
 
-||||||| base
-
-fn send_minimal_btw(app: &mut AppView, question: &str) -> uuid::Uuid {
-    match dispatch(
-        Action::SendBtw {
-            question: question.into(),
-            images: Vec::new(),
-        },
-        app,
-    )
-    .as_slice()
-    {
-        [
-            Effect::SendBtw {
-                minimal_request_id: Some(id),
-                ..
-            },
-        ] => *id,
-        other => panic!("expected correlated minimal /btw effect, got {other:?}"),
-    }
-}
-
-fn esc() -> crossterm::event::Event {
-    crossterm::event::Event::Key(crossterm::event::KeyEvent::new(
-        crossterm::event::KeyCode::Esc,
-        crossterm::event::KeyModifiers::NONE,
-    ))
-}
-
-=======
-fn send_minimal_btw(app: &mut AppView, question: &str) -> uuid::Uuid {
-    match dispatch(
-        Action::SendBtw {
-            question: question.into(),
-            images: Vec::new(),
-        },
-        app,
-    )
-    .as_slice()
-    {
-        [
-            Effect::SendBtw {
-                minimal_request_id: Some(id),
-                ..
-            },
-        ] => *id,
-        other => panic!("expected correlated minimal /btw effect, got {other:?}"),
-    }
-}
-fn esc() -> crossterm::event::Event {
-    crossterm::event::Event::Key(crossterm::event::KeyEvent::new(
-        crossterm::event::KeyCode::Esc,
-        crossterm::event::KeyModifiers::NONE,
-    ))
-}
->>>>>>> upstream
 #[test]
 fn remember_save_carries_the_session_pinned_mode() {
     let mut app = test_app_with_agent();

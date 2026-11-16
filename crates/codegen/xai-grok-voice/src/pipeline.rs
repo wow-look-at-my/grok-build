@@ -497,10 +497,13 @@ fn start_clip_session(
     let language = crate::language::language_for_api(&config.language).to_owned();
     let max_bytes = max_clip_bytes(sample_rate);
     let out = events.clone();
-    let reader = tokio::spawn(async move {
+    // The handle is kept in `ActivePtt.reader`: the pipeline aborts it on the next
+    // press and at shutdown.
+    #[allow(clippy::disallowed_methods)]
+    let reader = xai_spawn::spawn(async move {
         // `stop` joins the capture thread, so it runs off the runtime
         let stop_capture = || async move {
-            if let Err(error) = tokio::task::spawn_blocking(move || capture.stop()).await {
+            if let Err(error) = xai_spawn::spawn_blocking(move || capture.stop()).await {
                 tracing::warn!(%error, "voice: capture stop task failed");
             }
         };

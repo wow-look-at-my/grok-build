@@ -1040,91 +1040,6 @@ impl AgentBuilder {
             tool_config.tools = listed.tools.into_iter().cloned().collect();
         }
         if !definition.tools.is_empty() {
-<<<<<<< fork
-            let has_agent_entry = definition
-                .tools
-                .iter()
-                .any(|t| AGENT_TASK_CLASSIFIER_RE.is_match(t));
-            let task_deps = ["task", "get_task_output", "kill_task"];
-            let registered_tool_ids = tool_bridge_builder.known_tool_ids();
-            let present_kinds: std::collections::HashSet<ToolKind> =
-                tool_config.tools.iter().filter_map(|tc| tc.kind).collect();
-            let mut allow_kinds: std::collections::HashSet<ToolKind> =
-                std::collections::HashSet::new();
-            let mut unresolved: Vec<&str> = Vec::new();
-            let mut recognized_but_unavailable: Vec<&str> = Vec::new();
-            for t in &definition.tools {
-                if AGENT_TASK_CLASSIFIER_RE.is_match(t) {
-                    continue;
-                }
-                if t.starts_with("mcp__") {
-                    continue;
-                }
-                if names_removed_wait_tool(t) {
-                    tracing::warn!(
-                        agent = %definition.name,
-                        tool = %t,
-                        "tools allowlist names the wait tool, which does not exist; ignoring it"
-                    );
-                    continue;
-                }
-                if tool_config.tools.iter().any(|tc| tool_id_eq(t, &tc.id)) {
-                    continue;
-                }
-                match claude_tool_kind(t) {
-                    Some(kind) => {
-                        if present_kinds.contains(&kind) {
-                            allow_kinds.insert(kind);
-                        } else {
-                            recognized_but_unavailable.push(t);
-                        }
-                    }
-                    None if registered_tool_ids.iter().any(|id| tool_id_eq(t, id)) => {
-                        recognized_but_unavailable.push(t);
-                    }
-                    None => unresolved.push(t),
-                }
-            }
-            if !recognized_but_unavailable.is_empty() {
-||||||| base
-            let has_agent_entry = definition
-                .tools
-                .iter()
-                .any(|t| AGENT_TASK_CLASSIFIER_RE.is_match(t));
-            let task_deps = ["task", "get_task_output", "kill_task", "wait_tasks"];
-            let registered_tool_ids = tool_bridge_builder.known_tool_ids();
-            let present_kinds: std::collections::HashSet<ToolKind> =
-                tool_config.tools.iter().filter_map(|tc| tc.kind).collect();
-            let mut allow_kinds: std::collections::HashSet<ToolKind> =
-                std::collections::HashSet::new();
-            let mut unresolved: Vec<&str> = Vec::new();
-            let mut recognized_but_unavailable: Vec<&str> = Vec::new();
-            for t in &definition.tools {
-                if AGENT_TASK_CLASSIFIER_RE.is_match(t) {
-                    continue;
-                }
-                if t.starts_with("mcp__") {
-                    continue;
-                }
-                if tool_config.tools.iter().any(|tc| tool_id_eq(t, &tc.id)) {
-                    continue;
-                }
-                match claude_tool_kind(t) {
-                    Some(kind) => {
-                        if present_kinds.contains(&kind) {
-                            allow_kinds.insert(kind);
-                        } else {
-                            recognized_but_unavailable.push(t);
-                        }
-                    }
-                    None if registered_tool_ids.iter().any(|id| tool_id_eq(t, id)) => {
-                        recognized_but_unavailable.push(t);
-                    }
-                    None => unresolved.push(t),
-                }
-            }
-            if !recognized_but_unavailable.is_empty() {
-=======
             let entries: Vec<String> = definition
                 .tools
                 .iter()
@@ -1150,7 +1065,6 @@ impl AgentBuilder {
                 &tool_config.tools,
             );
             if !listed.unmatched.is_empty() {
->>>>>>> upstream
                 tracing::debug!(
                     agent = %definition.name,
                     recognized_but_unavailable = ?listed.unmatched,

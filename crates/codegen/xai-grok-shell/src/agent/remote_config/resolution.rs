@@ -494,47 +494,6 @@ fn unselect_models_without_a_url(catalog: &mut IndexMap<String, ModelEntry>) {
     }
 }
 
-||||||| base
-/// Compiled glob matcher shared by `allowed_models`, `disabled_models`, and `hidden_models` (matched against catalog key or model id).
-pub(crate) struct ModelGlobSet(GlobSet);
-
-impl ModelGlobSet {
-    /// Compile a filter list (`Ok(None)` for `None`/empty). Fails **closed**: an invalid pattern returns `Err` listing every bad one.
-    pub(crate) fn compile(patterns: Option<&[String]>) -> Result<Option<Self>, Vec<String>> {
-        let patterns = match patterns {
-            Some(p) if !p.is_empty() => p,
-            _ => return Ok(None),
-        };
-        let mut builder = GlobSetBuilder::new();
-        let mut invalid = Vec::new();
-        for pat in patterns {
-            match Glob::new(pat) {
-                Ok(glob) => {
-                    builder.add(glob);
-                }
-                Err(_) => invalid.push(pat.clone()),
-            }
-        }
-        if !invalid.is_empty() {
-            return Err(invalid);
-        }
-        builder
-            .build()
-            .map(|set| Some(Self(set)))
-            .map_err(|e| vec![e.to_string()])
-    }
-
-    fn matches(&self, key: &str, model: &str) -> bool {
-        self.0.is_match(key) || self.0.is_match(model)
-    }
-
-    fn matches_model(&self, model: &str) -> bool {
-        self.0.is_match(model)
-    }
-}
-
-=======
->>>>>>> upstream
 /// Resolved allowlist: fleet pin, user/project list, or unrestricted.
 enum EffectiveAllowlist<'a> {
     Unrestricted,
