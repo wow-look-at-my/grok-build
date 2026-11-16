@@ -117,6 +117,9 @@
 					"features": {
 						"$ref": "#/properties/features"
 					},
+					"file_acceleration": {
+						"$ref": "#/properties/file_acceleration"
+					},
 					"hooks": {
 						"$ref": "#/properties/hooks"
 					},
@@ -358,6 +361,11 @@
 		},
 		"features": {
 			"$ref": "#/$defs/Features"
+		},
+		"file_acceleration": {
+			"$ref": "#/$defs/FileAccelerationConfig",
+			"description": "`[file_acceleration]` section: the accelerator route override, read by `session::file_acceleration::settings`.",
+			"writeOnly": true
 		},
 		"hooks": {
 			"description": "Hook commands by event name. Each event holds a list of matcher groups.",
@@ -1193,7 +1201,7 @@
 						"string",
 						"null"
 					],
-					"description": "Last banner dismiss (Accept/Customize), RFC 3339 UTC.\nWhen the remote `privacy_banner_reshow_days` is unset or 0, the banner never re-shows once this is set."
+					"description": "RFC 3339 UTC."
 				},
 				"consent": {
 					"$ref": "#/$defs/ConsentConfig"
@@ -1569,6 +1577,7 @@
 						"cmd_prefix": null,
 						"auto_background_on_timeout": null,
 						"foreground_block_budget_ms": null,
+						"default_block_until_ms": null,
 						"allow_background_operator": null,
 						"login_shell_capture": null
 					}
@@ -2431,6 +2440,9 @@
 					"features": {
 						"$ref": "#/properties/features"
 					},
+					"file_acceleration": {
+						"$ref": "#/properties/file_acceleration"
+					},
 					"hooks": {
 						"$ref": "#/properties/hooks"
 					},
@@ -2770,6 +2782,16 @@
 					"description": "How long a command may block the foreground before auto-backgrounding, in milliseconds, when `auto_background_on_timeout` is on.\n`None` uses the server default of 15s.\n`Some(0)` disables the short budget, so auto-backgrounding happens only at the model/default timeout.",
 					"default": null
 				},
+				"default_block_until_ms": {
+					"type": [
+						"integer",
+						"null"
+					],
+					"format": "uint64",
+					"minimum": 0,
+					"description": "How long a command may block the foreground, in milliseconds, when the model omits `block_until_ms`.\n`None` uses the server default of 30s.",
+					"default": null
+				},
 				"allow_background_operator": {
 					"type": [
 						"boolean",
@@ -2911,7 +2933,7 @@
 					}
 				}
 			},
-			"description": "Raw `[compat]` TOML section."
+			"description": "The `compat` config section as parsed."
 		},
 		"ConfigModelOverride": {
 			"type": "object",
@@ -2957,6 +2979,18 @@
 						"string",
 						"null"
 					],
+					"default": null
+				},
+				"notice": {
+					"anyOf": [
+						{
+							"$ref": "#/$defs/ModelNotice"
+						},
+						{
+							"type": "null"
+						}
+					],
+					"description": "A notice with blank `text` clears the inherited one.",
 					"default": null
 				},
 				"api_key": {
@@ -3064,6 +3098,18 @@
 					],
 					"format": "uint64",
 					"minimum": 0,
+					"default": null
+				},
+				"context_windows": {
+					"type": [
+						"array",
+						"null"
+					],
+					"items": {
+						"type": "integer",
+						"format": "uint64",
+						"minimum": 1
+					},
 					"default": null
 				},
 				"max_request_bytes": {
@@ -3610,7 +3656,7 @@
 						"string",
 						"null"
 					],
-					"description": "cli chat proxy base URL. `None` = unset, and every URL derived from it is blank."
+					"description": "The cli-chat-proxy base URL. `None` means unset, and every URL derived from it is blank."
 				},
 				"xai_api_base_url": {
 					"type": "string",
@@ -3629,14 +3675,14 @@
 						"string",
 						"null"
 					],
-					"description": "Optional extra access-header value."
+					"description": "An extra access header value for matching first-party hosts, used only with the optional non-production feature."
 				},
 				"models_base_url": {
 					"type": [
 						"string",
 						"null"
 					],
-					"description": "Env: `GROK_MODELS_BASE_URL`. Enables custom endpoint mode.\nList URL defaults to `{models_base_url}/models`."
+					"description": "Env: `GROK_MODELS_BASE_URL`. Setting it makes `has_custom_endpoint` true.\nThe models list URL defaults to `{models_base_url}/models`."
 				},
 				"models_list_url": {
 					"type": [
@@ -3664,42 +3710,42 @@
 						"string",
 						"null"
 					],
-					"description": "Env: `GROK_MANAGED_CONFIG_URL`. Override the managed config endpoint.\nDefaults to `{proxy_url()}/deployment/config`."
+					"description": "Env: `GROK_MANAGED_CONFIG_URL`. The managed config endpoint.\nThe default is `{proxy_url()}/deployment/config`."
 				},
 				"otel_exporter_otlp_endpoint": {
 					"type": [
 						"string",
 						"null"
 					],
-					"description": "Env: `OTEL_EXPORTER_OTLP_ENDPOINT`. OTLP collector base; `/v1/traces` is appended.\nLegacy repoint of the INTERNAL trace pipeline, deprecated in favor of `GROK_INTERNAL_OTLP_TRACES_ENDPOINT`.\nIgnored by the internal pipeline when `GROK_EXTERNAL_OTEL` is set (the standard `OTEL_*` vars then route the external stream only)."
+					"description": "Env: `OTEL_EXPORTER_OTLP_ENDPOINT`. The OTLP collector base URL, before `/v1/traces` is appended.\nThe internal trace pipeline uses it only while `external_otel_master_switch` is off, as a deprecated fallback."
 				},
 				"otel_exporter_otlp_traces_endpoint": {
 					"type": [
 						"string",
 						"null"
 					],
-					"description": "Env: `OTEL_EXPORTER_OTLP_TRACES_ENDPOINT`.\nFull traces endpoint, used verbatim; overrides `otel_exporter_otlp_endpoint`.\nSame legacy/deprecation semantics as `otel_exporter_otlp_endpoint`."
+					"description": "Env: `OTEL_EXPORTER_OTLP_TRACES_ENDPOINT`. The full traces endpoint, used verbatim and preferred over `otel_exporter_otlp_endpoint`.\nThe internal trace pipeline treats it like `otel_exporter_otlp_endpoint`."
 				},
 				"otel_exporter_otlp_headers": {
 					"type": [
 						"string",
 						"null"
 					],
-					"description": "Env: `OTEL_EXPORTER_OTLP_HEADERS`. `k=v,k2=v2`; merged onto export headers.\nSame legacy/deprecation semantics as `otel_exporter_otlp_endpoint`."
+					"description": "Env: `OTEL_EXPORTER_OTLP_HEADERS`. Extra export headers in the form `k=v,k2=v2`.\nThe internal trace pipeline treats it like `otel_exporter_otlp_endpoint`."
 				},
 				"grok_internal_otlp_traces_endpoint": {
 					"type": [
 						"string",
 						"null"
 					],
-					"description": "Env: `GROK_INTERNAL_OTLP_TRACES_ENDPOINT`. Full INTERNAL traces endpoint, used verbatim.\nDev/debug repoint of the internal span firehose (replaces the legacy `OTEL_EXPORTER_OTLP_TRACES_ENDPOINT` behavior).\nUsed by local-ic-testing / internal dev flows. Wins over the legacy `OTEL_*` vars."
+					"description": "Env: `GROK_INTERNAL_OTLP_TRACES_ENDPOINT`. The full internal traces endpoint, used verbatim and preferred over the legacy `OTEL_*` vars.\nDevelopers set it to send internal spans elsewhere, for example to a local collector."
 				},
 				"grok_internal_otlp_headers": {
 					"type": [
 						"string",
 						"null"
 					],
-					"description": "Env: `GROK_INTERNAL_OTLP_HEADERS`.\n`k=v,k2=v2` extra headers for the internal export (debug).\nWins over the legacy `OTEL_EXPORTER_OTLP_HEADERS`."
+					"description": "Env: `GROK_INTERNAL_OTLP_HEADERS`. Extra `k=v,k2=v2` debug headers for the internal export.\nThey are preferred over the legacy `OTEL_EXPORTER_OTLP_HEADERS`."
 				},
 				"otel_traces_exporter": {
 					"type": [
@@ -3731,10 +3777,9 @@
 						"string",
 						"null"
 					],
-					"description": "Read by `load_management_api_key_sync()`. Declared for `serde_ignored`."
+					"description": "`load_management_api_key_sync()` reads this key.\nDeclaring the field stops `serde_ignored` from reporting the key as unrecognized."
 				}
-			},
-			"description": "Configuration for API endpoints."
+			}
 		},
 		"EnvKeys": {
 			"anyOf": [
@@ -3955,6 +4000,10 @@
 					"type": "boolean",
 					"description": "Default off. Environment: `GROK_TERMINAL_THEME`."
 				},
+				"file_acceleration": {
+					"type": "boolean",
+					"description": "Default off. Environment: `GROK_FILE_ACCELERATION`."
+				},
 				"campaigns": {
 					"type": "boolean"
 				},
@@ -4021,6 +4070,19 @@
 				}
 			},
 			"description": "Self-reported feedback author identity (never used for authorization).\nMerged only from trusted config tiers, so a cloned repo can't inject the `command` escape hatch."
+		},
+		"FileAccelerationConfig": {
+			"type": "object",
+			"properties": {
+				"routes": {
+					"type": [
+						"string",
+						"null"
+					],
+					"description": "See [`resolve_file_acceleration_routes`]."
+				}
+			},
+			"description": "`[file_acceleration]` in config.toml."
 		},
 		"FileToolset": {
 			"oneOf": [
@@ -4423,6 +4485,10 @@
 					"description": "Name of the environment variable to read and set for `Authorization: Bearer <token>`.",
 					"type": "string"
 				},
+				"bearer_token_file": {
+					"description": "Path of a file that holds the bearer token. It is read again on every request.",
+					"type": "string"
+				},
 				"headers": {
 					"type": "object",
 					"additionalProperties": {
@@ -4491,14 +4557,13 @@
 						"format": "uint64",
 						"minimum": 0
 					},
-					"description": "Per-tool timeout overrides in seconds: `{ \"create_issue\" = 120, \"search\" = 30 }`.\nTools not listed here fall back to `tool_timeout_sec`."
+					"description": "Seconds per tool name. Tools not listed here fall back to `tool_timeout_sec`."
 				},
 				"expose_image_base64": {
 					"type": [
 						"boolean",
 						"null"
-					],
-					"description": "Also keep the raw base64 in tool-result text so agents can forward bytes via path-based tools (`base64 -d > /tmp/x.png && send_file ...`).\nIt roughly doubles the tokens per image. `_meta.mcpConfig.<server>.exposeImageBase64` overrides it."
+					]
 				}
 			}
 		},
@@ -4533,7 +4598,7 @@
 					"default": null
 				}
 			},
-			"description": "A server's setup prompt: the fields it asks for, and the answers already\nrecorded under them."
+			"description": "A server's setup prompt: the fields it asks for, and the answers already recorded under them."
 		},
 		"McpSetupDerivedValue": {
 			"type": "object",
@@ -4969,6 +5034,49 @@
 					],
 					"default": null
 				},
+				"batch_dream_enabled": {
+					"type": [
+						"boolean",
+						"null"
+					],
+					"description": "Local value wins over remote `memory_v2.batch_dream_enabled`; unset on both sides means off.\nThe Dream kill switches still apply.",
+					"default": null
+				},
+				"batch_dream_max_run_secs": {
+					"type": [
+						"integer",
+						"null"
+					],
+					"format": "uint64",
+					"minimum": 0,
+					"default": null
+				},
+				"batch_dream_max_calls_per_batch": {
+					"type": [
+						"integer",
+						"null"
+					],
+					"format": "uint",
+					"minimum": 0,
+					"default": null
+				},
+				"batch_dream_max_batch_note_bytes": {
+					"type": [
+						"integer",
+						"null"
+					],
+					"format": "uint",
+					"minimum": 0,
+					"default": null
+				},
+				"compact_index_enabled": {
+					"type": [
+						"boolean",
+						"null"
+					],
+					"description": "Inject a titles-only topic index into the system prompt; pending\nobservations and topic descriptions are left out so more topics fit the\nsame byte budget. Local value wins over remote\n`memory_v2.compact_index_enabled`; unset on both sides means off.",
+					"default": null
+				},
 				"file_writes_enabled": {
 					"type": [
 						"boolean",
@@ -5073,6 +5181,41 @@
 				}
 			},
 			"description": "One `[model_groups.<id>]` table. Every field is optional. On a compiled\ngroup, a field that is not set keeps the compiled value."
+		},
+		"ModelNotice": {
+			"type": "object",
+			"properties": {
+				"severity": {
+					"$ref": "#/$defs/ModelNoticeSeverity",
+					"default": "info"
+				},
+				"text": {
+					"type": "string"
+				},
+				"label": {
+					"type": [
+						"string",
+						"null"
+					],
+					"description": "Short badge text, such as `deprecated`."
+				}
+			}
+		},
+		"ModelNoticeSeverity": {
+			"oneOf": [
+				{
+					"type": "string",
+					"enum": [
+						"warning",
+						"critical"
+					]
+				},
+				{
+					"type": "string",
+					"const": "info",
+					"description": "Also the fallback for a severity this build does not know."
+				}
+			]
 		},
 		"ModelPricing": {
 			"type": "object",
@@ -5436,6 +5579,18 @@
 					"description": "Extra top-level fields merged into every request body this provider serves.",
 					"default": {}
 				},
+				"context_windows": {
+					"type": [
+						"array",
+						"null"
+					],
+					"items": {
+						"type": "integer",
+						"format": "uint64",
+						"minimum": 1
+					},
+					"default": null
+				},
 				"max_request_bytes": {
 					"type": [
 						"integer",
@@ -5734,7 +5889,6 @@
 					"items": {
 						"type": "string"
 					},
-					"description": "Additional plugin directory paths to load.",
 					"default": []
 				},
 				"disabled": {
@@ -6650,7 +6804,7 @@
 					]
 				}
 			},
-			"description": "Raw per-vendor compat cells parsed from `[compat.<vendor>]` TOML.\n\nResolution order is env override, this value, remote flag, default ON."
+			"description": "Per-vendor compat cells as parsed from the `compat.<vendor>` config section.\n\nResolution order is env override, this value, remote flag, default ON."
 		},
 		"VoiceConfig": {
 			"type": "object",
