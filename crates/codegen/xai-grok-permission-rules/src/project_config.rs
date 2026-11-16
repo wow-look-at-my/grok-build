@@ -2,7 +2,7 @@
 
 use std::path::{Path, PathBuf};
 
-use xai_grok_agent::repo::RepoDirChain;
+use crate::repo::RepoDirChain;
 
 /// Filename of the project-local MCP server config.
 pub const MCP_JSON_FILENAME: &str = ".mcp.json";
@@ -28,19 +28,31 @@ pub fn find_mcp_json_files(cwd: &Path) -> Vec<PathBuf> {
 }
 
 /// [`find_mcp_json_files`] over a precomputed dir chain. See [`RepoDirChain`].
-/// `pub(crate)` so the folder-trust gate's `repo_configs_present` can call it.
-pub(crate) fn find_mcp_json_files_in(chain_dirs: &[PathBuf]) -> Vec<PathBuf> {
+/// `pub` so the folder-trust gate's `repo_configs_present` can call it.
+pub fn find_mcp_json_files_in(chain_dirs: &[PathBuf]) -> Vec<PathBuf> {
     mcp_json_candidate_paths_in(chain_dirs)
         .into_iter()
         .filter(|path| path.is_file())
         .collect()
 }
 
+<<<<<<< HEAD:crates/codegen/xai-grok-workspace/src/project_config.rs
 /// True when `config_path` is the `$GROK_HOME` config file (user tier, not project), JSON or legacy TOML.
 fn is_user_grok_config_file(config_path: &Path) -> bool {
     let Some(user_home) = xai_grok_config::user_grok_home() else {
         return false;
     };
+=======
+/// True when `config_path` is `<grok_home>/config.toml` (user tier, not project).
+fn is_user_grok_config_file(config_path: &Path, grok_home: Option<&Path>) -> bool {
+    let Some(grok_home) = grok_home else {
+        return false;
+    };
+    let user_config = grok_home.join("config.toml");
+    if config_path == user_config.as_path() {
+        return true;
+    }
+>>>>>>> upstream/main:crates/codegen/xai-grok-permission-rules/src/project_config.rs
     let Ok(canonical_config) = dunce::canonicalize(config_path) else {
         return false;
     };
@@ -58,18 +70,37 @@ fn is_user_grok_config_file(config_path: &Path) -> bool {
 /// to the git repo root, repo-root (lowest) to cwd (highest), matching skills
 /// and AGENTS.md discovery.
 pub fn find_project_configs(cwd: &Path) -> Vec<PathBuf> {
-    find_project_configs_in(&RepoDirChain::resolve(cwd).dirs)
+    find_project_configs_under(
+        cwd,
+        xai_dirs::home_dir().as_deref(),
+        xai_grok_config::user_grok_home().as_deref(),
+    )
+}
+
+pub fn find_project_configs_under(
+    cwd: &Path,
+    home: Option<&Path>,
+    grok_home: Option<&Path>,
+) -> Vec<PathBuf> {
+    find_project_configs_in(&RepoDirChain::resolve_under_home(cwd, home).dirs, grok_home)
 }
 
 /// [`find_project_configs`] over a precomputed [`RepoDirChain`], repo-root-first.
-/// Excludes user-global config so `cwd == $HOME` is not a project overlay. `pub(crate)` for the folder-trust gate.
-pub(crate) fn find_project_configs_in(chain_dirs: &[PathBuf]) -> Vec<PathBuf> {
+/// Excludes user-global config so `cwd == $HOME` is not a project overlay. `pub` for the folder-trust gate.
+pub fn find_project_configs_in(chain_dirs: &[PathBuf], grok_home: Option<&Path>) -> Vec<PathBuf> {
     // `dirs` is cwd-first; reverse so repo root comes first (lowest priority) and cwd last (highest)
     chain_dirs
         .iter()
         .rev()
+<<<<<<< HEAD:crates/codegen/xai-grok-workspace/src/project_config.rs
         .map(|dir| xai_grok_config::project_config_file(dir))
         .filter(|config_path| config_path.is_file() && !is_user_grok_config_file(config_path))
+=======
+        .map(|dir| dir.join(".grok").join("config.toml"))
+        .filter(|config_path| {
+            config_path.is_file() && !is_user_grok_config_file(config_path, grok_home)
+        })
+>>>>>>> upstream/main:crates/codegen/xai-grok-permission-rules/src/project_config.rs
         .collect()
 }
 
@@ -79,29 +110,27 @@ mod tests {
 
     #[test]
     fn find_project_configs_excludes_user_grok_config_file() {
-        let Some(user_home) = xai_grok_config::user_grok_home() else {
-            return;
-        };
+        let home = tempfile::tempdir().unwrap();
+        let user_home = home.path().join(".grok");
+        std::fs::create_dir_all(&user_home).unwrap();
         let user_config = user_home.join("config.toml");
-        if user_config.is_file() {
-            let home = xai_dirs::home_dir().expect("home dir");
-            let from_home = find_project_configs(&home);
-            assert!(
-                !from_home.iter().any(|p| is_user_grok_config_file(p)),
-                "user config leaked into project configs: {from_home:?}"
-            );
-            assert!(is_user_grok_config_file(&user_config));
-        }
+        std::fs::write(&user_config, "# user\n").unwrap();
+        let from_home =
+            find_project_configs_under(home.path(), Some(home.path()), Some(&user_home));
+        assert!(
+            from_home.is_empty(),
+            "user config leaked into project configs: {from_home:?}"
+        );
+        assert!(is_user_grok_config_file(&user_config, Some(&user_home)));
 
-        let tmp = tempfile::tempdir().unwrap();
-        let project = tmp.path().join("repo");
+        let project = home.path().join("repo");
         std::fs::create_dir_all(project.join(".grok")).unwrap();
         std::fs::write(project.join(".grok/config.toml"), "# project\n").unwrap();
-        let found = find_project_configs(&project);
+        let found = find_project_configs_under(&project, Some(home.path()), Some(&user_home));
         assert_eq!(found.len(), 1);
         let Some(first) = found.first() else {
             panic!("expected one project config: {found:?}");
         };
-        assert!(!is_user_grok_config_file(first));
+        assert!(!is_user_grok_config_file(first, Some(&user_home)));
     }
 }

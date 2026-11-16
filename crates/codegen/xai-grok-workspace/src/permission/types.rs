@@ -2,6 +2,8 @@ use agent_client_protocol as acp;
 use chrono::{DateTime, Utc};
 use serde::{Deserialize, Serialize};
 use tokio::sync::oneshot;
+pub use xai_grok_permission_rules::types::*;
+
 #[derive(Debug, Clone, Serialize, Deserialize)]
 pub struct PermissionEvent {
     pub tool_id: String,
@@ -47,11 +49,13 @@ pub struct PermissionEvent {
     #[serde(default, skip_serializing_if = "Option::is_none")]
     pub remember_tool_approvals: Option<bool>,
 }
+
 #[derive(Debug, Clone)]
 pub struct PermissionResolution {
     pub decision: Decision,
     pub event: Option<PermissionEvent>,
 }
+
 #[derive(Debug, Clone, Copy, PartialEq, Eq, Default, serde::Serialize, serde::Deserialize)]
 pub enum ClientType {
     #[default]
@@ -70,6 +74,7 @@ pub enum ClientType {
     #[serde(rename = "grok_desktop")]
     Desktop,
 }
+
 impl ClientType {
     pub fn user_agent_label(&self) -> &'static str {
         match self {
@@ -82,6 +87,7 @@ impl ClientType {
             Self::Desktop => "grok-desktop",
         }
     }
+
     pub fn from_client_identifier(id: Option<&str>) -> Self {
         match id {
             Some("grok-web") => Self::GrokWeb,
@@ -92,6 +98,7 @@ impl ClientType {
             _ => Self::Generic,
         }
     }
+
     pub fn feedback_label(&self) -> &'static str {
         match self {
             Self::GrokTUI | Self::GrokPager => "tui",
@@ -102,85 +109,18 @@ impl ClientType {
             Self::Desktop => "desktop",
         }
     }
+
     pub const fn can_present_permission_prompt(self) -> bool {
         !matches!(self, Self::Generic)
     }
 }
-#[derive(Clone, Debug)]
-#[non_exhaustive]
-pub enum AccessKind {
-    Read(Option<String>),
-    Grep {
-        path: Option<String>,
-        glob: Option<String>,
-    },
-    /// A file edit, named by its path.
-    Edit(String),
-    Bash(String),
-    MCPTool {
-        name: String,
-        input: serde_json::Value,
-    },
-    WebFetch(String),
-    WebSearch(String),
-    AgentMessage {
-        subagent_id: String,
-    },
-    /// A mutating tool that is neither a file edit, a command, nor an MCP call (subagent spawn,
-    /// scheduler, workflow, generation, deploy, feedback, browser, anything unclassified), named by
-    /// its tool id. No grant scope covers it: every call prompts.
-    Tool(String),
-}
-#[derive(Debug, Clone, PartialEq, Eq)]
-pub enum Decision {
-    Allow,
-    Ask,
-    FollowupMessage(String),
-    Reject(String),
-    PolicyDeny(String),
-    Cancelled,
-}
-#[derive(Debug, Clone, Copy, PartialEq, Eq, Default)]
-pub enum EditPolicy {
-    #[default]
-    Ask,
-    Allow,
-    Reject,
-}
-impl Serialize for EditPolicy {
-    fn serialize<S: serde::Serializer>(&self, serializer: S) -> Result<S::Ok, S::Error> {
-        serializer.serialize_str(match self {
-            Self::Ask => "ask",
-            Self::Allow => "allow",
-            Self::Reject => "reject",
-        })
-    }
-}
-impl<'de> Deserialize<'de> for EditPolicy {
-    fn deserialize<D: serde::Deserializer<'de>>(deserializer: D) -> Result<Self, D::Error> {
-        struct V;
-        impl serde::de::Visitor<'_> for V {
-            type Value = EditPolicy;
-            fn expecting(&self, f: &mut std::fmt::Formatter) -> std::fmt::Result {
-                f.write_str("one of: ask, allow, reject")
-            }
-            fn visit_str<E: serde::de::Error>(self, v: &str) -> Result<EditPolicy, E> {
-                match v {
-                    "ask" => Ok(EditPolicy::Ask),
-                    "allow" => Ok(EditPolicy::Allow),
-                    "reject" => Ok(EditPolicy::Reject),
-                    other => Err(E::unknown_variant(other, &["ask", "allow", "reject"])),
-                }
-            }
-        }
-        deserializer.deserialize_str(V)
-    }
-}
+
 #[derive(Debug, Clone)]
 pub struct RequestPathContext {
     pub real_cwd: std::path::PathBuf,
     pub display_cwd: Option<std::path::PathBuf>,
 }
+
 #[derive(Debug, Clone, PartialEq, Eq, serde::Serialize, serde::Deserialize)]
 #[serde(rename_all = "camelCase")]
 pub struct HookAsk {
@@ -188,8 +128,11 @@ pub struct HookAsk {
     #[serde(skip_serializing_if = "Option::is_none")]
     pub reason: Option<String>,
 }
+
 pub const HOOK_ASK_META_KEY: &str = "hookAsk";
+
 const HOOK_ASK_SEPARATOR: &str = " — ";
+
 impl HookAsk {
     pub fn ask_line(&self) -> String {
         let hook_name = &self.hook_name;
@@ -201,9 +144,11 @@ impl HookAsk {
             format!("hook '{hook_name}' asks: {reason}")
         }
     }
+
     pub fn prompt_header(&self, action: &str) -> String {
         format!("{action}{HOOK_ASK_SEPARATOR}{}", self.ask_line())
     }
+
     pub fn strip_prompt_header<'a>(&self, title: &'a str) -> &'a str {
         title
             .strip_suffix(self.ask_line().as_str())
@@ -211,6 +156,7 @@ impl HookAsk {
             .unwrap_or(title)
     }
 }
+
 #[derive(Debug, Clone)]
 pub struct PermissionRequest {
     pub access: AccessKind,
@@ -221,6 +167,7 @@ pub struct PermissionRequest {
     pub subagent_description: Option<String>,
     pub hook_ask: Option<HookAsk>,
 }
+
 impl PermissionRequest {
     pub fn new(access: AccessKind, tool_call_update: acp::ToolCallUpdate) -> Self {
         Self {
@@ -234,6 +181,7 @@ impl PermissionRequest {
         }
     }
 }
+
 #[allow(clippy::large_enum_variant)]
 pub enum PermissionCommand {
     Request {
@@ -248,6 +196,7 @@ pub enum PermissionCommand {
     ResetState,
     Shutdown,
 }
+<<<<<<< HEAD
 /// Classification is an allowlist of read-only tools: a tool is `Read`/`Grep`/`WebSearch` only when it
 /// reads state or touches nothing but the session's own bookkeeping. Every other tool prompts as an
 /// edit, a command, an MCP call, or a fetch, so a new `ToolInput` variant cannot run unasked.
@@ -464,9 +413,13 @@ pub struct Sourced<T> {
     pub value: T,
     pub source: RequirementSource,
 }
+=======
+
+>>>>>>> upstream/main
 #[cfg(test)]
 mod tests {
     use super::*;
+
     #[test]
     fn hook_ask_header_keeps_the_action_and_names_the_hook() {
         let with_reason = HookAsk {
@@ -495,16 +448,7 @@ mod tests {
         };
         assert_eq!(multiline.ask_line(), with_reason.ask_line());
     }
-    #[test]
-    fn agent_message_tool_filter_serde_is_dedicated_and_unknown_is_rejected() {
-        let filter: ToolFilter = serde_json::from_str(r#""agent_message""#).unwrap();
-        assert_eq!(filter, ToolFilter::AgentMessage);
-        assert_eq!(
-            serde_json::to_string(&filter).unwrap(),
-            r#""agent_message""#
-        );
-        assert!(serde_json::from_str::<ToolFilter>(r#""future_tool""#).is_err());
-    }
+
     #[test]
     fn permission_event_subagent_fields_default_to_none() {
         let json = r#"{
@@ -532,6 +476,7 @@ mod tests {
         assert!(event.security_findings.is_none());
         assert!(event.classifier_verdict.is_none());
     }
+
     #[test]
     fn permission_event_findings_none_vs_some_empty_are_distinct() {
         let base = r#"{
@@ -549,6 +494,7 @@ mod tests {
         let event: PermissionEvent = serde_json::from_str(base).unwrap();
         assert_eq!(event.security_findings.as_deref(), Some([].as_slice()));
         assert_eq!(event.classifier_verdict.as_deref(), Some("block"));
+
         let with_tokens: PermissionEvent = serde_json::from_str(&base.replace(
             "\"security_findings\": []",
             "\"security_findings\": [\"opaque_shell\"]",
@@ -559,6 +505,7 @@ mod tests {
             Some(["opaque_shell".to_owned()].as_slice())
         );
     }
+
     #[test]
     fn permission_event_with_subagent_attribution() {
         let event = PermissionEvent {
@@ -639,6 +586,7 @@ mod tests {
             Some(&serde_json::json!(true))
         );
     }
+
     #[test]
     fn permission_event_skips_none_optional_fields() {
         let event = PermissionEvent {
@@ -683,6 +631,7 @@ mod tests {
         assert!(!json.contains("classifier_verdict"));
         assert!(!json.contains("remember_tool_approvals"));
     }
+<<<<<<< HEAD
     #[test]
     fn hashline_edit_maps_to_edit_access() {
         use xai_grok_tools::implementations::grok_build_hashline::edit::types::HashlineEditInput;
@@ -904,6 +853,9 @@ mod tests {
             AccessKind::Bash(c) if c == "rm -rf /"
         ));
     }
+=======
+
+>>>>>>> upstream/main
     #[test]
     fn client_type_deserializes_grok_shell_as_generic() {
         assert_eq!(

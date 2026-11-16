@@ -1,12 +1,9 @@
-//! MCP server configuration value types, extracted from xai-grok-shell so crates the shell depends on can use them.
+//! This module re-exports the MCP server config types from `xai-grok-config`.
+//! It also holds `RelaySyncConfig`.
 
-use agent_client_protocol as acp;
-use indexmap::IndexMap;
 use serde::{Deserialize, Serialize};
-use std::collections::HashMap;
-use std::path::PathBuf;
-use xai_grok_mcp::oauth_config::McpOAuthConfig;
 
+<<<<<<< HEAD
 /// serde default helper.
 fn default_true() -> bool {
     true
@@ -702,6 +699,14 @@ impl McpServerConfig {
         None
     }
 }
+=======
+pub use xai_grok_config::{
+    KNOWN_MCP_SERVER_FIELDS, McpConfig, McpJsonOAuthBlock, McpPreferenceSource, McpPreferencesFile,
+    McpServerConfig, McpServerConfigProblem, McpServerPreferences, McpServerProblemSeverity,
+    McpServerTransportConfig, McpSetupConfig, McpSetupDerivedValue, McpSetupField,
+    McpSetupFieldType, McpSetupOption, McpSetupResolution,
+};
+>>>>>>> upstream/main
 
 /// Configuration for relay session sharing, set in config.json under the `session.relay` object.
 #[derive(Debug, Clone, Serialize, Deserialize, Default)]
@@ -718,6 +723,7 @@ impl RelaySyncConfig {
         self.enabled.unwrap_or(false)
     }
 }
+<<<<<<< HEAD
 
 #[derive(Debug, Clone, Default, Deserialize)]
 pub struct McpConfig {
@@ -1107,3 +1113,5 @@ mod wire_alias_tests {
         assert!(json.get("values").is_none(), "{json}");
     }
 }
+=======
+>>>>>>> upstream/main

@@ -1,27 +1,3 @@
-//! Folder-trust DECISION side ("do you trust this folder?").
-//!
-//! This is the client/workspace half of the folder-trust gate: it scans a
-//! workspace for trust-sensitive configs (code-exec configs and project
-//! instructions/skills), resolves the pure trust [`decide`] precedence, prompts
-//! (MVP stderr), and reads/writes the durable [`crate::trust::TrustStore`]
-//! (`~/.grok/trusted_folders.toml`). The consume/gating half (the `DECISIONS`
-//! cache, `resolve_and_record`, `project_scope_allowed`, the loader filters)
-//! lives in `xai-grok-shell`.
-//!
-//! ## Precedence (canonical; see [`decide`])
-//! 1. Feature flag OFF  → trusted (no gating).
-//! 2. Store (this workspace recorded trusted) → trusted.
-//!    An explicit `--trust` grant is persisted to the store up front (see [`grant_folder_trust`]), so it is honored here.
-//! 3. Key unrecordable (the user's own `$HOME`, the filesystem root, or a non-absolute path) → trusted.
-//!    The store refuses to persist such an over-broad root, so gating would re-prompt forever on a key that can never persist.
-//!    See [`crate::trust::is_unsafe_trust_root`].
-//! 4. No trust-sensitive configs present → trusted (nothing to gate).
-//! 5. Interactive TTY   → prompt the user (y/N).
-//! 6. Otherwise (headless) → untrusted.
-//!
-//! How the consume side caches this verdict is a `xai-grok-shell` concern, documented there.
-//! (For example, the rule-4 allow is provisional and re-checked rather than cached.)
-
 use std::collections::HashMap;
 use std::fmt;
 use std::io::{self, IsTerminal, Write};
@@ -31,57 +7,54 @@ use std::sync::LazyLock;
 use parking_lot::Mutex;
 
 use toml::Value as TomlValue;
-use xai_grok_config_types::{BoolFlag, RemoteSettings};
 
 use crate::trust::{TrustStore, workspace_key};
 
-/// The pure trust outcome for a set of inputs.
-#[derive(Debug, Clone, Copy, PartialEq, Eq)]
-pub enum TrustOutcome {
-    /// Repo-local servers allowed.
-    Trusted,
-    /// Repo-local servers blocked.
-    Untrusted,
-    /// Interactive: ask the user.
-    Prompt,
+pub use xai_grok_permission_rules::folder_trust::{
+    DecideInputs, PromptPolicy, TrustDecision, TrustDurability, TrustLevel, TrustOutcome,
+    TrustResolution, decide, feature_enabled, folder_trust_inert, resolve_trust,
+};
+
+pub fn finish_prompt(key: &Path, accepted: bool) -> TrustDecision {
+    if !accepted {
+        return TrustDecision {
+            level: TrustLevel::Untrusted,
+            durability: TrustDurability::Durable,
+        };
+    }
+    decision_for_grant(grant_folder_trust_key(key))
 }
 
-/// Inputs to the pure [`decide`] precedence function.
-#[derive(Debug, Clone, Copy)]
-pub struct DecideInputs {
-    pub store_trusted: bool,
-    pub repo_configs_present: bool,
-    pub is_interactive: bool,
-    /// False when the workspace key is an over-broad root the store refuses to record (home, filesystem root, non-absolute).
-    /// See [`crate::trust::is_unsafe_trust_root`].
-    pub key_recordable: bool,
+fn decision_for_grant(outcome: GrantOutcome) -> TrustDecision {
+    if outcome.dismisses_gate() {
+        return TrustDecision {
+            level: TrustLevel::Trusted,
+            durability: TrustDurability::Durable,
+        };
+    }
+    match outcome {
+        GrantOutcome::Granted {
+            persist: PersistStatus::ProcessLocalOnly { error },
+            ..
+        } => {
+            tracing::warn!(
+                error = %error,
+                "folder trust: grant is process-local only and will not survive restart"
+            );
+            TrustDecision {
+                level: TrustLevel::Untrusted,
+                durability: TrustDurability::Provisional,
+            }
+        }
+        GrantOutcome::Refused { .. }
+        | GrantOutcome::Granted { .. }
+        | GrantOutcome::AlreadyDurable { .. } => TrustDecision {
+            level: TrustLevel::Untrusted,
+            durability: TrustDurability::Durable,
+        },
+    }
 }
 
-/// Pure trust-decision precedence. No I/O; unit-tested directly.
-/// See the module docs for the ordered precedence.
-pub fn decide(feature_enabled: bool, i: &DecideInputs) -> TrustOutcome {
-    if !feature_enabled {
-        return TrustOutcome::Trusted;
-    }
-    if i.store_trusted {
-        return TrustOutcome::Trusted;
-    }
-    // An over-broad root the store can't record (the user's own $HOME or fs-root, never a fetched repo) can't be durably gated
-    // Trust it instead of prompting on a key that can never persist (mirrors the feature-off default)
-    if !i.key_recordable {
-        return TrustOutcome::Trusted;
-    }
-    if !i.repo_configs_present {
-        return TrustOutcome::Trusted;
-    }
-    if i.is_interactive {
-        return TrustOutcome::Prompt;
-    }
-    TrustOutcome::Untrusted
-}
-
-/// Gather the [`DecideInputs`] for `cwd` (store trust, repo configs, interactivity), keyed by `key`.
-/// The shell's `compute` and the launch-dir resolve both gather through here, so the store read and repo-config scan cannot drift across callers.
 pub fn decide_inputs(cwd: &Path, key: &Path) -> DecideInputs {
     decide_inputs_with_interactive(cwd, key, is_interactive())
 }
@@ -108,6 +81,7 @@ pub fn decide_inputs_with_interactive(
     }
 }
 
+<<<<<<< HEAD
 /// Whether the whole folder-trust system is inert (auto-trusts everything) for this binary: true on a local/dev build (no `GROK_VERSION` stamp).
 /// Every trust auto-grant site calls this; when true grok never prompts, never gates repo-local configs, and does no `trusted_folders.toml` I/O.
 pub fn folder_trust_inert() -> bool {
@@ -151,6 +125,8 @@ fn feature_enabled_for_build(remote: Option<&RemoteSettings>, is_local_build: bo
         .value
 }
 
+=======
+>>>>>>> upstream/main
 /// Process-local explicit grant/deny, separate from [`TrustStore`] durability.
 /// When the sandbox denies the store write, this process still honors the latest user decision.
 /// The consume side reads it via [`is_trusted_this_process`].
@@ -526,7 +502,10 @@ fn collect_repo_config_kinds(cwd: &Path, first_only: bool) -> Vec<&'static str> 
     // Project `.grok/config.json` markers: a non-empty `mcp.servers` object or `extensions.plugins.paths` array, or a contributing `permission` object
     // `[plugins].paths` loads as auto-trusted ConfigPath plugins; `[permission]` allow/deny/ask rules auto-approve or block tools
     // A clone whose ONLY repo-local config is either must still be gated (else it resolves Trusted and the loader runs ungated)
-    for path in crate::project_config::find_project_configs_in(&chain.dirs) {
+    for path in crate::project_config::find_project_configs_in(
+        &chain.dirs,
+        xai_grok_config::user_grok_home().as_deref(),
+    ) {
         let Ok(root) = xai_grok_config::load_config_file(&path) else {
             continue;
         };
@@ -643,98 +622,19 @@ fn is_interactive() -> bool {
     std::io::stdin().is_terminal() && std::io::stderr().is_terminal()
 }
 
-/// MVP trust prompt: a plain stderr warning and a stdin y/N read.
-/// Defaults to NO on empty input, EOF, or any non-yes answer.
-/// Deliberately minimal (no ACP modal).
-pub fn prompt_for_trust(key: &Path) -> bool {
-    use std::io::{BufRead, Write};
-
-    let mut err = std::io::stderr();
-    let _ = writeln!(err);
-    let _ = writeln!(
-        err,
-        "This folder contains repo-local config (MCP/LSP servers, hooks, permission rules) \
-         or project instructions/skills that Grok would otherwise apply automatically."
-    );
-    let _ = writeln!(err, "  Folder: {}", key.display());
-    let _ = write!(
-        err,
-        "Trust the authors of this folder and apply them? [y/N] "
-    );
-    let _ = err.flush();
-
-    let mut line = String::new();
-    match std::io::stdin().lock().read_line(&mut line) {
-        Ok(0) | Err(_) => false,
-        Ok(_) => matches!(line.trim().to_ascii_lowercase().as_str(), "y" | "yes"),
-    }
-}
-
 #[cfg(test)]
 mod tests {
     use super::*;
 
-    fn inputs() -> DecideInputs {
-        DecideInputs {
-            store_trusted: false,
-            repo_configs_present: true,
-            is_interactive: false,
-            // Default: a normal (recordable) key, so the Case-2 rule doesn't fire and every `..inputs()` spread exercises the other rules
-            key_recordable: true,
-        }
-    }
-
     #[test]
-    fn feature_off_is_always_trusted() {
-        // Even with everything pointing to untrusted, feature off resolves trusted
-        assert_eq!(decide(false, &inputs()), TrustOutcome::Trusted);
-    }
-
-    #[test]
-    fn store_trusted_is_trusted() {
-        let i = DecideInputs {
-            store_trusted: true,
-            ..inputs()
-        };
-        assert_eq!(decide(true, &i), TrustOutcome::Trusted);
-    }
-
-    #[test]
-    fn no_repo_configs_is_trusted_without_prompt() {
-        let i = DecideInputs {
-            repo_configs_present: false,
-            is_interactive: true,
-            ..inputs()
-        };
-        // Nothing to gate resolves Trusted, never Prompt
-        assert_eq!(decide(true, &i), TrustOutcome::Trusted);
-    }
-
-    #[test]
-    fn interactive_with_configs_prompts() {
-        let i = DecideInputs {
-            is_interactive: true,
-            ..inputs()
-        };
-        assert_eq!(decide(true, &i), TrustOutcome::Prompt);
-    }
-
-    #[test]
-    fn headless_with_configs_is_untrusted() {
-        assert_eq!(decide(true, &inputs()), TrustOutcome::Untrusted);
-    }
-
-    #[test]
-    fn unrecordable_key_is_trusted_even_with_configs_and_interactive() {
-        // Case 2: cwd == $HOME (or fs-root / non-absolute)
-        // The store can't record such a key, so gating would re-prompt forever; decide() trusts it, ahead of the repo-configs and interactive rules
-        let i = DecideInputs {
-            store_trusted: false,
-            repo_configs_present: true,
-            is_interactive: true,
-            key_recordable: false,
-        };
-        assert_eq!(decide(true, &i), TrustOutcome::Trusted);
+    fn rejected_prompt_is_a_durable_deny() {
+        assert_eq!(
+            TrustDecision {
+                level: TrustLevel::Untrusted,
+                durability: TrustDurability::Durable,
+            },
+            finish_prompt(Path::new("/unused"), false)
+        );
     }
 
     /// A `git init`'d temp dir, so repo discovery is bounded to it instead of any ancestor repo the system temp dir lives in.
@@ -1170,6 +1070,7 @@ mod tests {
     }
 
     #[test]
+<<<<<<< HEAD
     fn local_build_ignores_remote_rollout() {
         // A local/dev build never gates (auto-trust): even a remote rollout enable is ignored
         // The feature stays off and resolves Trusted with repo configs present and interactive
@@ -1254,6 +1155,8 @@ mod tests {
     }
 
     #[test]
+=======
+>>>>>>> upstream/main
     fn store_io_is_noop_on_local_build() {
         // On a local/dev build the whole feature is inert.
         let _lock = ENV_LOCK.lock().unwrap_or_else(|e| e.into_inner());

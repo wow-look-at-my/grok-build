@@ -1311,10 +1311,16 @@ pub(super) async fn run_session(
                                 }
                             }
                         }
-                        SessionCommand::CompactSession { user_context, respond_to } => {
+                        SessionCommand::CompactSession { respond_to } => {
                             let s = session.clone();
+<<<<<<< HEAD
                             xai_spawn::spawn_local(async move {
                                 s.compact_on_request(user_context, respond_to).await;
+=======
+                            tokio::task::spawn_local(async move {
+                                let compact_session = s.run_compact().await;
+                                let _ = respond_to.send(compact_session);
+>>>>>>> upstream/main
                             });
                         }
                         SessionCommand::ReloadPlugins { registry } => {
@@ -2498,6 +2504,7 @@ pub(super) async fn run_session(
                             .enqueue_v2_turn_capture(source_prompt_index)
                             .await;
                     }
+                    session.schedule_v2_dream_check_after_turn();
                     #[cfg(test)]
                     if let Some(processed) = processed {
                         let _ = processed.send(());

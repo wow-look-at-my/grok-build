@@ -1155,39 +1155,10 @@ fn apply_requirements_inner(
     fn req_str<'a>(req: &'a toml::Value, section: &str, key: &str) -> Option<&'a str> {
         req.get(section)?.get(key)?.as_str()
     }
-    enum ReqStrArray {
-        Absent,
-        Value(Vec<String>),
-        Malformed,
-    }
-    fn req_str_array(req: &toml::Value, section: &str, key: &str) -> ReqStrArray {
-        let Some(value) = req.get(section).and_then(|s| s.get(key)) else {
-            return ReqStrArray::Absent;
-        };
-        let Some(arr) = value.as_array() else {
-            tracing::error!(
-                section,
-                key,
-                kind = value.type_str(),
-                "requirements value is not an array; the constraint fail-closes"
-            );
-            return ReqStrArray::Malformed;
-        };
-        let mut out = Vec::with_capacity(arr.len());
-        for item in arr {
-            let Some(s) = item.as_str() else {
-                tracing::error!(
-                    section,
-                    key,
-                    kind = item.type_str(),
-                    "requirements array entry is not a string; the constraint fail-closes"
-                );
-                return ReqStrArray::Malformed;
-            };
-            out.push(s.to_owned());
-        }
-        ReqStrArray::Value(out)
-    }
+    let parsed = xai_grok_config::RequirementsToml::from_value(req);
+    let tool_pins: Vec<_> = parsed.tool_pins().collect();
+    let allowed_models = parsed.models.allowed_models.clone();
+    let default_model = parsed.models.default_model.clone();
     let mut enforced: Vec<EnforcedField> = Vec::new();
     let mut push = |path: &'static str, value: String| {
         enforced.push(EnforcedField {
@@ -1196,37 +1167,6 @@ fn apply_requirements_inner(
             source: source.clone(),
         });
     };
-    macro_rules! pin_feature {
-        ($name:ident) => {
-            if let Some(val) = req_bool(req, "features", stringify!($name)) {
-                config.requirements.$name.pin(val, source.clone());
-                config.features.$name = Some(val);
-                // Unconditional, like the registry loop
-                // A later layer repeating the pin must report, or the dedupe keeps the first layer that asked instead of the one that decided
-                push(concat!("features.", stringify!($name)), format!("{val}"));
-            }
-        };
-    }
-    macro_rules! enforce_opt {
-        ($section:expr, $key:expr, $field:expr) => {
-            if let Some(val) = req_bool(req, $section, $key)
-                && $field != Some(val)
-            {
-                $field = Some(val);
-                push(concat!($section, ".", $key), format!("{val}"));
-            }
-        };
-    }
-    macro_rules! enforce_val {
-        ($section:expr, $key:expr, $field:expr) => {
-            if let Some(val) = req_bool(req, $section, $key)
-                && $field != val
-            {
-                $field = val;
-                push(concat!($section, ".", $key), format!("{val}"));
-            }
-        };
-    }
     use crate::agent::config::TelemetryMode;
     let req_telemetry_mode = req_str(req, "features", "telemetry")
         .and_then(TelemetryMode::parse)
@@ -1238,18 +1178,43 @@ fn apply_requirements_inner(
             push("features.telemetry", format!("{mode}"));
         }
     }
-    macro_rules! pin_requirement_only {
-        ($name:ident) => {
-            if let Some(val) = req_bool(req, "features", stringify!($name)) {
-                config.requirements.$name.pin(val, source.clone());
-                push(concat!("features.", stringify!($name)), format!("{val}"));
+    use crate::agent::config::Feature;
+    use xai_grok_config::ToolFeature;
+    for (tool, val) in tool_pins {
+        let registry_row = match tool {
+            ToolFeature::ImageGen => {
+                config.requirements.image_gen.pin(val, source.clone());
+                config.features.image_gen = Some(val);
+                push("features.image_gen", format!("{val}"));
+                None
             }
+            ToolFeature::ImageEdit => {
+                config.requirements.image_edit.pin(val, source.clone());
+                push("features.image_edit", format!("{val}"));
+                None
+            }
+            ToolFeature::VideoGen => {
+                config.requirements.video_gen.pin(val, source.clone());
+                config.features.video_gen = Some(val);
+                push("features.video_gen", format!("{val}"));
+                None
+            }
+            ToolFeature::AskUserQuestion => Some(Feature::AskUserQuestion),
+            ToolFeature::LspTools => Some(Feature::LspTools),
+            ToolFeature::WebFetch => Some(Feature::WebFetch),
+            ToolFeature::WriteFile => Some(Feature::WriteFile),
         };
+        if let Some(feature) = registry_row {
+            config
+                .requirements
+                .pin_feature(feature, val, source.clone());
+            push(feature.path(), format!("{val}"));
+        }
     }
-    pin_feature!(image_gen);
-    pin_requirement_only!(image_edit);
-    pin_feature!(video_gen);
     for spec in crate::agent::config::FEATURES {
+        if <ToolFeature as std::str::FromStr>::from_str(spec.key).is_ok() {
+            continue;
+        }
         let Some(value) = req
             .get("features")
             .and_then(|features| features.get(spec.key))
@@ -1271,6 +1236,14 @@ fn apply_requirements_inner(
             .pin_feature(spec.id, val, source.clone());
         push(spec.path, format!("{val}"));
     }
+    macro_rules! pin_requirement_only {
+        ($name:ident) => {
+            if let Some(val) = req_bool(req, "features", stringify!($name)) {
+                config.requirements.$name.pin(val, source.clone());
+                push(concat!("features.", stringify!($name)), format!("{val}"));
+            }
+        };
+    }
     pin_requirement_only!(remote_fetch);
     pin_requirement_only!(title_refresh);
     if let Some(val) = req_bool(req, "telemetry", "trace_upload") {
@@ -1280,12 +1253,20 @@ fn apply_requirements_inner(
             push("telemetry.trace_upload", format!("{val}"));
         }
     }
-    enforce_opt!("cli", "auto_update", config.cli.auto_update);
-    enforce_opt!("cli", "use_leader", config.cli.use_leader);
-    enforce_opt!("cli", "show_tips", config.cli.show_tips);
-    enforce_opt!("memory", "enabled", config.memory.enabled);
-    enforce_val!("subagents", "enabled", config.subagents.enabled);
-    enforce_val!("managed_mcps", "enabled", config.managed_mcps.enabled);
+    parsed.enforce_cli_toggles(
+        &mut config.cli.auto_update,
+        &mut config.cli.use_leader,
+        &mut config.cli.show_tips,
+        &mut push,
+    );
+    parsed.enforce_service_toggles(
+        &mut xai_grok_config::ServiceTogglePins {
+            memory_enabled: &mut config.memory.enabled,
+            subagents_enabled: &mut config.subagents.enabled,
+            managed_mcps_enabled: &mut config.managed_mcps.enabled,
+        },
+        &mut push,
+    );
     if let Some(val) = req_bool(req, "tools", "respect_gitignore") {
         config
             .requirements
@@ -1303,67 +1284,32 @@ fn apply_requirements_inner(
             push("ui.yolo", "--yolo blocked".to_string());
         }
     }
-    macro_rules! enforce_str {
-        ($section:expr, $key:expr, $field:expr) => {
-            if let Some(val) = req_str(req, $section, $key)
-                && $field.as_deref() != Some(val)
-            {
-                $field = Some(val.to_owned());
-                push(concat!($section, ".", $key), val.to_owned());
-            }
-        };
-        ($section:expr, $key:expr, $field:expr, redacted) => {
-            if let Some(val) = req_str(req, $section, $key)
-                && $field.as_deref() != Some(val)
-            {
-                $field = Some(val.to_owned());
-                push(concat!($section, ".", $key), "[redacted]".to_owned());
-            }
-        };
+    if let Some(val) = default_model
+        && config.models.default.as_deref() != Some(val.as_str())
+    {
+        push("models.default", val.clone());
+        config.models.default = Some(val);
     }
-    use crate::agent::config::AllowlistPin;
-    macro_rules! pin_str_array {
-        ($section:expr, $key:expr, $pin:expr) => {
-            match req_str_array(req, $section, $key) {
-                ReqStrArray::Absent => {}
-                ReqStrArray::Value(val) => {
-                    let reported = if val.is_empty() {
-                        "(unrestricted)".to_owned()
-                    } else {
-                        val.join(", ")
-                    };
-                    $pin.pin(AllowlistPin::List(val), source.clone());
-                    push(concat!($section, ".", $key), reported);
-                }
-                ReqStrArray::Malformed => {
-                    $pin.pin(AllowlistPin::FailClosed, source.clone());
-                    push(
-                        concat!($section, ".", $key),
-                        "(invalid; nothing selectable)".to_owned(),
-                    );
-                }
-            }
+    parsed.enforce_web_search(&mut config.models.web_search, &mut push);
+    if let Some(pin) = allowed_models {
+        use crate::agent::config::AllowlistPin;
+        let reported = match &pin {
+            AllowlistPin::List(patterns) if patterns.is_empty() => "(unrestricted)".to_owned(),
+            AllowlistPin::List(patterns) => patterns.join(", "),
+            AllowlistPin::FailClosed => "(invalid; nothing selectable)".to_owned(),
         };
+        config.requirements.allowed_models.pin(pin, source.clone());
+        push("models.allowed_models", reported);
     }
-    enforce_str!("models", "default", config.models.default);
-    enforce_str!("models", "web_search", config.models.web_search);
-    pin_str_array!(
-        "models",
-        "allowed_models",
-        config.requirements.allowed_models
-    );
-    enforce_str!("cli", "channel", config.cli.channel);
-    enforce_str!("cli", "minimum_version", config.cli.minimum_version);
-    enforce_str!("cli", "maximum_version", config.cli.maximum_version);
-    enforce_str!(
-        "cli",
-        "required_minimum_version",
-        config.cli.required_minimum_version
-    );
-    enforce_str!(
-        "cli",
-        "required_maximum_version",
-        config.cli.required_maximum_version
+    parsed.enforce_cli_strings(
+        &mut xai_grok_config::CliStringPins {
+            channel: &mut config.cli.channel,
+            minimum_version: &mut config.cli.minimum_version,
+            maximum_version: &mut config.cli.maximum_version,
+            required_minimum_version: &mut config.cli.required_minimum_version,
+            required_maximum_version: &mut config.cli.required_maximum_version,
+        },
+        &mut push,
     );
     if let Some(val) = req_str(req, "endpoints", "xai_api_base_url")
         && config.endpoints.xai_api_base_url != val
@@ -1377,15 +1323,10 @@ fn apply_requirements_inner(
         config.endpoints.cli_chat_proxy_base_url = Some(val.to_owned());
         push("endpoints.cli_chat_proxy_base_url", val.to_owned());
     }
-    enforce_str!(
-        "endpoints",
-        "models_base_url",
-        config.endpoints.models_base_url
-    );
-    enforce_str!(
-        "endpoints",
-        "models_list_url",
-        config.endpoints.models_list_url
+    parsed.enforce_model_urls(
+        &mut config.endpoints.models_base_url,
+        &mut config.endpoints.models_list_url,
+        &mut push,
     );
     if let Some(val) = req_str(req, "sandbox", "profile") {
         config
@@ -1407,6 +1348,7 @@ fn apply_requirements_inner(
             push("sandbox.auto_allow_bash", format!("{val}"));
         }
     }
+<<<<<<< HEAD
     enforce_str!(
         "endpoints",
         "trace_upload_url",
@@ -1434,6 +1376,24 @@ fn apply_requirements_inner(
         "mixpanel_token",
         config.telemetry.mixpanel_token,
         redacted
+=======
+    parsed.enforce_upload_and_telemetry(
+        &mut xai_grok_config::UploadTelemetryPins {
+            trace_upload_url: &mut config.endpoints.trace_upload_url,
+            feedback_base_url: &mut config.endpoints.feedback_base_url,
+            deployment_key: &mut config.endpoints.deployment_key,
+            events_url: &mut config.telemetry.events_url,
+            events_api_key: &mut config.telemetry.events_api_key,
+            mixpanel_enabled: &mut config.telemetry.mixpanel_enabled,
+            mixpanel_token: &mut config.telemetry.mixpanel_token,
+            trace_upload_bucket: &mut config.endpoints.trace_upload_bucket,
+            trace_upload_region: &mut config.endpoints.trace_upload_region,
+            trace_upload_credentials_file: &mut config.endpoints.trace_upload_credentials_file,
+            trace_upload_endpoint_url: &mut config.endpoints.trace_upload_endpoint_url,
+            trace_upload_credentials: &mut config.endpoints.trace_upload_credentials,
+        },
+        &mut push,
+>>>>>>> upstream/main
     );
     if let Some(val) = req.get("features").and_then(|f| f.get("codebase_indexing")) {
         use crate::agent::config::CodebaseIndexingSetting;
@@ -1522,6 +1482,7 @@ pub fn apply_sandbox(
         .and_then(|p| dunce::canonicalize(p).ok())
         .or_else(|| std::env::current_dir().ok())
         .unwrap_or_else(|| std::path::PathBuf::from("."));
+<<<<<<< HEAD
     // Whether a bwrap re-exec follows decides how the worker's fd is handed over, so it is settled before the worker starts.
     #[cfg(target_os = "linux")]
     let reexec_follows = xai_grok_sandbox::bwrap_reexec_planned(&sandbox_profile, &workspace);
@@ -1532,6 +1493,9 @@ pub fn apply_sandbox(
     if sandbox_profile != xai_grok_sandbox::ProfileName::Off {
         let _ = xai_grok_sandbox::ci_host::start_ci_host_for_session(&workspace, reexec_follows);
     }
+=======
+    xai_grok_sandbox::set_confinement_root(&workspace);
+>>>>>>> upstream/main
     #[cfg(target_os = "linux")]
     let requires_read_deny = xai_grok_sandbox::requires_read_deny(&sandbox_profile, &workspace);
     #[cfg(target_os = "linux")]
@@ -1663,6 +1627,7 @@ pub fn apply_sandbox(
         sandbox.install();
     }
 }
+<<<<<<< HEAD
 pub use xai_grok_workspace::project_config::find_project_configs;
 /// Resolve the effective `extensions.plugins` config for a working directory the same way a session does at reload time: global/user config ([`load_effective_config`]), plus every ancestor project `.grok/config.json` ([`find_project_configs`], extending `paths` and `disabled`), plus the imported `enabledPlugins` merge.
 /// All three must discover the same plugins for a given cwd.
@@ -1695,6 +1660,11 @@ pub(crate) fn resolve_effective_plugins_config(
 }
 pub use xai_grok_config::{deep_merge_toml, expand_env_vars_in_string, expand_env_vars_in_toml};
 /// Locked read-modify-write of `~/.grok/config.json`: the whole window runs under the config-init
+=======
+pub use xai_grok_config::{deep_merge_toml, expand_env_vars_in_string, expand_env_vars_in_toml};
+pub use xai_grok_workspace::project_config::find_project_configs;
+/// Locked read-modify-write of `~/.grok/config.toml`: the whole window runs under the config-init
+>>>>>>> upstream/main
 /// flock and lands via atomic replace; unchanged configs skip the write.
 fn update_config_toml_locked(
     grok_home: &std::path::Path,

@@ -27,7 +27,16 @@ pub fn build_storage_client_for_proxy(
     let http_client = xai_grok_http::shared_upload_client();
     if let Some(am) = auth_manager {
         let provider: Arc<dyn AuthCredentialProvider> =
+<<<<<<< HEAD
             Arc::new(ShellAuthCredentialProvider::new(am.clone(), alpha_test_key));
+=======
+            Arc::new(ShellAuthCredentialProvider::with_deployment_id_resolver(
+                am.clone(),
+                deployment_key,
+                alpha_test_key,
+                std::sync::Arc::new(xai_grok_cloud_config::managed_config::resolve_deployment_id),
+            ));
+>>>>>>> upstream/main
         let bridge: Arc<dyn xai_file_utils::storage_client::Auth401AttributionCallback> =
             Arc::new(StorageClientAttributionBridge::new(am, session_id));
         xai_file_utils::storage_client::StorageClient::with_provider(
@@ -60,5 +69,12 @@ pub fn build_storage_client_for_proxy(
 /// Call [`xai_grok_login::credential_provider::wire_otel_auth_manager`] after agent init to upgrade it.
 pub fn build_bootstrap_otel_credentials() -> (Arc<dyn AuthCredentialProvider>, String) {
     let proxy_base_url = crate::agent::config::EndpointsConfig::from_effective_config().proxy_url();
+<<<<<<< HEAD
     xai_grok_login::credential_provider::install_bootstrap_otel_provider(proxy_base_url)
+=======
+    xai_grok_login::credential_provider::install_bootstrap_otel_provider(
+        proxy_base_url,
+        std::sync::Arc::new(xai_grok_cloud_config::managed_config::resolve_deployment_id),
+    )
+>>>>>>> upstream/main
 }

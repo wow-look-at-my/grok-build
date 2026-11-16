@@ -8,12 +8,14 @@ use super::*;
 fn gate_snapshot_denies_when_lock_held_or_unopenable() {
     let short_wait = std::time::Duration::from_millis(150);
     let dir = tempfile::tempdir().unwrap();
+
     let _held = try_lock_managed_config(dir.path()).expect("test takes the lock first");
     assert_eq!(
         locked_gate_snapshot(dir.path(), short_wait).map(|_| ()),
         Err(ManagedPolicyRefusal::Busy),
         "a contended gate lock must fail closed as busy"
     );
+
     let missing = dir.path().join("missing/home");
     assert_eq!(
         locked_gate_snapshot(&missing, short_wait).map(|_| ()),
@@ -47,7 +49,6 @@ fn gate_waits_out_a_contended_lock_inside_a_local_set_on_a_multi_thread_runtime(
         Err(ManagedPolicyRefusal::Busy),
         "a lock held for the whole wait must fail closed as busy, not panic"
     );
-    // Pins the bounded-poll contract: a regression to unbounded blocking must fail here, not hang as a CI timeout.
     assert!(
         waited < std::time::Duration::from_secs(1),
         "the contended wait must stay near lock_wait ({short_wait:?}), took {waited:?}"
@@ -73,10 +74,12 @@ fn gate_waits_out_a_contended_lock_inside_a_local_set_on_a_multi_thread_runtime(
 async fn refresher_drop_stops_work_without_cancelling_parent() {
     let parent = tokio_util::sync::CancellationToken::new();
     let (tx, rx) = tokio::sync::oneshot::channel::<()>();
+
     drop(ManagedConfigRefresher::spawn(&parent, async move {
         tokio::time::sleep(std::time::Duration::from_millis(50)).await;
         let _ = tx.send(());
     }));
+
     assert!(
         rx.await.is_err(),
         "the aborted work must never reach its send"
@@ -130,6 +133,7 @@ fn gate_blocks_only_managed_principal_with_compromised_policy() {
         managed_principal_present,
         policy_compromised,
     };
+
     assert!(
         managed_policy_gate_decision(snapshot(true, true)).is_err(),
         "managed principal + compromised policy must fail closed"
@@ -208,13 +212,11 @@ fn apply_partial_write_failure_keeps_written_artifact() {
     use std::os::unix::fs::PermissionsExt;
     let dir = tempfile::tempdir().unwrap();
     let home = dir.path();
-    // A squat whose child can't be unlinked: the squat-clear and the rename both fail.
     let req = home.join("requirements.toml");
     std::fs::create_dir(&req).unwrap();
     std::fs::write(req.join("pin"), "x").unwrap();
     std::fs::set_permissions(&req, std::fs::Permissions::from_mode(0o500)).unwrap();
-    if std::fs::remove_dir_all(&req).is_ok() {
-        eprintln!("skipping: permissions not enforced (running as root?)");
+    if removal_bypasses_permissions(&req) {
         return;
     }
 
@@ -232,6 +234,7 @@ fn apply_partial_write_failure_keeps_written_artifact() {
         home.join("managed_config.toml").exists(),
         "the artifact that wrote successfully must be kept"
     );
+
     let _ = std::fs::set_permissions(&req, std::fs::Permissions::from_mode(0o700));
 }
 
@@ -251,6 +254,7 @@ fn apply_converges_over_a_squatting_directory() {
         ..Default::default()
     };
     assert!(apply_managed_config(home, &body).unwrap());
+
     assert_eq!(
         std::fs::read_to_string(home.join("managed_config.toml")).unwrap(),
         "[cli]\ntheme = \"dark\"\n",
@@ -288,6 +292,7 @@ fn remove_managed_config_files_tolerates_partial_existence() {
 #[test]
 fn staging_classifier_matches_only_the_write_deny_class() {
     use std::io::{Error, ErrorKind};
+
     for kind in [
         ErrorKind::PermissionDenied,
         ErrorKind::ReadOnlyFilesystem,
@@ -298,6 +303,7 @@ fn staging_classifier_matches_only_the_write_deny_class() {
             "{kind:?} is the sandbox deny class and may stage"
         );
     }
+
     for kind in [
         ErrorKind::IsADirectory,
         ErrorKind::DirectoryNotEmpty,
@@ -314,7 +320,7 @@ fn staging_classifier_matches_only_the_write_deny_class() {
 
 #[test]
 fn transport_failure_maps_to_managed_config_error() {
-    use crate::http::{TransportFailure, TransportFailureKind};
+    use xai_grok_http::{TransportFailure, TransportFailureKind};
 
     let unreachable = map_transport_failure(TransportFailure {
         kind: TransportFailureKind::Unreachable,
@@ -409,7 +415,6 @@ fn purge_keeps_marker_when_an_artifact_removal_fails() {
     }
     std::fs::write(home.join(xai_grok_config::MANAGED_CONFIG_CACHE_FILE), "{}").unwrap();
 
-    // Unremovable squat: `remove_dir_all` can't unlink inside the read-only subdir.
     let squat = home.join("requirements.toml");
     std::fs::remove_file(&squat).unwrap();
     let locked_subdir = squat.join("locked");
@@ -417,9 +422,7 @@ fn purge_keeps_marker_when_an_artifact_removal_fails() {
     std::fs::write(locked_subdir.join("pin"), "x").unwrap();
     let readonly = std::fs::Permissions::from_mode(0o555);
     std::fs::set_permissions(&locked_subdir, readonly).unwrap();
-    if std::fs::remove_dir_all(&squat).is_ok() {
-        // The fault can't be injected: read-only perms don't block removal (root/CI edge).
-        eprintln!("skipping: permissions not enforced (running as root?)");
+    if removal_bypasses_permissions(&squat) {
         return;
     }
 
@@ -458,6 +461,7 @@ fn served_principal_prefers_deployment_id() {
         nonce: String::new(),
         key_id: "v1".into(),
     };
+
     assert_eq!(
         served_principal_of(&payload(Some("dep-1"), Some("team-007"))),
         Some("dep-1")
@@ -478,6 +482,7 @@ fn claim_persists_only_when_bound_to_served_principal() {
         expires_at: 4_000_000_000,
         key_id: "v1".into(),
     };
+
     assert!(claim_binds_to(&claim("team-007"), Some("team-007")));
     assert!(!claim_binds_to(&claim("team-evil"), Some("team-007")));
     assert!(!claim_binds_to(&claim("team-007"), None));
@@ -492,14 +497,23 @@ fn absent_claim_is_skipped() {
 fn auth_mode_classification() {
     use xai_grok_telemetry::startup::AuthMode;
     let err = || std::io::Error::other("unreadable");
+<<<<<<< HEAD:crates/codegen/xai-grok-shell/src/managed_config/tests.rs
     assert_eq!(auth_mode(&Ok(true)), AuthMode::Team);
     assert_eq!(auth_mode(&Ok(false)), AuthMode::Personal);
     assert_eq!(auth_mode(&Err(err())), AuthMode::Unknown);
+=======
+
+    assert_eq!(auth_mode(true, &Ok(true)), AuthMode::Deployment);
+    assert_eq!(auth_mode(true, &Err(err())), AuthMode::Deployment);
+    assert_eq!(auth_mode(false, &Ok(true)), AuthMode::Team);
+    assert_eq!(auth_mode(false, &Ok(false)), AuthMode::Personal);
+    assert_eq!(auth_mode(false, &Err(err())), AuthMode::Unknown);
+>>>>>>> upstream/main:crates/codegen/xai-grok-cloud-config/src/managed_config/tests.rs
 }
 
 #[test]
 fn managed_config_gate_ignores_the_overlay_in_both_directions() {
-    use crate::config::ConfigLayers;
+    use xai_grok_config::ConfigLayers;
 
     fn features_managed_config(v: bool) -> toml::Value {
         toml::from_str(&format!("[features]\nmanaged_config = {v}\n")).unwrap()
@@ -519,4 +533,13 @@ fn managed_config_gate_ignores_the_overlay_in_both_directions() {
     layers.user = toml::Value::Table(Default::default());
     layers.env_overlay = Some(features_managed_config(false));
     assert_eq!(managed_config_enabled_from_layers(&layers), None);
+}
+
+#[cfg(unix)]
+fn removal_bypasses_permissions(dir: &std::path::Path) -> bool {
+    if std::fs::remove_dir_all(dir).is_ok() {
+        eprintln!("skipping: permissions not enforced (running as root?)");
+        return true;
+    }
+    false
 }

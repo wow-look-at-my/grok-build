@@ -127,6 +127,25 @@ pub struct DownloadResponse {
     pub turn: i32,
 }
 
+/// A non-success registry response other than 401, kept typed so callers can tell a refusal from an outage.
+#[derive(Debug, thiserror::Error)]
+#[error("{op} failed: {status}")]
+pub(crate) struct RegistryStatusError {
+    op: &'static str,
+    status: reqwest::StatusCode,
+}
+
+impl RegistryStatusError {
+    /// A 4xx the same request will get again; 408 and 429 are throttling, not refusal.
+    pub(crate) fn is_permanent_refusal(&self) -> bool {
+        self.status.is_client_error()
+            && !matches!(
+                self.status,
+                reqwest::StatusCode::REQUEST_TIMEOUT | reqwest::StatusCode::TOO_MANY_REQUESTS
+            )
+    }
+}
+
 // ============================================================================
 // Client
 // ============================================================================
@@ -171,6 +190,10 @@ impl SessionRegistryClient {
                 xai_grok_login::credential_provider::ShellAuthCredentialProvider::new(
                     auth_manager.clone(),
                     self.credentials.alpha_test_key.clone(),
+<<<<<<< HEAD
+=======
+                    std::sync::Arc::new(xai_grok_cloud_config::managed_config::resolve_deployment_id),
+>>>>>>> upstream/main
                 ),
             );
         self.credentials = self.credentials.with_auth_manager(auth_manager);
@@ -218,15 +241,24 @@ impl SessionRegistryClient {
 
     fn check_response(
         &self,
+<<<<<<< HEAD
         response: xai_grok_net::Response,
         stamp: Option<&xai_grok_auth::SentBearerSuffix>,
         op: &str,
+=======
+        response: reqwest::Response,
+        stamp: Option<&xai_grok_auth::StampedBearerSuffix>,
+        op: &'static str,
+>>>>>>> upstream/main
     ) -> anyhow::Error {
         if response.status() == xai_grok_net::StatusCode::UNAUTHORIZED {
             self.record_401_attribution(op, stamp);
             anyhow::anyhow!("{op}: {}", self.credentials.auth_error_hint())
         } else {
-            anyhow::anyhow!("{op} failed: {}", response.status())
+            anyhow::Error::new(RegistryStatusError {
+                op,
+                status: response.status(),
+            })
         }
     }
 

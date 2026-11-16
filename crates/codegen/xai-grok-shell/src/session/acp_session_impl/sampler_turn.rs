@@ -2,6 +2,7 @@
 //! It also covers sampling-failure recovery and per-response usage recording.
 
 use super::*;
+use crate::session::persistence::{PersistedAgent, PersistenceMsg};
 use xai_grok_login::backend::{ActiveAuthBackend, AuthBackend};
 use xai_grok_telemetry::region;
 use xai_grok_telemetry::region::Parent;
@@ -785,7 +786,13 @@ impl SessionActor {
             stream_tool_calls: cfg.stream_tool_calls.unwrap_or(false),
             idle_timeout_secs: None,
             client_identifier: self.client_identifier.clone(),
+<<<<<<< HEAD
             deployment_id: None,
+=======
+            deployment_id: xai_grok_cloud_config::managed_config::resolve_deployment_id(
+                xai_grok_cloud_config::managed_config::resolve_deployment_key().as_deref(),
+            ),
+>>>>>>> upstream/main
             user_id: self
                 .auth_manager
                 .as_ref()
@@ -1354,6 +1361,7 @@ impl SessionActor {
                 && let Some(new_cw) = std::num::NonZeroU64::new(cw)
                 && self.compaction.context_window_override.is_none()
             {
+<<<<<<< HEAD
                 cfg.context_window = new_cw;
                 self.chat_state_handle.update_sampling_config(cfg);
             }
@@ -1379,6 +1387,29 @@ impl SessionActor {
                             return Err(self.surface_compact_auth_failure(e).await);
                         }
                         return Err(e);
+=======
+                let total_tokens = self.chat_state_handle.get_estimated_total_tokens().await;
+                let percentage = xai_token_estimation::usage_percentage_u8(total_tokens, cw);
+
+                // Update the in-memory sampling config's `context_window` if the model reported a different value (mirror the legacy path's bookkeeping)
+                if let Some(mut cfg) = self.chat_state_handle.get_sampling_config().await
+                    && let Some(new_cw) = std::num::NonZeroU64::new(cw)
+                    && self.compaction.context_window_override.is_none()
+                {
+                    cfg.context_window = self.context_window_after_overflow(&cfg, new_cw);
+                    self.chat_state_handle.update_sampling_config(cfg);
+                }
+
+                let trigger_info = compaction::AutoCompactTriggerInfo {
+                    tokens_used: total_tokens,
+                    context_window: cw,
+                    percentage,
+                    reason_override: None,
+                };
+                if let Err(e) = self.run_compact_only(trigger_info, false).await {
+                    if Self::is_auth_compact_error(&e) {
+                        return Err(self.surface_compact_auth_failure(e).await);
+>>>>>>> upstream/main
                     }
                     self.compaction
                         .context_overflow_recovery
@@ -1843,6 +1874,50 @@ impl SessionActor {
         );
         self.chat_state_handle
             .replace_conversation_for_compaction(reduced);
+    }
+
+    /// The window after a server overflow at `server_window`: a selection that fits stays, a larger one is cleared.
+    pub(in crate::session) fn context_window_after_overflow(
+        &self,
+        cfg: &xai_grok_sampling_types::SamplingConfig,
+        server_window: std::num::NonZeroU64,
+    ) -> std::num::NonZeroU64 {
+        let selection = crate::session::handle::load_context_window_selection(
+            &self.compaction.context_window_selection,
+        );
+        let Some(selection) = selection.filter(|selection| *selection == cfg.context_window) else {
+            return server_window;
+        };
+        if selection <= server_window {
+            return selection;
+        }
+
+        self.compaction
+            .context_window_selection
+            .store(0, std::sync::atomic::Ordering::Relaxed);
+
+        // The summary and clients key models by catalog id, not by the routing slug `cfg.model` may hold
+        let model_id = self
+            .models_manager
+            .catalog_key(&cfg.model)
+            .unwrap_or_else(|| acp::ModelId::new(cfg.model.clone()));
+        let agent_name = self.agent.borrow().definition().name.clone();
+        let _ = self
+            .notifications
+            .persistence_tx
+            .send(PersistenceMsg::CurrentModel {
+                model_id: model_id.clone(),
+                agent: PersistedAgent::Named(agent_name),
+                reasoning_effort: None,
+                context_window: Some(None),
+            });
+
+        self.send_xai_notification_transient(XaiSessionUpdate::model_changed(
+            model_id.0.to_string(),
+            cfg.reasoning_effort.map(|effort| effort.to_string()),
+            None,
+        ));
+        server_window
     }
 
     async fn wait_for_stream_drain(

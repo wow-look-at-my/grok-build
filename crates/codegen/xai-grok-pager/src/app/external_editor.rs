@@ -155,5 +155,179 @@ mod tests {
                 .map(|(text, _)| text.as_str()),
             Some(message)
         );
+<<<<<<< HEAD
+=======
+
+        app.agents.get_mut(&id).unwrap().toast = None;
+        app.screen_mode = crate::app::ScreenMode::Minimal;
+        finish_prepare_error(&mut app, error());
+        assert!(
+            get_agent(&app, id)
+                .scrollback
+                .iter_entries()
+                .any(|(_, entry)| entry.block.searchable_text().as_deref() == Some(message))
+        );
+    }
+
+    #[test]
+    fn revalidation_cancels_after_warm_voice_ownership_change() {
+        let (mut app, request) = app_with_prompt_request();
+        let id = AgentId(0);
+        let (tx, _rx) = tokio::sync::mpsc::channel(1);
+        app.voice_cmd_tx = Some(tx);
+        app.voice_state = crate::app::app_view::VoiceState::Recording {
+            hold: false,
+            target: crate::app::app_view::VoiceTarget::Agent(id),
+            partial: crate::app::app_view::Partial::None,
+            route: None,
+        };
+        assert!(prepare(&mut app, request).unwrap().is_none());
+        assert!(
+            get_agent(&app, id)
+                .scrollback
+                .iter_entries()
+                .any(|(_, entry)| entry.block.searchable_text().as_deref() == Some(VOICE_MESSAGE))
+        );
+    }
+
+    #[test]
+    fn revalidation_cancels_after_cold_voice_ownership_change() {
+        let (mut app, request) = app_with_prompt_request();
+        let id = AgentId(0);
+        app.voice_state = crate::app::app_view::VoiceState::ColdStart {
+            hold: false,
+            target: crate::app::app_view::VoiceTarget::Agent(id),
+        };
+        assert!(prepare(&mut app, request).unwrap().is_none());
+        assert!(
+            get_agent(&app, id)
+                .scrollback
+                .iter_entries()
+                .any(|(_, entry)| entry.block.searchable_text().as_deref() == Some(VOICE_MESSAGE))
+        );
+    }
+
+    #[test]
+    fn revalidation_cancels_after_paste_probe_ownership_change() {
+        let (mut app, request) = app_with_prompt_request();
+        let id = AgentId(0);
+        app.agents.get_mut(&id).unwrap().paste_probe_in_flight = 1;
+        assert!(prepare(&mut app, request).unwrap().is_none());
+        assert!(
+            get_agent(&app, id)
+                .scrollback
+                .iter_entries()
+                .any(|(_, entry)| entry.block.searchable_text().as_deref() == Some(PASTE_MESSAGE))
+        );
+    }
+
+    #[test]
+    fn finish_success_failure_and_stale_paths_preserve_contracts() {
+        let id = AgentId(0);
+        let mut app = crate::app::app_view::tests::test_app();
+        let mut agent = crate::test_util::make_agent_view(Some("session"), "/work");
+        agent.session.id = id;
+        agent.prompt.set_text("original");
+        app.agents.insert(id, agent);
+        app.active_view = ActiveView::Agent(id);
+
+        let file = PromptEditorFile::create("edited\n").unwrap();
+        let prepared = PreparedEditorRequest::PromptDraft {
+            launch: EditorLaunch {
+                argv: vec!["editor".to_owned()],
+                path: file.path().to_path_buf(),
+            },
+            agent_id: id,
+            original_text: "original".to_owned(),
+            file,
+        };
+        finish(&mut app, prepared, Ok(success_status()));
+        assert_eq!(
+            get_agent(&app, id).prompt.text(),
+            "edited",
+            "the editor's final newline is stripped"
+        );
+
+        app.agents.get_mut(&id).unwrap().prompt.set_text("newer");
+        apply_prompt_outcome(&mut app, id, "original".to_owned(), Ok("stale".to_owned()));
+        assert_eq!(get_agent(&app, id).prompt.text(), "newer");
+
+        apply_prompt_outcome(&mut app, id, "newer".to_owned(), Err(PROMPT_EDITOR_NONZERO));
+        assert_eq!(get_agent(&app, id).prompt.text(), "newer");
+        assert!(
+            get_agent(&app, id)
+                .scrollback
+                .iter_entries()
+                .any(|(_, entry)| entry.block.searchable_text().as_deref()
+                    == Some(PROMPT_EDITOR_NONZERO))
+        );
+    }
+
+    /// The trailing-newline strip tells an editor-added newline from one the draft already had.
+    /// Editors append a final newline only when the buffer doesn't already end with one.
+    /// So a draft that ended with '\n' keeps it, and a blank line the user adds to a newline-less draft survives as exactly one '\n'.
+    #[test]
+    fn finish_preserves_a_drafts_own_trailing_newline() {
+        let id = AgentId(0);
+        let mut app = crate::app::app_view::tests::test_app();
+        let mut agent = crate::test_util::make_agent_view(Some("session"), "/work");
+        agent.session.id = id;
+        app.agents.insert(id, agent);
+        app.active_view = ActiveView::Agent(id);
+
+        // The draft ends with '\n': the file was saved as-is, so nothing is stripped
+        app.agents.get_mut(&id).unwrap().prompt.set_text("line\n");
+        let file = PromptEditorFile::create("edited\n").unwrap();
+        let prepared = PreparedEditorRequest::PromptDraft {
+            launch: EditorLaunch {
+                argv: vec!["editor".to_owned()],
+                path: file.path().to_path_buf(),
+            },
+            agent_id: id,
+            original_text: "line\n".to_owned(),
+            file,
+        };
+        finish(&mut app, prepared, Ok(success_status()));
+        assert_eq!(
+            get_agent(&app, id).prompt.text(),
+            "edited\n",
+            "a draft's own trailing newline survives the round trip"
+        );
+
+        // Newline-less draft, the user appends a blank line: the editor saved "text\n\n"; only the editor-added final '\n' is stripped
+        app.agents.get_mut(&id).unwrap().prompt.set_text("text");
+        let file = PromptEditorFile::create("text\n\n").unwrap();
+        let prepared = PreparedEditorRequest::PromptDraft {
+            launch: EditorLaunch {
+                argv: vec!["editor".to_owned()],
+                path: file.path().to_path_buf(),
+            },
+            agent_id: id,
+            original_text: "text".to_owned(),
+            file,
+        };
+        finish(&mut app, prepared, Ok(success_status()));
+        assert_eq!(
+            get_agent(&app, id).prompt.text(),
+            "text\n",
+            "a deliberately added trailing blank line survives as one newline"
+        );
+    }
+
+    #[test]
+    fn unconsumed_prompt_request_has_no_materialized_path() {
+        let request = PendingEditorRequest::PromptDraft {
+            agent_id: AgentId(7),
+            original_text: "sensitive draft".to_owned(),
+        };
+        assert!(matches!(
+            request,
+            PendingEditorRequest::PromptDraft {
+                agent_id: AgentId(7),
+                ref original_text,
+            } if original_text == "sensitive draft"
+        ));
+        drop(request);
+>>>>>>> upstream/main
     }
 }

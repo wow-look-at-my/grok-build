@@ -7,7 +7,8 @@ description = "Shared test-support for grok-build crates: mock inference server,
 publish = false
 
 [dependencies]
-agent-client-protocol = { workspace = true }
+# `unstable` enables the model-selection types these fixtures build.
+agent-client-protocol = { workspace = true, features = ["unstable"] }
 anyhow = { workspace = true }
 async-trait = { workspace = true }
 axum = { workspace = true }
@@ -36,7 +37,12 @@ xai-tty-utils = { workspace = true }
 xai-spawn = { workspace = true }
 
 [dev-dependencies]
+<<<<<<< HEAD
 request = { workspace = true }
+=======
+pretty_assertions = { workspace = true }
+reqwest = { workspace = true }
+>>>>>>> upstream/main
 # `test-util` enables the paused clock the recorder's deadline tests run on.
 tokio = { workspace = true, features = ["test-util"] }
 [features]

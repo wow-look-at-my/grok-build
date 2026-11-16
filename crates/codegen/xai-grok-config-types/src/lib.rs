@@ -1,3 +1,4 @@
+<<<<<<< HEAD
 #![allow(clippy::cast_lossless)]
 // lib.rs holds the lib code.
 #![allow(
@@ -7,7 +8,12 @@
     unreachable_code,
     dead_code
 )]
+=======
+>>>>>>> upstream/main
 #![deny(clippy::indexing_slicing)]
+
+mod file_acceleration;
+pub use file_acceleration::*;
 mod flags;
 pub use flags::*;
 mod registry;
@@ -20,6 +26,7 @@ mod permission;
 pub use permission::*;
 mod auth_provider;
 pub use auth_provider::*;
+<<<<<<< HEAD
 pub mod retry_budget;
 use serde::{Deserialize, Serialize};
 use xai_grok_announcements::RemoteAnnouncement;
@@ -1793,3 +1800,15 @@ mod tests {
         assert_eq!(s.workspace_command_enabled, Some(true));
     }
 }
+=======
+mod privacy;
+pub use privacy::{PrivacyMode, SharedPrivacyMode};
+mod sandbox;
+pub use sandbox::*;
+
+pub use xai_grok_config::{
+    CampaignOverride, ConsentGate, ContextualHintsRemote, DisplayRefreshSettings,
+    DoomLoopRecoverySettings, GoalRoleModel, LongReasoningReminderSettings, RemoteRequestEncoding,
+    RemoteSettings, WorktreeAutoGcSettings, WorktreeKindMaxAge, deserialize_tolerant,
+};
+>>>>>>> upstream/main

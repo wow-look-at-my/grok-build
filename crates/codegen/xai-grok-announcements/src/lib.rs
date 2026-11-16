@@ -9,11 +9,13 @@ use std::path::PathBuf;
 
 use chrono::{DateTime, Utc};
 use serde::{Deserialize, Serialize};
+pub use xai_grok_config::{AnnouncementCta, RemoteAnnouncement};
 
 // ─────────────────────────────────────────────────────────────────────────────
 // Types
 // ─────────────────────────────────────────────────────────────────────────────
 
+<<<<<<< HEAD
 /// Announcement from remote settings or local override.
 #[derive(Debug, Clone, Default, PartialEq, Eq, Serialize, Deserialize, schemars::JsonSchema)]
 #[cfg_attr(feature = "ts", derive(ts_rs::TS))]
@@ -55,6 +57,9 @@ pub struct AnnouncementCta {
 }
 
 /// Payload for `example.invalid/announcements/update` ACP notification.
+=======
+/// Payload for `x.ai/announcements/update` ACP notification.
+>>>>>>> upstream/main
 // Name predates the method rename to `.../update`; renaming would churn the pager consumer.
 #[derive(Debug, Clone, Deserialize)]
 #[cfg_attr(feature = "ts", derive(ts_rs::TS))]
@@ -292,6 +297,7 @@ mod tests {
         }
     }
 
+<<<<<<< HEAD
     /// The nested `cta` object is optional and per-field tolerant, matching the parent struct's style.
     /// A partial cta parses instead of failing the whole announcement.
     #[test]
@@ -320,6 +326,8 @@ mod tests {
         assert_eq!(absent.cta, None);
     }
 
+=======
+>>>>>>> upstream/main
     #[test]
     fn hidden_ids_round_trip() {
         let ids: BTreeSet<String> = ["outage-a".to_string(), "outage-b".to_string()]

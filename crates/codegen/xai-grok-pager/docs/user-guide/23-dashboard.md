@@ -153,7 +153,13 @@ Top to bottom: header (**last response type** — `Thinking` / `Thought` / `Resp
 
 The selected agent's **model** and, in always-approve (yolo) mode, an **`always-approve`** flag sit on the panel's bottom border (same badge slot as the dispatch box), including while answering questions. List rows no longer repeat model or always-approve badges.
 
+<<<<<<< HEAD
 **`Shift+Tab` cycles the peeked agent's mode** (Normal → Plan → Auto (when enabled) → Always-approve → Normal) on the **live** agent. On the dispatch box, Shift+Tab only stages mode for the *next* agent.
+=======
+**`Shift+Tab` cycles the peeked agent's mode** (Normal → Plan → Auto-review
+(when enabled) → Always-approve → Normal) on the **live** agent. On the dispatch box,
+Shift+Tab only stages mode for the *next* agent.
+>>>>>>> upstream/main
 
 Unlike dispatch (new sessions only), peek reply **talks to the selected agent**:
 

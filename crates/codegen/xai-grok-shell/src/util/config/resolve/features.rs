@@ -52,6 +52,7 @@ fn compose_turn_transient_retry(
     .value
 }
 
+<<<<<<< HEAD
 /// Whether model-catalog (`/v1/models`) and remote-settings (`/v1/settings`) fetches from xAI backends are allowed. That includes the deployment-config sync bundled into the startup prefetch.
 /// The background managed-config sync has its own `features.managed_config` gate. Precedence: requirements (MDM > system > user) > managed (`managed_config.toml` > system managed) > user `config.json` > default (true).
 /// This is an egress gate, so an overlay cannot re-enable a user's or a deployment's "never fetch" decision. Callable before an `AgentConfig` exists (startup prefetch runs pre-agent).
@@ -66,6 +67,9 @@ pub fn resolve_remote_fetch_enabled() -> bool {
         ),
     }
 }
+=======
+pub use xai_grok_config::resolve_remote_fetch_enabled;
+>>>>>>> upstream/main
 
 pub const REMOTE_FETCH_CONFIG_PATH: &str = "features.remote_fetch";
 
@@ -73,6 +77,7 @@ pub const REMOTE_FETCH_CONFIG_PATH: &str = "features.remote_fetch";
 /// The effective merge lets the user file win for every other key.
 pub const MANAGED_WINS_OVER_USER: &[&str] = &[REMOTE_FETCH_CONFIG_PATH];
 
+<<<<<<< HEAD
 fn remote_fetch_value(v: &TomlValue) -> Option<bool> {
     v.get("features")?.get("remote_fetch")?.as_bool()
 }
@@ -277,6 +282,8 @@ mod tests {
     }
 }
 
+=======
+>>>>>>> upstream/main
 #[cfg(test)]
 mod turn_transient_retry_toml_tests {
     use super::turn_transient_retry_from_toml;

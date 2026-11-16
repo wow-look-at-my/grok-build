@@ -1,26 +1,11 @@
-//! Async settings getter.
-//!
-//! One owner per `(origin, identity)` scope drives a load, chosen under the
-//! state lock so two concurrent starts cannot both fetch; callers observe that
-//! scope's `watch` cell, so a timeout or cancel drops only the observation, not
-//! the load.
-//!
-//! Protocol: [`warm_startup_settings`] starts the load, [`await_startup_settings`]
-//! (async) or [`block_on_startup_settings`] (multi-thread runtimes only) observes
-//! it, and [`consume_wait`] installs the outcome after a live scope recheck.
+//! Each function here calls the `xai-grok-cloud-config` startup settings getter with the shell's `policy_repair_pending` check.
 
-use std::sync::{Mutex, OnceLock};
 use std::time::Duration;
 
-use tokio::sync::watch;
-use tokio::task::AbortHandle;
 use tokio_util::sync::CancellationToken;
-
-use super::SettingsCacheManager;
-use crate::agent::config::Config;
-use crate::util::config::RemoteSettings;
 use xai_grok_login::{GrokAuth, GrokComConfig};
 
+<<<<<<< HEAD
 /// A settings load request. Warm a load with [`resolve`](Self::resolve) or
 /// [`from_config`](Self::from_config); a consume-time recheck reuses the warmed
 /// [`auth`](Self::auth) rather than re-reading disk.
@@ -91,18 +76,17 @@ pub struct SettingsOutcome {
     origin: String,
     identity: String,
 }
+=======
+use crate::util::config::RemoteSettings;
+use xai_grok_cloud_config::managed_config::policy_repair_pending;
+>>>>>>> upstream/main
 
 #[cfg(any(test, feature = "test-support"))]
-impl SettingsOutcome {
-    pub fn settings(&self) -> Option<&RemoteSettings> {
-        self.settings.as_ref()
-    }
+pub use xai_grok_cloud_config::settings_get::reset_startup_settings_for_tests;
 
-    pub fn attempted(&self) -> bool {
-        self.attempted
-    }
-}
+pub use xai_grok_cloud_config::settings_get::{SettingsOutcome, SettingsQuery, SettingsWait};
 
+<<<<<<< HEAD
 impl SettingsOutcome {
     fn skipped() -> Self {
         Self {
@@ -278,36 +262,18 @@ fn warm_and_subscribe(query: &SettingsQuery) -> Option<watch::Receiver<Option<Se
 }
 
 /// Ineligible auth or policy returns immediately. No network, no cache write.
+=======
+>>>>>>> upstream/main
 pub fn is_eligible(query: &SettingsQuery) -> bool {
-    if query.auth.is_none() {
-        return false;
-    }
-    if !crate::util::config::resolve_remote_fetch_enabled() {
-        return false;
-    }
-    if crate::managed_config::policy_repair_pending() {
-        return false;
-    }
-    true
+    xai_grok_cloud_config::settings_get::is_eligible(query, policy_repair_pending)
 }
 
-/// Clear the startup owner and watch so a later test in this process does not
-/// observe a previous load.
-#[cfg(any(test, feature = "test-support"))]
-pub fn reset_startup_settings_for_tests() {
-    let mut state = lock_state();
-    if let Some(owner) = state.owner.take() {
-        owner.abort.abort();
-    }
-}
-
-/// Cache-first settings load. Fetch on miss; write the signed cache only on
-/// success after a policy and identity re-check. Never joins the startup watch.
 #[cfg(any(test, feature = "test-support"))]
 pub async fn get_settings(query: SettingsQuery) -> SettingsOutcome {
-    load_settings(query).await
+    xai_grok_cloud_config::settings_get::get_settings(query, policy_repair_pending).await
 }
 
+<<<<<<< HEAD
 /// Live `/v1/settings` read for mid-session refresh. Does not consult the
 /// startup cache. A successful fetch is written through so a later startup
 /// can hit disk. `SettingsFetch` variants are preserved, including `Rejected`.
@@ -361,67 +327,50 @@ pub(crate) async fn fetch_settings_live(query: SettingsQuery) -> crate::remote::
 /// Observe this scope's startup load, warming it first when eligible. An
 /// ineligible query returns immediately. The observed value is always for the
 /// caller's own scope, so no post-hoc match is needed.
+=======
+>>>>>>> upstream/main
 pub async fn await_startup_settings(
     query: SettingsQuery,
     deadline: Duration,
     cancel: &CancellationToken,
 ) -> SettingsWait {
-    if !is_eligible(&query) {
-        return SettingsWait::Ready(Box::new(SettingsOutcome::skipped()));
-    }
-    let Some(rx) = warm_and_subscribe(&query) else {
-        return SettingsWait::TimedOut;
-    };
-    observe(rx, Some(deadline), cancel).await
+    xai_grok_cloud_config::settings_get::await_startup_settings(
+        query,
+        deadline,
+        cancel,
+        policy_repair_pending,
+    )
+    .await
 }
 
-/// Resolve a wait into settings: a ready outcome is rechecked against the live
-/// scope; a timeout or cancel falls open to `None`.
 pub fn consume_wait(
     wait: SettingsWait,
     auth: Option<&GrokAuth>,
     grok_com_config: &GrokComConfig,
 ) -> Option<RemoteSettings> {
-    match wait {
-        SettingsWait::Ready(outcome) => outcome.take_if_in_scope(auth, grok_com_config),
-        SettingsWait::TimedOut | SettingsWait::Cancelled => None,
-    }
+    xai_grok_cloud_config::settings_get::consume_wait(
+        wait,
+        auth,
+        grok_com_config,
+        policy_repair_pending,
+    )
 }
 
-/// Unbounded observation for callers that share the startup load without their
-/// own deadline. The owner is still bounded by the fetch timeouts. The observed
-/// value is always for this scope.
 #[cfg(any(test, feature = "test-support"))]
 pub async fn get_startup_settings(query: SettingsQuery) -> SettingsOutcome {
-    if !is_eligible(&query) {
-        return SettingsOutcome::skipped();
-    }
-    let Some(rx) = warm_and_subscribe(&query) else {
-        return SettingsOutcome::failed();
-    };
-    match observe(rx, None, &CancellationToken::new()).await {
-        SettingsWait::Ready(outcome) => *outcome,
-        SettingsWait::TimedOut | SettingsWait::Cancelled => SettingsOutcome::failed(),
-    }
+    xai_grok_cloud_config::settings_get::get_startup_settings(query, policy_repair_pending).await
 }
 
-/// Sole public entry to start the startup load. Ineligible queries spawn
-/// nothing. Election is atomic; see [`warm_and_subscribe`].
 pub fn warm_startup_settings(query: SettingsQuery) {
-    if !is_eligible(&query) {
-        return;
-    }
-    let _ = warm_and_subscribe(&query);
+    xai_grok_cloud_config::settings_get::warm_startup_settings(query, policy_repair_pending);
 }
 
-/// Sync wait for `spawn_blocking` bootstrap on a multi-thread runtime.
-/// Current-thread callers must [`await_startup_settings`] first; this returns
-/// a published value if one exists and otherwise does not pretend to wait.
 pub fn block_on_startup_settings(
     query: SettingsQuery,
     deadline: Duration,
     cancel: &CancellationToken,
 ) -> SettingsWait {
+<<<<<<< HEAD
     if !is_eligible(&query) {
         return SettingsWait::Ready(Box::new(SettingsOutcome::skipped()));
     }
@@ -672,4 +621,12 @@ mod tests {
         drop(tx);
         reset_startup_settings_for_tests();
     }
+=======
+    xai_grok_cloud_config::settings_get::block_on_startup_settings(
+        query,
+        deadline,
+        cancel,
+        policy_repair_pending,
+    )
+>>>>>>> upstream/main
 }

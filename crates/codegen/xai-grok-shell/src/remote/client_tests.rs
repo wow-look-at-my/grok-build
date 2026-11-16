@@ -21,6 +21,7 @@ fn get_env_keys_parses_strings_and_rejects_non_strings() {
     assert_eq!(parse(serde_json::json!(["A", 123])), None);
     assert_eq!(parse(serde_json::json!([])), None);
 }
+<<<<<<< HEAD
 /// Mock cli-chat-proxy serving `GET /settings` with a fixed status and body.
 async fn start_settings_server(
     status: StatusCode,
@@ -68,6 +69,8 @@ async fn settings_fetch_maps_status_to_outcome() {
         assert_eq!(got, expected, "status {status}, body {body:?}");
     }
 }
+=======
+>>>>>>> upstream/main
 #[derive(Debug, Default, Clone)]
 struct SeenHeaders {
     authorization: Option<String>,
@@ -350,6 +353,38 @@ fn parse_reads_rate_limit_retry_threshold() {
     assert_eq!(result.rate_limit_retry_threshold, Some(7));
 }
 #[test]
+fn parse_reads_notice_from_top_level_or_meta() {
+    use xai_grok_sampling_types::{ModelNotice, ModelNoticeSeverity};
+    let deprecated = ModelNotice {
+        severity: ModelNoticeSeverity::Warning,
+        text: "Deprecated Oct 15".to_owned(),
+        label: Some("deprecated".to_owned()),
+    };
+    let top_level = serde_json::json!({
+        "id": "old-model",
+        "notice": {"severity": "warning", "text": "Deprecated Oct 15", "label": "deprecated"},
+        "_meta": {"notice": {"severity": "critical", "text": "ignored"}}
+    });
+    let in_meta = serde_json::json!({
+        "id": "old-model",
+        "_meta": {"notice": {"severity": "warning", "text": "Deprecated Oct 15", "label": "deprecated"}}
+    });
+    let from_top_level = parse_remote_model_value(&top_level, "https://default.url")
+        .expect("entry with an id parses");
+    let from_meta =
+        parse_remote_model_value(&in_meta, "https://default.url").expect("entry with an id parses");
+    assert_eq!(Some(deprecated.clone()), from_top_level.notice);
+    assert_eq!(Some(deprecated), from_meta.notice);
+}
+#[test]
+fn parse_keeps_the_model_when_its_notice_is_malformed() {
+    let value = serde_json::json!({"id": "old-model", "notice": {"severity": "warning"}});
+    let result =
+        parse_remote_model_value(&value, "https://default.url").expect("entry with an id parses");
+    assert_eq!("old-model", result.model);
+    assert_eq!(None, result.notice);
+}
+#[test]
 fn parse_reads_model_family() {
     let value = serde_json::json!({
         "model": "grok-4.5",
@@ -529,6 +564,42 @@ fn parse_reads_meta_fallback_fields() {
         std::num::NonZeroU64::new(131072).unwrap()
     );
     assert_eq!(result.agent_type, "concise");
+}
+#[test]
+fn parse_remote_model_value_context_window_is_default_and_context_windows_are_choices() {
+    let camel = serde_json::json!({ "contextWindows": [500_000, 256_000] });
+    let snake = serde_json::json!({ "context_windows": [500_000, 256_000] });
+    let meta = serde_json::json!({ "_meta": { "contextWindows": [500_000, 256_000] } });
+    for listed in [camel, snake, meta] {
+        let mut value = serde_json::json!({ "model": "grok-4.7", "context_window": 256_000 });
+        value
+            .as_object_mut()
+            .unwrap()
+            .extend(listed.as_object().unwrap().clone());
+        let result = parse_remote_model_value(&value, "https://default.url").expect("model parses");
+        assert_eq!(result.context_window.get(), 256_000, "{listed}");
+        let windows: Vec<u64> = result.context_windows.iter().map(|w| w.get()).collect();
+        assert_eq!(windows, [500_000, 256_000], "{listed}");
+    }
+}
+#[test]
+fn parse_remote_model_value_bad_context_windows_fall_back_to_context_window() {
+    for bad in [
+        serde_json::json!([256_000, "big"]),
+        serde_json::json!([0]),
+        serde_json::json!(500_000),
+    ] {
+        let value = serde_json::json!({
+            "model": "grok-4",
+            "context_window": 300_000,
+            "context_windows": bad.clone(),
+        });
+        let result = parse_remote_model_value(&value, "https://default.url").expect("model parses");
+        assert_eq!(result.context_window.get(), 300_000, "{bad}");
+        assert!(result.context_windows.is_empty(), "{bad}");
+    }
+    let value = serde_json::json!({ "model": "grok-4", "context_window": 0 });
+    assert!(parse_remote_model_value(&value, "https://default.url").is_none());
 }
 #[test]
 fn parse_remote_model_value_no_laziness_detector_block_yields_default() {
@@ -813,6 +884,7 @@ fn get_object_returns_some_for_actual_object() {
         &serde_json::json!("two")
     );
 }
+<<<<<<< HEAD
 fn endpoints(
     proxy: &str,
     models_base_url: Option<&str>,
@@ -890,6 +962,9 @@ fn list_url_explicit_overrides_derivation() {
     );
 }
 /// REGRESSION: `grok setup` must send the team token to the proxy, never the inference endpoint.
+=======
+/// REGRESSION: `grok setup` must send the deployment key to the proxy, never the inference endpoint.
+>>>>>>> upstream/main
 #[test]
 #[serial_test::serial]
 fn deployment_config_url_uses_cli_chat_proxy_when_not_overridden() {

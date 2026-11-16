@@ -1,18 +1,6 @@
-//! Vendor compatibility configuration for third-party agent surfaces
-//! (skills, rules, agents, MCPs, hooks, sessions).
-//!
-//! Historically the agent hard-coded the dir lists `[".grok", ".agents",
-//! ".claude", ".cursor"]` (and `RULES_DIRS` / `AGENT_FILENAMES`) across ~6
-//! call sites in three crates. This module now owns the canonical cell registry
-//! used by runtime resolution and diagnostics (env var → config TOML → remote
-//! setting → default ON).
-//!
-//! Two forms:
-//! - [`CompatConfigToml`] — raw, parsed from the `[compat]` TOML section. Each
-//!   cell is `Option<bool>` so `None` falls through to the resolution chain.
-//! - [`CompatConfig`] — resolved plain bools consumed at runtime. Every cell
-//!   defaults on.
+//! Vendor compatibility configuration; `xai-grok-config` owns it.
 
+<<<<<<< HEAD
 use serde::{Deserialize, Serialize};
 
 #[derive(Debug, Clone, Copy, PartialEq, Eq, strum::AsRefStr, strum::IntoStaticStr)]
@@ -503,3 +491,10 @@ mod tests {
         assert_eq!(parsed.cursor, VendorCompatToml::default());
     }
 }
+=======
+pub(crate) use xai_grok_config::compat::INSTRUCTION_FILENAMES;
+pub use xai_grok_config::compat::{
+    COMPAT_CELLS, CompatCell, CompatConfig, CompatConfigToml, CompatRemoteKey, CompatSurface,
+    CompatVendor, VendorCompat, VendorCompatToml,
+};
+>>>>>>> upstream/main

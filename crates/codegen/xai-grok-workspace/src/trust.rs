@@ -1,3 +1,4 @@
+<<<<<<< HEAD
 //! Folder-trust store ("do you trust this folder?").
 //!
 //! Persists per-folder trust decisions to `~/.grok/trusted_folders.json`.
@@ -19,9 +20,12 @@
 use std::collections::BTreeMap;
 use std::io;
 use std::path::{Path, PathBuf};
+=======
+use std::path::Path;
+>>>>>>> upstream/main
 use std::sync::Once;
-use std::time::{SystemTime, UNIX_EPOCH};
 
+<<<<<<< HEAD
 use serde::{Deserialize, Serialize};
 
 /// Filename of the folder-trust store under `~/.grok/`.
@@ -502,6 +506,12 @@ impl Drop for ExclusiveLock {
         let _ = fs2::FileExt::unlock(&self.file);
     }
 }
+=======
+pub(crate) use xai_grok_permission_rules::trust::{Recorded, TrustPersistError, trust_store_home};
+pub use xai_grok_permission_rules::trust::{
+    TRUST_FILE_NAME, TrustStore, is_home_dir, is_unsafe_trust_root, workspace_key,
+};
+>>>>>>> upstream/main
 
 /// One-time migration of legacy project-hook trust grants into the unified folder-trust store. Idempotent and guarded to run at most once per process.
 /// The legacy file is then renamed to `*.migrated` so it is read only once.
@@ -545,7 +555,7 @@ fn migrate_legacy_hook_trust_in(legacy_file: &Path, store: &mut TrustStore) -> u
         }
     };
     // A failed load is not "no decision": do not seed from an empty stand-in or consume the legacy file.
-    if store.path.is_none() || !store.disk_readable() {
+    if !store.has_store_path() || !store.disk_readable() {
         tracing::warn!(
             path = %legacy_file.display(),
             "leaving legacy hook-trust file in place; folder-trust store has no readable document"
@@ -600,6 +610,8 @@ fn migrate_legacy_hook_trust_in(legacy_file: &Path, store: &mut TrustStore) -> u
 #[cfg(test)]
 mod tests {
     use super::*;
+    use std::path::PathBuf;
+    use xai_grok_permission_rules::trust::canonicalize_or_owned;
 
     #[test]
     fn migrate_legacy_hook_trust_seeds_store_and_renames_file() {
@@ -771,6 +783,7 @@ mod tests {
         );
     }
 
+<<<<<<< HEAD
     #[test]
     fn empty_store_trusts_nothing() {
         let tmp = tempfile::tempdir().unwrap();
@@ -1630,6 +1643,8 @@ mod tests {
         );
     }
 
+=======
+>>>>>>> upstream/main
     // ── workspace_key registry collapse (grok-managed worktrees) ─────────
 
     // The crate-shared env lock and env guards travel as ONE value
@@ -1823,7 +1838,7 @@ mod tests {
 
     #[test]
     fn workspace_key_ignores_registry_for_cwd_outside_worktrees_dir() {
-        // A populated registry must NOT collapse a cwd OUTSIDE `<grok_home>/worktrees` `worktree_record_for_cwd` skips the registry there, so the key falls back to
+        // A populated registry must NOT collapse a cwd OUTSIDE `<grok_home>/worktrees` The reader's cwd gate skips the registry there, so the key falls back to
         // git/cwd Non-vacuous: the registry IS populated with a real git source repo that WOULD be returned for a worktree cwd `outside` is its OWN git repo (under
         // grok HOME but not under its `worktrees/`), so the fallback is deterministic (no conditional skip) We assert the key is `outside`'s own root, never the source repo
         let temp = tempfile::TempDir::new().unwrap();

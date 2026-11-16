@@ -312,7 +312,11 @@ pub(super) fn default_actions(mouse_reporting_toggle_enabled: bool) -> Vec<Actio
             hint_key_display: Some("Shift+Tab"),
             requires_confirmation: false,
             long_help: Some(
+<<<<<<< HEAD
                 "Steps the session mode: Plan -> Auto -> Always-Approve -> Orchestrator -> Explore -> Plan.\nPlan keeps the agent planning first and writes no files; Always-Approve runs every tool call without asking; Orchestrator and Explore live-switch the active agent.\nCtrl+O toggles auto-approve directly.",
+=======
+                "Steps the session mode: Normal -> Plan -> Auto-review (when enabled) -> Always-Approve -> Normal.\nPlan keeps the agent planning first and writes no files; Auto-review has a classifier approve safe tool calls; Always-Approve runs every tool call without asking.\nCtrl+O toggles auto-approve directly.",
+>>>>>>> upstream/main
             ),
         },
         // ── Panes (agent-level: toggle side panes) ─────────────────
@@ -506,7 +510,7 @@ pub(super) fn default_actions(mouse_reporting_toggle_enabled: bool) -> Vec<Actio
         ActionDef {
             id: ActionId::StashPrompt,
             label: "stash",
-            description: "Stash / pop prompt draft",
+            description: "Stash / pop prompt",
             default_key: key!('s', CONTROL),
             // The escape hatch for terminals that swallow Ctrl+S as XOFF.
             alt_keys: vec![key!('s', ALT)],
@@ -516,7 +520,7 @@ pub(super) fn default_actions(mouse_reporting_toggle_enabled: bool) -> Vec<Actio
             hint_key_display: None,
             requires_confirmation: false,
             long_help: Some(
-                "Stash your current prompt as a draft.\nCtrl+S sets the draft aside and clears the composer. Ctrl+S on an empty composer restores it, as does Ctrl+Z pressed right after the stash. The draft also restores by itself after you send your next prompt. Use Alt+S if your terminal swallows Ctrl+S.\nOne draft at a time: a new stash replaces the old one.",
+                "Stash your current prompt as a draft.\nCtrl+S sets the draft aside and clears the composer. Ctrl+S on an empty composer pops the draft back (unstash), as does Ctrl+Z pressed right after the stash. The draft also restores by itself after you send your next prompt. Use Alt+S if your terminal swallows Ctrl+S.\nOne draft at a time: a new stash replaces the old one.",
             ),
         },
         ActionDef {

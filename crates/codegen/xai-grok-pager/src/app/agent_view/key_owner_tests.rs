@@ -451,7 +451,7 @@ fn a_parked_card_does_not_hand_esc_to_the_turn_cancel() {
     for open in [
         open_permission as fn(&mut AgentView),
         open_question as fn(&mut AgentView),
-        open_elicitation as fn(&mut AgentView),
+        (|agent: &mut AgentView| drop(open_elicitation(agent))) as fn(&mut AgentView),
     ] {
         let mut agent = make_agent();
         open(&mut agent);
@@ -571,7 +571,7 @@ fn esc_parks_even_under_a_latent_queued_edit() {
     for open in [
         open_permission as fn(&mut AgentView),
         open_question as fn(&mut AgentView),
-        open_elicitation as fn(&mut AgentView),
+        (|agent: &mut AgentView| drop(open_elicitation(agent))) as fn(&mut AgentView),
     ] {
         let mut agent = make_agent();
         agent.prompt_mode = crate::app::queue_edit::PromptMode::EditingQueued {
@@ -707,7 +707,10 @@ fn anything_parked_in_the_overlay_keeps_an_esc_route_to_the_dashboard() {
     for (label, setup) in [
         ("permission", open_permission as fn(&mut AgentView)),
         ("question", open_question as fn(&mut AgentView)),
-        ("elicitation", open_elicitation as fn(&mut AgentView)),
+        (
+            "elicitation",
+            (|agent: &mut AgentView| drop(open_elicitation(agent))) as fn(&mut AgentView),
+        ),
         ("plan approval", open_plan as fn(&mut AgentView)),
         (
             "plan approval over a parked question",
@@ -896,9 +899,166 @@ fn blanking_a_free_text_answer_unmarks_it_from_the_nav_buttons_too() {
 // The Tab/Esc contract is mode-independent: card intercepts run ahead of the scrollback's vim letter bindings
 // These go through `handle_input` so the full router (not just the card handlers) is under test
 
+<<<<<<< HEAD
 fn open_elicitation(agent: &mut AgentView) {
+=======
+fn press(agent: &mut AgentView, code: KeyCode, modifiers: KeyModifiers) {
+    let registry = ActionRegistry::defaults();
+    let _ = agent.handle_input(
+        &crossterm::event::Event::Key(KeyEvent::new(code, modifiers)),
+        &registry,
+    );
+}
+
+fn question_cursor(agent: &AgentView) -> usize {
+    agent
+        .question_view
+        .as_ref()
+        .expect("question open")
+        .cursor()
+}
+
+fn question_tab(agent: &AgentView) -> usize {
+    agent
+        .question_view
+        .as_ref()
+        .expect("question open")
+        .active_tab
+}
+
+/// With vim mode on, the focused card still owns j/k/Tab/Esc, the same walk-and-park contract as the default mode.
+#[test]
+fn vim_mode_focused_card_keeps_the_tab_contract() {
+    let mut agent = make_agent();
+    agent.vim_mode = true;
+    open_two_questions(&mut agent);
+
+    assert_eq!(question_cursor(&agent), 0);
+    press(&mut agent, KeyCode::Char('j'), KeyModifiers::NONE);
+    assert_eq!(
+        question_cursor(&agent),
+        1,
+        "j walks the answer rows while the card holds the keyboard"
+    );
+    press(&mut agent, KeyCode::Tab, KeyModifiers::NONE);
+    // Two options and a freeform row, so Tab from option 1 lands on the freeform row (2)
+    assert_eq!(question_cursor(&agent), 2, "Tab still walks answers");
+    assert_eq!(
+        agent.active_pane,
+        AgentPane::Prompt,
+        "Tab never parks the card"
+    );
+
+    // Leave freeform with an arrow (a letter would enter InputMode), then `l` must still switch questions under vim mode
+    press(&mut agent, KeyCode::Up, KeyModifiers::NONE);
+    assert_eq!(question_cursor(&agent), 1);
+    press(&mut agent, KeyCode::Char('l'), KeyModifiers::NONE);
+    assert_eq!(
+        question_tab(&agent),
+        1,
+        "l still crosses questions when the card is focused"
+    );
+
+    press(&mut agent, KeyCode::Esc, KeyModifiers::NONE);
+    assert_eq!(agent.active_pane, AgentPane::Scrollback);
+    assert!(
+        agent.question_view.is_some(),
+        "Esc parks without dismissing the card"
+    );
+    assert!(
+        hint_labels(&agent).contains(&"question".to_string()),
+        "parked bar names the route back, got {:?}",
+        hint_labels(&agent)
+    );
+}
+
+/// Once parked, vim letter keys belong to the scrollback; they must not keep walking the card behind the pane.
+#[test]
+fn vim_mode_parked_card_does_not_eat_scrollback_jk() {
+    let mut agent = make_agent();
+    agent.vim_mode = true;
+    open_two_questions(&mut agent);
+
+    press(&mut agent, KeyCode::Esc, KeyModifiers::NONE);
+    assert_eq!(agent.active_pane, AgentPane::Scrollback);
+    let cursor_before = question_cursor(&agent);
+    let tab_before = question_tab(&agent);
+
+    press(&mut agent, KeyCode::Char('j'), KeyModifiers::NONE);
+    press(&mut agent, KeyCode::Char('k'), KeyModifiers::NONE);
+    press(&mut agent, KeyCode::Char('l'), KeyModifiers::NONE);
+    press(&mut agent, KeyCode::Char('h'), KeyModifiers::NONE);
+    assert_eq!(
+        question_cursor(&agent),
+        cursor_before,
+        "parked j/k must not move the card's answer cursor"
+    );
+    assert_eq!(
+        question_tab(&agent),
+        tab_before,
+        "parked h/l must not switch questions"
+    );
+    assert_eq!(
+        agent.active_pane,
+        AgentPane::Scrollback,
+        "scrollback keeps the keyboard"
+    );
+
+    press(&mut agent, KeyCode::Tab, KeyModifiers::NONE);
+    assert_eq!(
+        agent.active_pane,
+        AgentPane::Prompt,
+        "Tab from the scrollback still hands the keyboard back"
+    );
+    assert_eq!(
+        agent.key_owner(),
+        KeyOwner::Card(BlockingCard::Question),
+        "and the card owns keys again"
+    );
+}
+
+/// Permission options walk the same way under vim mode, including the Esc park that must never answer the request.
+#[test]
+fn vim_mode_permission_tab_and_esc_match_default() {
+    let mut agent = make_agent();
+    agent.vim_mode = true;
+    open_permission(&mut agent);
+
+    press(&mut agent, KeyCode::Tab, KeyModifiers::NONE);
+    assert_eq!(permission_cursor(&agent), 1);
+    press(&mut agent, KeyCode::Char('j'), KeyModifiers::NONE);
+    assert_eq!(
+        permission_cursor(&agent),
+        2,
+        "j walks permission options while the card holds the keyboard"
+    );
+    assert_eq!(agent.permission_queue.len(), 1);
+    assert_eq!(agent.active_pane, AgentPane::Prompt);
+
+    press(&mut agent, KeyCode::Esc, KeyModifiers::NONE);
+    assert_eq!(agent.active_pane, AgentPane::Scrollback);
+    assert_eq!(agent.permission_queue.len(), 1);
+    let parked_cursor = permission_cursor(&agent);
+
+    // Parked j is scrollback nav; it must not walk or answer the options
+    press(&mut agent, KeyCode::Char('j'), KeyModifiers::NONE);
+    assert_eq!(agent.permission_queue.len(), 1);
+    assert_eq!(permission_cursor(&agent), parked_cursor);
+    assert_eq!(agent.active_pane, AgentPane::Scrollback);
+
+    press(&mut agent, KeyCode::Tab, KeyModifiers::NONE);
+    assert_eq!(agent.active_pane, AgentPane::Prompt);
+    assert_eq!(agent.key_owner(), KeyOwner::Card(BlockingCard::Permission));
+}
+
+type ElicitAnswer = tokio::sync::oneshot::Receiver<xai_acp_lib::AcpResult<acp::ExtResponse>>;
+
+/// Returns what the MCP server would receive.
+fn open_elicitation(agent: &mut AgentView) -> ElicitAnswer {
+>>>>>>> upstream/main
     use crate::views::elicitation_view::ElicitationViewState;
     use xai_grok_tools::mcp_elicitation::{McpElicitExtRequest, McpElicitModeFields};
+    let (tx, rx) = tokio::sync::oneshot::channel();
     agent.elicitation_view = Some(ElicitationViewState::from_request(
         McpElicitExtRequest {
             session_id: "s".into(),
@@ -916,8 +1076,9 @@ fn open_elicitation(agent: &mut AgentView) {
             },
         },
         Some(StashedPrompt::default()),
-        None,
+        Some(tx),
     ));
+    rx
 }
 
 #[test]
@@ -1207,4 +1368,174 @@ fn elicitation_shift_tab_walks_fields_backwards() {
         assert_eq!(ev.focus, ElicitationFocus::Fields);
         assert_eq!(ev.field_cursor(), 0);
     }
+}
+
+fn delivered_answer(rx: &mut ElicitAnswer) -> serde_json::Value {
+    let response = rx
+        .try_recv()
+        .expect("an answer was sent")
+        .expect("the answer is not an error");
+    serde_json::from_str(response.0.get()).expect("answer is JSON")
+}
+
+fn system_notes(agent: &AgentView) -> Vec<String> {
+    (0..agent.scrollback.len())
+        .filter_map(|i| agent.scrollback.get(i))
+        .filter_map(|entry| match &entry.block {
+            crate::scrollback::block::RenderBlock::System(block) => Some(block.text.clone()),
+            _ => None,
+        })
+        .collect()
+}
+
+fn minimal_type(agent: &mut AgentView, keys: &[KeyCode]) {
+    use crossterm::event::Event;
+    let registry = ActionRegistry::defaults();
+    for code in keys {
+        let _ = agent.handle_minimal_input(
+            &Event::Key(KeyEvent::new(*code, KeyModifiers::NONE)),
+            &registry,
+        );
+    }
+}
+
+/// Minimal keeps the prompt pane focused and routes keys through its `/btw` panel before the shared router.
+fn minimal_agent_with_btw() -> AgentView {
+    let mut agent = make_agent();
+    agent
+        .prompt
+        .set_screen_mode(crate::app::ScreenMode::Minimal);
+    agent.set_active_pane(AgentPane::Prompt, true);
+    let request_id = crate::minimal_api::start_minimal_btw(&mut agent, "q".into());
+    assert!(crate::minimal_api::finish_minimal_btw(
+        &mut agent,
+        request_id,
+        Ok("answer".into())
+    ));
+    agent.btw_focused = true;
+    agent
+}
+
+#[test]
+fn minimal_keys_answer_the_elicitation_card_and_submit_it() {
+    let mut agent = minimal_agent_with_btw();
+    let mut rx = open_elicitation(&mut agent);
+    assert!(agent.is_awaiting_user_answer());
+
+    let mut keys: Vec<KeyCode> = "a@b.co".chars().map(KeyCode::Char).collect();
+    keys.extend([KeyCode::Enter, KeyCode::Tab, KeyCode::Char('y')]);
+    minimal_type(&mut agent, &keys);
+
+    assert_eq!(
+        serde_json::json!({ "outcome": "accept", "content": { "email": "a@b.co" } }),
+        delivered_answer(&mut rx)
+    );
+    assert!(
+        agent.elicitation_view.is_none(),
+        "the card closes on accept"
+    );
+    assert_eq!("", agent.prompt.text(), "no key leaked into the composer");
+    assert!(
+        agent.btw_state.is_some(),
+        "the /btw panel never saw the keys"
+    );
+    assert_eq!(Vec::<String>::new(), system_notes(&agent));
+}
+
+#[test]
+fn declined_elicitation_tells_the_server_and_leaves_a_notice() {
+    let mut agent = minimal_agent_with_btw();
+    let mut rx = open_elicitation(&mut agent);
+    minimal_type(&mut agent, &[KeyCode::Tab, KeyCode::Char('d')]);
+
+    assert_eq!(
+        serde_json::json!({ "outcome": "decline" }),
+        delivered_answer(&mut rx)
+    );
+    assert!(agent.elicitation_view.is_none());
+    assert_eq!(
+        vec!["Declined MCP “demo” request for input.".to_owned()],
+        system_notes(&agent)
+    );
+}
+
+#[test]
+fn cancelled_elicitation_tells_the_server_and_leaves_a_notice() {
+    use crossterm::event::Event;
+    let mut agent = minimal_agent_with_btw();
+    let mut rx = open_elicitation(&mut agent);
+    let _ = agent.handle_minimal_input(
+        &Event::Key(KeyEvent::new(KeyCode::Char('c'), KeyModifiers::CONTROL)),
+        &ActionRegistry::defaults(),
+    );
+
+    assert_eq!(
+        serde_json::json!({ "outcome": "cancel" }),
+        delivered_answer(&mut rx)
+    );
+    assert_eq!(
+        vec!["Dismissed MCP “demo” request for input without answering.".to_owned()],
+        system_notes(&agent)
+    );
+}
+
+#[test]
+fn accept_after_the_server_gave_up_leaves_a_notice() {
+    let mut agent = minimal_agent_with_btw();
+    drop(open_elicitation(&mut agent));
+    let mut keys: Vec<KeyCode> = "a@b.co".chars().map(KeyCode::Char).collect();
+    keys.extend([KeyCode::Enter, KeyCode::Tab, KeyCode::Char('y')]);
+    minimal_type(&mut agent, &keys);
+
+    assert!(agent.elicitation_view.is_none());
+    assert_eq!(
+        vec![
+            "MCP “demo” request for input closed before it was answered here (it timed out or was answered elsewhere)."
+                .to_owned()
+        ],
+        system_notes(&agent)
+    );
+}
+
+#[test]
+fn notice_quotes_only_catalog_name_characters_of_the_server() {
+    let mut agent = make_agent();
+    crate::minimal_api::open_test_elicitation(
+        &mut agent,
+        "x” approved. Visit https://evil.example",
+        "Create ticket?",
+    );
+    assert!(agent.dismiss_resolved_interaction("mcp-elicit-test"));
+    assert_eq!(
+        vec![
+            "MCP “xapprovedVisithttpsevilexample” request for input closed before it was answered here (it timed out or was answered elsewhere)."
+                .to_owned()
+        ],
+        system_notes(&agent)
+    );
+}
+
+#[test]
+fn elicitation_closed_elsewhere_leaves_a_notice() {
+    let mut agent = make_agent();
+    let _answer = open_elicitation(&mut agent);
+
+    assert!(agent.dismiss_resolved_interaction("mcp-elicit-1"));
+
+    assert!(agent.elicitation_view.is_none());
+    assert!(!agent.is_awaiting_user_answer());
+    assert_eq!(
+        vec![
+            "MCP “demo” request for input closed before it was answered here (it timed out or was answered elsewhere)."
+                .to_owned()
+        ],
+        system_notes(&agent)
+    );
+}
+
+#[test]
+fn cancel_turn_confirm_is_not_awaiting_a_user_answer() {
+    let mut agent = make_agent();
+    open_cancel_turn(&mut agent);
+    assert!(!agent.is_awaiting_user_answer());
 }

@@ -512,6 +512,7 @@ fn write_summary(
 ) {
     let session_dir = cwd_dir.join(session_id);
     fs::create_dir(&session_dir).expect("create session directory");
+<<<<<<< HEAD
     // `Summary` has a crate-private field, so the file is built as JSON and
     // then parsed back to prove it is a valid summary.
     let summary = serde_json::json!({
@@ -526,18 +527,38 @@ fn write_summary(
         "num_chat_messages": 8 + ordinal % 24,
         "current_model_id": acp::ModelId::new("benchmark-model"),
         "next_trace_turn": 0,
+=======
+    let created_at = active_at - ChronoDuration::minutes(5);
+    let summary: Summary = serde_json::from_value(serde_json::json!({
+        "info": { "id": session_id, "cwd": cwd },
+        "session_summary": format!("Deterministic benchmark session {ordinal}"),
+        "created_at": created_at.to_rfc3339(),
+        "updated_at": active_at.to_rfc3339(),
+        "num_messages": 8 + ordinal % 24,
+        "num_chat_messages": 8 + ordinal % 24,
+        "current_model_id": "benchmark-model",
+>>>>>>> upstream/main
         "chat_format_version": 1,
         "git_root_dir": cwd,
         "git_remotes": ["git@github.com:xai-org/benchmark.git"],
         "head_commit": format!("{ordinal:040x}"),
         "head_branch": "main",
+<<<<<<< HEAD
         "last_active_at": active_at,
+=======
+        "last_active_at": active_at.to_rfc3339(),
+>>>>>>> upstream/main
         "generated_title": format!("Benchmark session {ordinal}"),
         "worktree_label": worktree_label,
         "agent_name": "benchmark-agent",
         "sandbox_profile": "workspace",
+<<<<<<< HEAD
     });
     let _: Summary = serde_json::from_value(summary.clone()).expect("valid summary");
+=======
+    }))
+    .expect("summary fixture");
+>>>>>>> upstream/main
     let summary_path = session_dir.join("summary.json");
     let bytes = serde_json::to_vec_pretty(&summary).expect("serialize summary");
     fs::write(&summary_path, bytes).expect("write summary");

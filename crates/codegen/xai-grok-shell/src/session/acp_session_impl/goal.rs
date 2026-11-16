@@ -1611,6 +1611,7 @@ impl SessionActor {
         Some(ctx)
     }
 
+<<<<<<< HEAD
     /// The continuation next step read off the live todo list. A missing list gives the reason the goal is open.
     async fn goal_next_step_from_todos(&self) -> String {
         let todos = self.goal_todo_snapshot().await;
@@ -1646,6 +1647,8 @@ impl SessionActor {
         }
     }
 
+=======
+>>>>>>> upstream/main
     /// Live GoalTracker snapshot for the post-compaction reminder.
     /// `None` when no goal exists or it already completed.
     /// Continuation-style (next step), not create-style `goal_rules`.

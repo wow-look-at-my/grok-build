@@ -1,22 +1,28 @@
+<<<<<<< HEAD
 // Scans Claude settings and generates TOML patches for .grok/config.json.
 //
 // This module reuses the existing discovery and parsing functions from claude_compat.rs and util/config.rs
 // It does NOT modify the runtime Claude compat layer; that continues to work as before
 
 use std::path::{Path, PathBuf};
+=======
+use std::path::Path;
+>>>>>>> upstream/main
 use std::sync::OnceLock;
 
-use toml::Value as TomlValue;
-use toml::map::Map as TomlMap;
-use tracing::{debug, info, warn};
+use tracing::{debug, info};
 
-use crate::util::config::McpServerConfig;
+use xai_grok_external_agent_migration::{
+    ClaudeSettingsSnapshot, ImportPatternMode, ImportPermission, ImportPlan, ImportRuleAction,
+    ImportTool,
+};
 use xai_grok_workspace::permission::claude_settings::{
     find_claude_settings_paths, load_claude_settings,
 };
 use xai_grok_workspace::permission::rules::parse_permission_rule;
-use xai_grok_workspace::permission::types::{PatternMode, PermissionRule, RuleAction, ToolFilter};
+use xai_grok_workspace::permission::types::{PatternMode, RuleAction, ToolFilter};
 
+<<<<<<< HEAD
 // Types
 
 /// Scope for an import operation.
@@ -471,31 +477,36 @@ static MARKER_CACHE: std::sync::RwLock<Option<bool>> = std::sync::RwLock::new(No
 /// Whether the current user has already imported Claude settings. Reads `claude_compat.imported` (`true`) from `~/.grok/config.json` once per process and caches the result.
 /// When the marker is set, runtime fallbacks that read `.claude/` should be skipped; the user has migrated to native config. Resilient: returns `false` on missing file, missing section, parse error, or any other failure.
 /// Trade-off: a user who manually flips the marker mid-session must restart to see the change, acceptable because reverting after import is rare. That variant logs one line so users can see the cutoff fired.
+=======
+static MARKER_CACHE: std::sync::RwLock<Option<bool>> = std::sync::RwLock::new(None);
+
+// A manual edit of the marker is read on the next start.
+>>>>>>> upstream/main
 pub(crate) fn is_claude_import_marked() -> bool {
-    if let Some(v) = *MARKER_CACHE.read().expect("MARKER_CACHE poisoned") {
-        return v;
+    if let Some(value) = *MARKER_CACHE.read().expect("MARKER_CACHE poisoned") {
+        return value;
     }
+<<<<<<< HEAD
     let config_path = crate::util::config::user_config_path();
     let v = is_claude_import_marked_at(&config_path);
     *MARKER_CACHE.write().expect("MARKER_CACHE poisoned") = Some(v);
     v
+=======
+    let value = xai_grok_config::is_claude_import_marked(&crate::util::grok_home::grok_home());
+    *MARKER_CACHE.write().expect("MARKER_CACHE poisoned") = Some(value);
+    value
+>>>>>>> upstream/main
 }
 
-/// Forcibly seed the cache with the freshly written marker value.
-/// The slash command calls this after `apply_import` writes the marker so gate checks reflect the new state without a restart.
 pub(crate) fn refresh_marker_cache(value: bool) {
     *MARKER_CACHE.write().expect("MARKER_CACHE poisoned") = Some(value);
 }
 
-/// Reset the marker cache to uninitialised. Test-only.
 #[cfg(test)]
 pub(crate) fn reset_marker_cache_for_test() {
     *MARKER_CACHE.write().expect("MARKER_CACHE poisoned") = None;
 }
 
-/// Like [`is_claude_import_marked`], but logs a one-time `info!` line on the first true result per process.
-/// `gate_name` identifies which call site fired the cutoff (useful for debugging which subsystem stopped reading `.claude/`).
-/// Call sites are runtime fallback paths in `claude_compat.rs`, `util/config.rs`, `util/hooks.rs`, and `agent/config.rs` that previously read `.claude/`.
 pub(crate) fn is_claude_import_marked_with_log(gate_name: &'static str) -> bool {
     static LOGGED: OnceLock<()> = OnceLock::new();
     let marked = is_claude_import_marked();
@@ -510,6 +521,7 @@ pub(crate) fn is_claude_import_marked_with_log(gate_name: &'static str) -> bool 
     marked
 }
 
+<<<<<<< HEAD
 /// Testable variant of [`is_claude_import_marked`] that reads from the given path.
 pub(crate) fn is_claude_import_marked_at(config_path: &Path) -> bool {
     let Ok(value) = xai_grok_config::read_config_tree(config_path) else {
@@ -568,11 +580,21 @@ fn write_import_marker(config_path: &Path) -> anyhow::Result<()> {
 pub fn mark_claude_imported() -> anyhow::Result<()> {
     let path = xai_grok_config::user_config_file(&crate::util::grok_home::grok_home())?;
     write_import_marker(&path)?;
+=======
+pub(crate) fn import_marker() -> xai_grok_hooks::discovery::ClaudeImport {
+    xai_grok_hooks::discovery::ClaudeImport::from_marker(is_claude_import_marked_with_log(
+        "hook_and_plugin_sources",
+    ))
+}
+
+pub fn mark_claude_imported() -> anyhow::Result<()> {
+    xai_grok_external_agent_migration::write_import_marker(&crate::util::grok_home::grok_home())?;
+>>>>>>> upstream/main
     refresh_marker_cache(true);
     Ok(())
 }
-// TOML Patch Writer
 
+<<<<<<< HEAD
 /// Apply an import plan by writing TOML patches to the appropriate config files. This is additive-only: existing entries are never removed.
 /// New permission rules are appended; new env vars and MCP servers are added without overwriting existing keys or names.
 /// Project items are written to `<repo_root>/.grok/config.json` (found by repository discovery), not `cwd/.grok/config.json`. This avoids creating config files in unexpected subdirectories.
@@ -978,68 +1000,89 @@ fn apply_hooks_to_dir(hooks_dir: &Path, items: &[ImportableItem]) -> anyhow::Res
                         None => {
                             handler_obj.remove("timeout");
                         }
+=======
+pub fn scan_importable_settings(cwd: &Path) -> ImportPlan {
+    let paths = find_claude_settings_paths(cwd);
+    let mcp_json_files = crate::util::config::find_mcp_json_files(cwd);
+    xai_grok_external_agent_migration::scan_importable_settings(
+        cwd,
+        &paths,
+        snapshot_at,
+        &mcp_json_files,
+    )
+}
+
+fn snapshot_at(path: &Path) -> Option<ClaudeSettingsSnapshot> {
+    let settings = load_claude_settings(path)?;
+    let mut permissions = Vec::new();
+    if let Some(perms) = settings.permissions {
+        for (action, entries) in [
+            (RuleAction::Allow, perms.allow),
+            (RuleAction::Deny, perms.deny),
+            (RuleAction::Ask, perms.ask),
+        ] {
+            for rule_str in entries {
+                match parse_permission_rule(&rule_str, action) {
+                    Ok(rule) => match import_permission(rule) {
+                        Some(rule) => permissions.push(rule),
+                        None => debug!(
+                            path = %path.display(),
+                            rule = %rule_str,
+                            "Skipping Claude permission rule with an unrecognized tool"
+                        ),
+                    },
+                    Err(error) => {
+                        debug!(
+                            path = %path.display(),
+                            rule = %rule_str,
+                            error = %error,
+                            "Skipping unparseable Claude permission rule"
+                        );
+>>>>>>> upstream/main
                     }
                 }
-                debug!(
-                    event = %event,
-                    matcher = ?matcher,
-                    command = %command,
-                    timeout = ?timeout,
-                    "Hook already present; refreshed timeout in place"
-                );
-                updated = true;
-                dirty = true;
-                break;
-            }
-            if updated {
-                break;
             }
         }
-        if updated {
-            continue;
-        }
-
-        let mut handler = serde_json::json!({
-            "type": "command",
-            "command": command,
-        });
-        if let Some(t) = timeout {
-            handler
-                .as_object_mut()
-                .unwrap()
-                .insert("timeout".to_string(), serde_json::json!(t));
-        }
-
-        let mut group = serde_json::json!({
-            "hooks": [handler],
-        });
-        if let Some(m) = matcher {
-            group
-                .as_object_mut()
-                .unwrap()
-                .insert("matcher".to_string(), serde_json::json!(m));
-        }
-        groups.push(group);
-        count += 1;
     }
+    Some(ClaudeSettingsSnapshot {
+        permissions,
+        env: settings.env.unwrap_or_default(),
+    })
+}
 
-    if count > 0 || dirty {
-        std::fs::create_dir_all(hooks_dir)?;
-        let json_str = serde_json::to_string_pretty(&root)?;
-        let tmp = target.with_extension("json.tmp");
-        std::fs::write(&tmp, &json_str)?;
-        std::fs::rename(&tmp, &target)?;
-        info!(
-            path = %target.display(),
-            count,
-            "Wrote imported hooks to .grok/hooks/imported-from-claude.json"
-        );
-    }
-
-    Ok(count)
+fn import_permission(
+    rule: xai_grok_workspace::permission::types::PermissionRule,
+) -> Option<ImportPermission> {
+    let tool = match rule.tool {
+        ToolFilter::Any => ImportTool::Any,
+        ToolFilter::Bash => ImportTool::Bash,
+        ToolFilter::Edit => ImportTool::Edit,
+        ToolFilter::Read => ImportTool::Read,
+        ToolFilter::Grep => ImportTool::Grep,
+        ToolFilter::Mcp => ImportTool::Mcp,
+        ToolFilter::WebFetch => ImportTool::WebFetch,
+        ToolFilter::WebSearch => ImportTool::WebSearch,
+        ToolFilter::AgentMessage => ImportTool::AgentMessage,
+    };
+    let action = match rule.action {
+        RuleAction::Allow => ImportRuleAction::Allow,
+        RuleAction::Deny => ImportRuleAction::Deny,
+        RuleAction::Ask => ImportRuleAction::Ask,
+    };
+    let pattern_mode = match rule.pattern_mode {
+        PatternMode::Glob => ImportPatternMode::Glob,
+        PatternMode::Domain => ImportPatternMode::Domain,
+    };
+    Some(ImportPermission {
+        action,
+        tool,
+        pattern: rule.pattern,
+        pattern_mode,
+    })
 }
 
 #[cfg(test)]
+<<<<<<< HEAD
 mod tests {
     use super::*;
     use xai_grok_workspace::HookSourceConfig;
@@ -2109,3 +2152,7 @@ extra_rule_dirs = ["/c/rules"]
         );
     }
 }
+=======
+#[path = "claude_import_tests.rs"]
+mod tests;
+>>>>>>> upstream/main

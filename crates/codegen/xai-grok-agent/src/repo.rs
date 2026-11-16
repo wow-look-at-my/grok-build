@@ -1,3 +1,4 @@
+<<<<<<< HEAD
 //! Shared git-repo dir-chain primitive.
 //!
 //! One repository discovery and one walk from cwd up to the root.
@@ -49,6 +50,14 @@ impl RepoDirChain {
         Self { git_root, dirs }
     }
 }
+=======
+//! Startup project sources over the [`RepoDirChain`] re-exported from `xai-grok-permission-rules`.
+
+use std::path::{Path, PathBuf};
+
+pub use xai_grok_permission_rules::repo::RepoDirChain;
+use xai_grok_permission_rules::repo::canonical_or_raw;
+>>>>>>> upstream/main
 
 #[derive(Debug, Clone)]
 pub struct StartupProjectSources {
@@ -96,21 +105,6 @@ impl StartupProjectSources {
         }
         dirs
     }
-}
-
-fn canonical_or_raw(path: &Path) -> PathBuf {
-    dunce::canonicalize(path).unwrap_or_else(|_| path.to_path_buf())
-}
-
-/// Whether `path` canonicalizes to the user's home directory.
-/// It stays local (not reused from `xai-grok-workspace`, which depends on THIS crate) to keep the dep edge one-way.
-/// It backs the guard in [`RepoDirChain::resolve`] that drops a $HOME git root.
-fn is_home_dir(path: &Path) -> bool {
-    let Some(home) = xai_dirs::home_dir() else {
-        return false;
-    };
-    let canon = |p: &Path| dunce::canonicalize(p).unwrap_or_else(|_| p.to_path_buf());
-    canon(path) == canon(&home)
 }
 
 /// Existing `<dir>/<subdir>` directories under each dir of a precomputed cwd-to-git-root chain ([`RepoDirChain::dirs`]).

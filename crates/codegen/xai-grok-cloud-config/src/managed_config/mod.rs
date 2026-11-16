@@ -9,12 +9,19 @@ mod supervisor;
 pub use policy::ManagedPolicyRefusal;
 pub use response::ManagedConfigError;
 // Test seams: pub only so the integration suites can link them.
+#[cfg(any(test, feature = "test-support"))]
 #[doc(hidden)]
 pub use store::MANAGED_ARTIFACT_FILES;
 pub use store::{
     classify_auth_mode, clear_orphan, current_serving_identity, has_principal, is_fetch_enabled,
 };
+<<<<<<< HEAD:crates/codegen/xai-grok-shell/src/managed_config/mod.rs
 pub(crate) use supervisor::policy_repair_pending;
+=======
+pub use store::{resolve_deployment_id, resolve_deployment_key};
+pub use supervisor::policy_repair_pending;
+#[cfg(any(test, feature = "test-support"))]
+>>>>>>> upstream/main:crates/codegen/xai-grok-cloud-config/src/managed_config/mod.rs
 #[doc(hidden)]
 pub use supervisor::{ManagedConfigRefresher, spawn_refresh_supervisor, take_refresh_supervisor};
 pub use supervisor::{
@@ -35,7 +42,7 @@ pub enum LaunchProfile {
 static PUBLISHED_PROFILE: std::sync::Mutex<Option<LaunchProfile>> = std::sync::Mutex::new(None);
 
 fn observe_startup_profile() -> LaunchProfile {
-    if !cfg!(test) && store::managed_principal_present() {
+    if store::managed_principal_present() {
         LaunchProfile::Managed
     } else {
         LaunchProfile::Personal
@@ -70,22 +77,23 @@ pub fn clear_startup_profile_for_tests() {
 
 /// Fail-closed session-start gate for managed principals.
 pub fn managed_policy_gate() -> Result<(), ManagedPolicyRefusal> {
-    managed_policy_gate_with_lock_wait(GATE_LOCK_WAIT)
+    run_managed_policy_gate(GATE_LOCK_WAIT)
 }
 
 /// Test seam injecting the bounded lock wait; production stays on [`GATE_LOCK_WAIT`].
+#[cfg(any(test, feature = "test-support"))]
 #[doc(hidden)]
 pub fn managed_policy_gate_with_lock_wait(
     lock_wait: std::time::Duration,
 ) -> Result<(), ManagedPolicyRefusal> {
-    // Unit tests would hit the host's real home.
-    if cfg!(test) {
-        return Ok(());
-    }
+    run_managed_policy_gate(lock_wait)
+}
+
+fn run_managed_policy_gate(lock_wait: std::time::Duration) -> Result<(), ManagedPolicyRefusal> {
     if !store::managed_principal_present() {
         return Ok(());
     }
-    let snapshot = locked_gate_snapshot(&crate::util::grok_home::grok_home(), lock_wait)?;
+    let snapshot = locked_gate_snapshot(&xai_dirs::grok_home(), lock_wait)?;
     policy::managed_policy_gate_decision(snapshot)
 }
 
@@ -95,9 +103,9 @@ fn locked_gate_snapshot(
 ) -> Result<policy::GateSnapshot, ManagedPolicyRefusal> {
     let lock_file = match store::try_gate_lock(home) {
         store::GateLockAttempt::Acquired(lock_file) => lock_file,
-        // No `block_in_place`: bootstrap runs inside a `LocalSet`, where tokio panics on it even on a multi-thread runtime.
-        // Plain blocking is safe here: no task ever holds this flock across an await, and the wait is bounded by `lock_wait`.
         store::GateLockAttempt::Contended(lock_file) => {
+            // No `block_in_place`: bootstrap runs inside a `LocalSet`, where tokio panics on it even on a multi-thread runtime.
+            // Plain blocking is safe here: no task ever holds this flock across an await, and the wait is bounded by `lock_wait`.
             store::wait_for_gate_lock(&lock_file, home, lock_wait)?;
             lock_file
         }

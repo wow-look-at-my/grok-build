@@ -146,6 +146,7 @@ async fn persist_ack_waits_for_disk_flush_before_success() {
                 rewind_pending_prompt: std::sync::Mutex::new(None),
                 startup_hints: StartupHints::default(),
                 forked_tool_override: None,
+<<<<<<< HEAD
                 compaction: crate::session::compaction_config::CompactionConfig {
                     threshold_percent: std::cell::Cell::new(85),
                     pending_manual_compact: std::cell::Cell::new(None),
@@ -162,6 +163,9 @@ async fn persist_ack_waits_for_disk_flush_before_success() {
                     cancel: Default::default(),
                     context_overflow_recovery: Default::default(),
                 },
+=======
+                compaction: test_compaction_config(85),
+>>>>>>> upstream/main
                 long_reasoning_reminder:
                     crate::session::long_reasoning_reminder::LongReasoningReminder {
                         enabled: false,
@@ -699,6 +703,7 @@ async fn first_turn_memory_injection_disabled_does_not_persist_to_chat_history()
                 rewind_pending_prompt: std::sync::Mutex::new(None),
                 startup_hints: StartupHints::default(),
                 forked_tool_override: None,
+<<<<<<< HEAD
                 compaction: crate::session::compaction_config::CompactionConfig {
                     threshold_percent: std::cell::Cell::new(85),
                     pending_manual_compact: std::cell::Cell::new(None),
@@ -715,6 +720,9 @@ async fn first_turn_memory_injection_disabled_does_not_persist_to_chat_history()
                     cancel: Default::default(),
                     context_overflow_recovery: Default::default(),
                 },
+=======
+                compaction: test_compaction_config(85),
+>>>>>>> upstream/main
                 long_reasoning_reminder:
                     crate::session::long_reasoning_reminder::LongReasoningReminder {
                         enabled: false,
@@ -1050,6 +1058,7 @@ async fn cancel_running_task_teardown_clears_running_and_pending_work() {
                 rewind_pending_prompt: std::sync::Mutex::new(None),
                 startup_hints: StartupHints::default(),
                 forked_tool_override: None,
+<<<<<<< HEAD
                 compaction: crate::session::compaction_config::CompactionConfig {
                     threshold_percent: std::cell::Cell::new(85),
                     pending_manual_compact: std::cell::Cell::new(None),
@@ -1068,6 +1077,9 @@ async fn cancel_running_task_teardown_clears_running_and_pending_work() {
                     cancel: Default::default(),
                     context_overflow_recovery: Default::default(),
                 },
+=======
+                compaction: test_compaction_config(85),
+>>>>>>> upstream/main
                 long_reasoning_reminder: crate::session::long_reasoning_reminder::LongReasoningReminder {
                     enabled: false,
                     tokens: crate::session::long_reasoning_reminder::DEFAULT_TOKENS,
@@ -2684,6 +2696,7 @@ async fn cancel_propagates_to_sampler_handle_so_no_further_emission() {
                 rewind_pending_prompt: std::sync::Mutex::new(None),
                 startup_hints: StartupHints::default(),
                 forked_tool_override: None,
+<<<<<<< HEAD
                 compaction: crate::session::compaction_config::CompactionConfig {
                     threshold_percent: std::cell::Cell::new(85),
                     pending_manual_compact: std::cell::Cell::new(None),
@@ -2702,6 +2715,9 @@ async fn cancel_propagates_to_sampler_handle_so_no_further_emission() {
                     cancel: Default::default(),
                     context_overflow_recovery: Default::default(),
                 },
+=======
+                compaction: test_compaction_config(85),
+>>>>>>> upstream/main
                 long_reasoning_reminder: crate::session::long_reasoning_reminder::LongReasoningReminder {
                     enabled: false,
                     tokens: crate::session::long_reasoning_reminder::DEFAULT_TOKENS,

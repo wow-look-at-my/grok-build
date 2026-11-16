@@ -1,11 +1,5 @@
 //! Tests for the action router, model switching, slash commands, and other cross-cutting dispatch behavior.
 use super::*;
-fn agent_ref(app: &AppView, id: AgentId) -> &AgentView {
-    let Some(agent) = app.agents.get(&id) else {
-        panic!("expected agent {id:?}");
-    };
-    agent
-}
 #[test]
 fn auth_copy_dispatch_preserves_all_delivery_states() {
     for delivery in [
@@ -33,6 +27,285 @@ fn auth_copy_dispatch_preserves_all_delivery_states() {
     }
 }
 #[test]
+<<<<<<< HEAD
+=======
+fn external_prompt_editor_arms_typed_request_and_preserves_composer_modes() {
+    use crate::app::agent_view::PromptInputMode;
+    for mode in [
+        PromptInputMode::Normal,
+        PromptInputMode::Bash,
+        PromptInputMode::Remember,
+    ] {
+        let mut app = test_app_with_agent();
+        let id = AgentId(0);
+        app.screen_mode = crate::app::ScreenMode::Minimal;
+        let agent = app.agents.get_mut(&id).unwrap();
+        agent
+            .prompt
+            .set_screen_mode(crate::app::ScreenMode::Minimal);
+        agent.prompt_input_mode = mode;
+        agent.prompt.set_text("draft with\nnewlines");
+        let effects = dispatch(Action::EditPromptExternal, &mut app);
+        assert!(effects.is_empty());
+        let request = app.pending_editor.take().expect("editor request");
+        match request {
+            crate::app::external_editor::PendingEditorRequest::PromptDraft {
+                agent_id,
+                original_text,
+            } => {
+                assert_eq!(agent_id, id);
+                assert_eq!(original_text, "draft with\nnewlines");
+            }
+            other => panic!("expected prompt draft request, got {other:?}"),
+        }
+        assert_eq!(agent_ref(&app, id).prompt_input_mode, mode);
+        assert_eq!(agent_ref(&app, id).prompt.text(), "draft with\nnewlines");
+    }
+}
+#[test]
+fn external_prompt_editor_arms_in_fullscreen_and_refuses_owned_input() {
+    let mut app = test_app_with_agent();
+    let id = AgentId(0);
+    app.agents.get_mut(&id).unwrap().prompt.set_text("draft");
+    let _ = dispatch(Action::EditPromptExternal, &mut app);
+    assert!(
+        matches!(
+            app.pending_editor.take(),
+            Some(crate::app::external_editor::PendingEditorRequest::PromptDraft { .. })
+        ),
+        "full TUI arms the request without requiring prompt-pane focus"
+    );
+    app.screen_mode = crate::app::ScreenMode::Minimal;
+    app.agents.get_mut(&id).unwrap().active_pane = ActivePane::Scrollback;
+    let _ = dispatch(Action::EditPromptExternal, &mut app);
+    assert!(
+        matches!(
+            app.pending_editor,
+            Some(crate::app::external_editor::PendingEditorRequest::PromptDraft { .. })
+        ),
+        "the composer stays the editing surface with scrollback focused"
+    );
+    app.pending_editor = None;
+    app.agents.get_mut(&id).unwrap().cancel_turn_view =
+        Some(crate::views::modal::CancelTurnViewState {
+            active_idx: 0,
+            running_count: 1,
+        });
+    let _ = dispatch(Action::EditPromptExternal, &mut app);
+    assert!(app.pending_editor.is_none(), "modal owner must refuse");
+    assert_eq!(agent_ref(&app, id).prompt.text(), "draft");
+    app.agents.get_mut(&id).unwrap().cancel_turn_view = None;
+    app.agents.get_mut(&id).unwrap().prompt_mode = PromptMode::EditingQueued {
+        id: 1,
+        original: "queued".to_owned(),
+        server_id: None,
+        kind: crate::app::agent::QueueEntryKind::Prompt,
+    };
+    let _ = dispatch(Action::EditPromptExternal, &mut app);
+    assert!(app.pending_editor.is_none(), "queue edit must refuse");
+    assert_eq!(agent_ref(&app, id).prompt.text(), "draft");
+    app.agents.get_mut(&id).unwrap().prompt_mode = PromptMode::Normal;
+    app.agents.get_mut(&id).unwrap().prompt.set_text("/");
+    let models = agent_ref(&app, id).session.models.clone();
+    app.agents
+        .get_mut(&id)
+        .unwrap()
+        .prompt
+        .refresh_slash(&models);
+    assert!(agent_ref(&app, id).prompt.any_dropdown_open());
+    let _ = dispatch(Action::EditPromptExternal, &mut app);
+    assert!(app.pending_editor.is_none(), "dropdown owner must refuse");
+}
+#[test]
+fn external_prompt_editor_refuses_elements_with_visible_message() {
+    let mut app = test_app_with_agent();
+    let id = AgentId(0);
+    app.screen_mode = crate::app::ScreenMode::Minimal;
+    app.agents
+        .get_mut(&id)
+        .unwrap()
+        .prompt
+        .set_screen_mode(crate::app::ScreenMode::Minimal);
+    let agent = app.agents.get_mut(&id).unwrap();
+    let pasted = "one\ntwo\nthree\nfour";
+    let _ = agent.prompt.handle_paste(pasted);
+    assert!(!agent.prompt.textarea.elements().is_empty());
+    let _ = dispatch(Action::EditPromptExternal, &mut app);
+    assert!(app.pending_editor.is_none());
+    assert_eq!(agent_ref(&app, id).prompt.text(), pasted);
+    assert!(!agent_ref(&app, id).prompt.textarea.elements().is_empty());
+    assert!(
+        agent_ref(&app, id)
+            .scrollback
+            .iter_entries()
+            .any(|(_, entry)| entry.block.searchable_text().as_deref()
+                == Some(crate::app::external_editor::ATTACHMENT_MESSAGE))
+    );
+    let agent = app.agents.get_mut(&id).unwrap();
+    agent.prompt.set_text("");
+    agent.prompt.textarea.insert_element(
+        "@src/main.rs",
+        crate::views::prompt_widget::KIND_FILE_REF,
+        None,
+    );
+    let file_ref_text = agent.prompt.text().to_owned();
+    let _ = dispatch(Action::EditPromptExternal, &mut app);
+    assert!(app.pending_editor.is_none());
+    assert_eq!(agent_ref(&app, id).prompt.text(), file_ref_text);
+    assert!(!agent_ref(&app, id).prompt.textarea.elements().is_empty());
+    let agent = app.agents.get_mut(&id).unwrap();
+    agent.prompt.set_text("");
+    let image = crate::prompt_images::PastedImage {
+        element_id: xai_ratatui_textarea::ElementId::from_raw(0),
+        display_number: 0,
+        mime_type: "image/png".to_owned(),
+        dimensions: Some((8, 8)),
+        byte_len: 1,
+        encoded_bytes: Some(vec![0].into()),
+        source_path: None,
+        staged_temp_path: None,
+        session_image_path: None,
+        preview: crate::prompt_images::PromptImagePreview::default(),
+    };
+    agent.prompt.insert_image(image).unwrap();
+    let image_text = agent.prompt.text().to_owned();
+    let _ = dispatch(Action::EditPromptExternal, &mut app);
+    assert!(app.pending_editor.is_none());
+    assert_eq!(agent_ref(&app, id).prompt.text(), image_text);
+    assert_eq!(agent_ref(&app, id).prompt.images.len(), 1);
+}
+#[test]
+fn external_prompt_editor_refuses_voice_and_pending_paste_with_visible_messages() {
+    use crate::app::agent_view::AgentDeferredSend;
+    use crate::app::app_view::{Partial, VoiceState, VoiceTarget};
+    for voice_state in [
+        VoiceState::ColdStart {
+            hold: false,
+            target: VoiceTarget::Agent(AgentId(0)),
+        },
+        VoiceState::Recording {
+            hold: false,
+            target: VoiceTarget::Agent(AgentId(0)),
+            partial: Partial::Shown("partial".to_owned()),
+            route: Some(xai_grok_voice::VoiceRoute::Streaming),
+        },
+        VoiceState::Stopping {
+            target: VoiceTarget::Agent(AgentId(0)),
+            partial: Partial::Shown("partial".to_owned()),
+            route: Some(xai_grok_voice::VoiceRoute::Streaming),
+        },
+    ] {
+        let mut app = test_app_with_agent();
+        let id = AgentId(0);
+        app.screen_mode = crate::app::ScreenMode::Minimal;
+        app.voice_state = voice_state;
+        app.agents.get_mut(&id).unwrap().prompt.set_text("draft");
+        let _ = dispatch(Action::EditPromptExternal, &mut app);
+        assert!(app.pending_editor.is_none());
+        assert_eq!(agent_ref(&app, id).prompt.text(), "draft");
+        assert!(
+            agent_ref(&app, id)
+                .scrollback
+                .iter_entries()
+                .any(|(_, entry)| entry.block.searchable_text().as_deref()
+                    == Some(crate::app::external_editor::VOICE_MESSAGE))
+        );
+    }
+    for (probes, deferred_send) in [
+        (1, None),
+        (1, Some(AgentDeferredSend::SendPrompt)),
+        (0, Some(AgentDeferredSend::SendPrompt)),
+    ] {
+        let mut app = test_app_with_agent();
+        let id = AgentId(0);
+        app.screen_mode = crate::app::ScreenMode::Minimal;
+        let agent = app.agents.get_mut(&id).unwrap();
+        agent.prompt.set_text("draft");
+        agent.paste_probe_in_flight = probes;
+        agent.deferred_send = deferred_send;
+        let _ = dispatch(Action::EditPromptExternal, &mut app);
+        assert!(app.pending_editor.is_none());
+        assert_eq!(agent_ref(&app, id).prompt.text(), "draft");
+        assert_eq!(agent_ref(&app, id).paste_probe_in_flight, probes);
+        assert_eq!(agent_ref(&app, id).deferred_send, deferred_send);
+        assert!(
+            agent_ref(&app, id)
+                .scrollback
+                .iter_entries()
+                .any(|(_, entry)| entry.block.searchable_text().as_deref()
+                    == Some(crate::app::external_editor::PASTE_MESSAGE))
+        );
+    }
+}
+#[test]
+fn deferred_paste_completion_after_refused_editor_does_not_implicitly_send_without_stash() {
+    let mut app = test_app_with_agent();
+    let id = AgentId(0);
+    app.screen_mode = crate::app::ScreenMode::Minimal;
+    let agent = app.agents.get_mut(&id).unwrap();
+    agent.prompt.set_text("draft");
+    let draft_len = agent.prompt.text().len();
+    agent.prompt.set_cursor(draft_len);
+    agent.paste_probe_in_flight = 1;
+    let _ = dispatch(Action::EditPromptExternal, &mut app);
+    assert!(app.pending_editor.is_none());
+    let effects = dispatch(
+        Action::TaskComplete(TaskResult::ClipboardAttachmentProbed {
+            ctx: crate::app::actions::ClipboardPasteContext {
+                target: crate::app::actions::ClipboardPasteTarget::AgentPrompt {
+                    agent_id: id,
+                    images_dir: None,
+                },
+                source: crate::app::actions::ClipboardPasteSource::ClipboardKey {
+                    text: crate::app::actions::ClipboardTextRead::Success(Some(
+                        "pasted".to_owned(),
+                    )),
+                    tip_showing: false,
+                },
+            },
+            image: crate::app::actions::ProbedAttachment::NoRaster,
+            file_urls: None,
+        }),
+        &mut app,
+    );
+    assert!(effects.is_empty(), "no deferred submit was armed");
+    assert_eq!(agent_ref(&app, id).prompt.text(), "draftpasted");
+    assert!(agent_ref(&app, id).session.pending_prompts.is_empty());
+}
+#[test]
+fn external_prompt_editor_result_replaces_or_clears_without_sending() {
+    let mut app = test_app_with_agent();
+    let id = AgentId(0);
+    app.agents.get_mut(&id).unwrap().session.state = AgentState::TurnRunning;
+    app.agents.get_mut(&id).unwrap().prompt.set_text("original");
+    crate::app::external_editor::apply_prompt_text(&mut app, id, "edited\n".to_owned());
+    assert_eq!(agent_ref(&app, id).prompt.text(), "edited\n");
+    assert!(agent_ref(&app, id).session.state.is_turn_running());
+    assert!(agent_ref(&app, id).session.pending_prompts.is_empty());
+    crate::app::external_editor::apply_prompt_text(&mut app, id, String::new());
+    assert_eq!(agent_ref(&app, id).prompt.text(), "");
+    assert!(agent_ref(&app, id).session.state.is_turn_running());
+}
+#[test]
+fn editor_failure_targets_original_agent_and_vanished_agent_is_safe() {
+    let mut app = test_app_with_agent();
+    let id = AgentId(0);
+    app.agents.get_mut(&id).unwrap().prompt.set_text("original");
+    crate::app::external_editor::report_prompt_failure(&mut app, id, "editor failed");
+    assert_eq!(agent_ref(&app, id).prompt.text(), "original");
+    assert!(
+        agent_ref(&app, id)
+            .scrollback
+            .iter_entries()
+            .any(|(_, entry)| entry.block.searchable_text().as_deref() == Some("editor failed"))
+    );
+    app.agents.shift_remove(&id);
+    crate::app::external_editor::apply_prompt_text(&mut app, id, "ignored".to_owned());
+    crate::app::external_editor::report_prompt_failure(&mut app, id, "ignored");
+    assert!(app.agents.is_empty());
+}
+#[test]
+>>>>>>> upstream/main
 fn config_editor_action_still_uses_typed_request() {
     let mut app = test_app_with_agent();
     let path = std::path::PathBuf::from("/tmp/agent-config.md");
@@ -700,18 +973,111 @@ fn switch_model_dispatch_produces_effect_and_sets_pending() {
     let model_id = acp::ModelId::new(std::sync::Arc::from("grok-4.5"));
     assert!(!agent_ref(&app, id).session.model_switch_pending);
     let effects = dispatch(
-        Action::SwitchModel {
-            model_id: model_id.clone(),
-            effort: None,
-        },
+        Action::SwitchModel(ModelChoice::new(model_id.clone())),
         &mut app,
     );
     assert_eq!(effects.len(), 1);
     assert!(
-        matches!(effects.first(), Some(Effect::SwitchModel { model_id: mid, .. }) if mid == &model_id)
+        matches!(effects.first(), Some(Effect::SwitchModel { choice, .. }) if choice.model_id == model_id)
     );
     assert!(agent_ref(&app, id).session.model_switch_pending);
     assert!(agent_ref(&app, id).session.state.is_idle());
+}
+#[test]
+fn context_window_selection_is_refused_while_a_model_switch_is_pending() {
+    let mut app = test_app_with_agent();
+    let id = AgentId(0);
+    let old_model = acp::ModelId::new(std::sync::Arc::from("grok-4.5"));
+    let new_model = acp::ModelId::new(std::sync::Arc::from("grok-4.7"));
+    test_agent_mut(&mut app, id).session.models.current = Some(old_model.clone());
+    dispatch(Action::SwitchModel(ModelChoice::new(new_model)), &mut app);
+    let scrollback_before = agent_ref(&app, id).scrollback.len();
+    let effects = dispatch(
+        Action::SwitchModel(ModelChoice {
+            context_window_selection: std::num::NonZeroU64::new(500_000),
+            ..ModelChoice::new(old_model)
+        }),
+        &mut app,
+    );
+    assert!(
+        effects.is_empty(),
+        "re-selecting the old model must not revert the pending switch: {effects:?}"
+    );
+    assert_eq!(agent_ref(&app, id).scrollback.len(), scrollback_before + 1);
+}
+#[test]
+fn a_window_pick_sends_only_a_change_to_the_session_selection() {
+    let cases = [
+        (Some(500_000), "grok-4.8", 500_000, None),
+        (Some(500_000), "grok-4.5", 256_000, None),
+        (None, "grok-4.8", 256_000, None),
+        (None, "grok-4.7", 256_000, Some(256_000)),
+        (Some(500_000), "grok-4.8", 256_000, Some(256_000)),
+    ];
+    for (selection, target, picked, expected) in cases {
+        let mut app = test_app_with_catalog(selection);
+        let effects = dispatch(
+            Action::SwitchModel(ModelChoice {
+                model_id: acp::ModelId::new(std::sync::Arc::from(target)),
+                effort: None,
+                context_window_selection: std::num::NonZeroU64::new(picked),
+            }),
+            &mut app,
+        );
+        let sent = match effects.as_slice() {
+            [Effect::SwitchModel { choice, .. }] => choice
+                .context_window_selection
+                .map(std::num::NonZeroU64::get),
+            other => panic!("expected one SwitchModel effect, got {other:?}"),
+        };
+        assert_eq!(sent, expected, "selection {selection:?}, {target} {picked}");
+    }
+}
+#[test]
+fn a_redundant_window_pick_is_refused_while_a_model_switch_is_pending() {
+    let mut app = test_app_with_catalog(Some(500_000));
+    dispatch(
+        Action::SwitchModel(ModelChoice::new(acp::ModelId::new(std::sync::Arc::from(
+            "grok-4.5",
+        )))),
+        &mut app,
+    );
+    let scrollback_before = agent_ref(&app, AgentId(0)).scrollback.len();
+    let effects = dispatch(
+        Action::SwitchModel(ModelChoice {
+            model_id: acp::ModelId::new(std::sync::Arc::from("grok-4.8")),
+            effort: None,
+            context_window_selection: std::num::NonZeroU64::new(500_000),
+        }),
+        &mut app,
+    );
+    assert!(effects.is_empty(), "got {effects:?}");
+    assert_eq!(
+        agent_ref(&app, AgentId(0)).scrollback.len(),
+        scrollback_before + 1
+    );
+}
+/// Grok 4.7 (current) and 4.8 list 256k and 500k, and Grok 4.5 lists 128k and 256k. All default to 256k.
+fn test_app_with_catalog(selection: Option<u64>) -> AppView {
+    let mut app = test_app_with_agent();
+    let models = &mut test_agent_mut(&mut app, AgentId(0)).session.models;
+    for (id, windows) in [
+        ("grok-4.7", [256_000, 500_000]),
+        ("grok-4.8", [256_000, 500_000]),
+        ("grok-4.5", [128_000, 256_000]),
+    ] {
+        let info = xai_grok_test_support::acp_fixtures::model_info_with_meta(
+            id,
+            id,
+            serde_json::json!({ "totalContextTokens": 256_000, "contextWindows": windows }),
+        );
+        models
+            .available
+            .insert(acp::ModelId::new(std::sync::Arc::from(id)), info);
+    }
+    models.current = Some(acp::ModelId::new(std::sync::Arc::from("grok-4.7")));
+    models.context_window_selection = selection;
+    app
 }
 #[test]
 fn switch_model_allowed_when_agent_chat_kind() {
@@ -720,15 +1086,12 @@ fn switch_model_allowed_when_agent_chat_kind() {
     app.agents.get_mut(&id).unwrap().chat_kind = true;
     let model_id = acp::ModelId::new(std::sync::Arc::from("auto"));
     let effects = dispatch(
-        Action::SwitchModel {
-            model_id: model_id.clone(),
-            effort: None,
-        },
+        Action::SwitchModel(ModelChoice::new(model_id.clone())),
         &mut app,
     );
     assert_eq!(effects.len(), 1);
     assert!(
-        matches!(effects.first(), Some(Effect::SwitchModel { model_id: mid, .. }) if mid == &model_id)
+        matches!(effects.first(), Some(Effect::SwitchModel { choice, .. }) if choice.model_id == model_id)
     );
     assert!(agent_ref(&app, id).session.model_switch_pending);
 }
@@ -739,15 +1102,12 @@ fn switch_model_allowed_when_app_chat_mode() {
     app.chat_mode = true;
     let model_id = acp::ModelId::new(std::sync::Arc::from("auto"));
     let effects = dispatch(
-        Action::SwitchModel {
-            model_id: model_id.clone(),
-            effort: None,
-        },
+        Action::SwitchModel(ModelChoice::new(model_id.clone())),
         &mut app,
     );
     assert_eq!(effects.len(), 1);
     assert!(
-        matches!(effects.first(), Some(Effect::SwitchModel { model_id: mid, .. }) if mid == &model_id)
+        matches!(effects.first(), Some(Effect::SwitchModel { choice, .. }) if choice.model_id == model_id)
     );
     assert!(agent_ref(&app, id).session.model_switch_pending);
 }
@@ -1236,17 +1596,11 @@ fn deferred_switch_overwritten_by_second_switch() {
     let model_b = acp::ModelId::new(std::sync::Arc::from("model-b"));
     app.agents.get_mut(&id).unwrap().session.session_id = None;
     dispatch(
-        Action::SwitchModel {
-            model_id: model_a.clone(),
-            effort: None,
-        },
+        Action::SwitchModel(ModelChoice::new(model_a.clone())),
         &mut app,
     );
     dispatch(
-        Action::SwitchModel {
-            model_id: model_b.clone(),
-            effort: None,
-        },
+        Action::SwitchModel(ModelChoice::new(model_b.clone())),
         &mut app,
     );
     assert_eq!(
@@ -1274,10 +1628,7 @@ fn pick_over_cli_seed_keeps_display_as_rollback_target() {
         prev_model_id: None,
     });
     dispatch(
-        Action::SwitchModel {
-            model_id: picked.clone(),
-            effort: None,
-        },
+        Action::SwitchModel(ModelChoice::new(picked.clone())),
         &mut app,
     );
     assert_eq!(
@@ -1296,10 +1647,7 @@ fn deferred_switch_updates_display_and_persists() {
     let model_id = acp::ModelId::new(std::sync::Arc::from("model-b"));
     app.agents.get_mut(&id).unwrap().session.session_id = None;
     let effects = dispatch(
-        Action::SwitchModel {
-            model_id: model_id.clone(),
-            effort: None,
-        },
+        Action::SwitchModel(ModelChoice::new(model_id.clone())),
         &mut app,
     );
     let agent = agent_ref(&app, id);
@@ -1329,10 +1677,7 @@ fn deferred_switch_updates_display_and_persists() {
         "expected a single PersistPreferredModel effect, got {effects:?}"
     );
     let effects = dispatch(
-        Action::SwitchModel {
-            model_id: model_id.clone(),
-            effort: None,
-        },
+        Action::SwitchModel(ModelChoice::new(model_id.clone())),
         &mut app,
     );
     assert!(
@@ -2701,4 +3046,10 @@ fn refresh_mcp_list_clears_managed_connectors_wait() {
         effects.as_slice(),
         [Effect::FetchMcpsList { cache: false, .. }]
     ));
+}
+fn agent_ref(app: &AppView, id: AgentId) -> &AgentView {
+    let Some(agent) = app.agents.get(&id) else {
+        panic!("expected agent {id:?}");
+    };
+    agent
 }

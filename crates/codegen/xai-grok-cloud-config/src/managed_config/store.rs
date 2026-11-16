@@ -21,6 +21,7 @@ pub(super) fn remove_managed_config_files(home: &std::path::Path) {
     for name in MANAGED_ARTIFACT_FILES {
         artifacts_removed &= remove_synced_file(home, name, "removed managed config file");
     }
+
     // Marker last, only on full success: crash/error leaves the detector armed for the next start.
     // The stage shares the marker's fate — only a completed eviction may delete it.
     if artifacts_removed {
@@ -104,7 +105,7 @@ pub(super) fn eligible_team_principal(auth: GrokAuth) -> Option<GrokAuth> {
 
 /// Single-team: managed config is a grok.invalid feature with one grok.invalid auth.
 fn read_team_principal() -> std::io::Result<Option<GrokAuth>> {
-    let home = crate::util::grok_home::grok_home();
+    let home = xai_dirs::grok_home();
     let store = xai_grok_login::read_auth_json(&xai_grok_login::auth_json_path(&home))?;
     Ok(store.into_values().find(|a| a.is_team_principal()))
 }
@@ -125,7 +126,13 @@ pub(super) fn team_principal_signed_in() -> std::io::Result<bool> {
 /// Best-effort; a fail_closed opt-in is kept — swapping `auth.json` must not escape policy.
 pub fn clear_orphan() {
     // Env switch only: a served `[features] managed_config = false` must not veto evicting itself.
+<<<<<<< HEAD:crates/codegen/xai-grok-shell/src/managed_config/store.rs
     if crate::agent::config::env_bool("GROK_MANAGED_CONFIG") == Some(false) {
+=======
+    if xai_grok_env::env_bool("GROK_MANAGED_CONFIG") == Some(false)
+        || resolve_deployment_key().is_some()
+    {
+>>>>>>> upstream/main:crates/codegen/xai-grok-cloud-config/src/managed_config/store.rs
         return;
     }
     match team_principal_signed_in() {
@@ -136,9 +143,9 @@ pub fn clear_orphan() {
             return;
         }
     }
-    let home = crate::util::grok_home::grok_home();
+    let home = xai_dirs::grok_home();
     let Some(_lock) = try_lock_managed_config(&home) else {
-        return; // another process is syncing; retry next call
+        return;
     };
     if xai_grok_config::fail_closed_policy_armed_at(&home) {
         tracing::info!(
@@ -229,7 +236,7 @@ pub(super) fn gate_snapshot_locked(home: &std::path::Path) -> GateSnapshot {
     GateSnapshot {
         managed_principal_present: managed_principal_present(),
         // Expiry-ignoring: a backdated auth.json must not resolve Team→None and relax binding.
-        policy_compromised: crate::config::managed_policy_compromised_for(
+        policy_compromised: xai_grok_config::managed_policy_compromised_for(
             &current_serving_identity_any_expiry(),
         ),
     }
@@ -237,11 +244,11 @@ pub(super) fn gate_snapshot_locked(home: &std::path::Path) -> GateSnapshot {
 
 /// Marker-scoped: a config.json blip is not a switch.
 fn purge_prior_tenant_locked(home: &std::path::Path) {
-    let crate::config::ServingIdentity::Team(team_id) = current_serving_identity_any_expiry()
+    let xai_grok_config::ServingIdentity::Team(team_id) = current_serving_identity_any_expiry()
     else {
         return;
     };
-    if let Some(evicted) = crate::config::confirmed_team_switch_at(home, &team_id) {
+    if let Some(evicted) = xai_grok_config::confirmed_team_switch_at(home, &team_id) {
         tracing::warn!(
             team_id = %team_id,
             evicted_principal = %evicted,
@@ -257,7 +264,7 @@ pub(super) fn bump_managed_rollback_floor() {
     if !xai_grok_config::signed_policy::verification_active() {
         return;
     }
-    let home = crate::util::grok_home::grok_home();
+    let home = xai_dirs::grok_home();
     match try_lock_managed_config(&home) {
         Some(_lock) => {
             xai_grok_config::bump_rollback_floor(&home);
@@ -336,7 +343,14 @@ pub(super) fn apply_fetched(
     } else {
         None
     };
+<<<<<<< HEAD:crates/codegen/xai-grok-shell/src/managed_config/store.rs
     let home = crate::util::grok_home::grok_home();
+=======
+    let signed_deployment_id = verified
+        .as_ref()
+        .and_then(|v| v.payload.deployment_id.clone());
+    let home = xai_dirs::grok_home();
+>>>>>>> upstream/main:crates/codegen/xai-grok-cloud-config/src/managed_config/store.rs
     let Some(_lock) = try_lock_managed_config(&home) else {
         tracing::debug!("managed config locked by another process; skipping apply");
         return Ok(ApplyOutcome::Skipped);
@@ -352,7 +366,15 @@ pub(super) fn apply_fetched(
     {
         return Ok(ApplyOutcome::StaleStage);
     }
+<<<<<<< HEAD:crates/codegen/xai-grok-shell/src/managed_config/store.rs
     let identity_changed = crate::config::managed_config_identity_changed_at(&home, new_principal);
+=======
+    let identity_changed = xai_grok_config::managed_config_identity_changed_at(
+        &home,
+        new_principal,
+        new_key_fingerprint,
+    );
+>>>>>>> upstream/main:crates/codegen/xai-grok-cloud-config/src/managed_config/store.rs
     let wrote = match apply_managed_config(&home, body) {
         // A switch's destructive half lands only with its constructive half: the policy
         // files are converged above, so only the prior principal's sidecars go.
@@ -387,14 +409,25 @@ pub(super) fn apply_fetched(
             xai_grok_config::signed_policy::write_managed_identity_sidecar(&home, &claim_sidecar)?;
         }
     }
+    clear_squatting_dir(&home.join(xai_grok_config::MANAGED_CONFIG_CACHE_FILE));
     // Marker last, still under the lock: post-release, a concurrent purge could delete
     // the files it describes.
-    clear_squatting_dir(&home.join(xai_grok_config::MANAGED_CONFIG_CACHE_FILE));
-    crate::config::mark_managed_config_synced_at(
+    xai_grok_config::mark_managed_config_synced_at(
         &home,
+<<<<<<< HEAD:crates/codegen/xai-grok-shell/src/managed_config/store.rs
         crate::config::SyncMarker {
             // Always the serving team — a deployment-signed envelope must not rebind it.
             principal: new_principal,
+=======
+        xai_grok_config::SyncMarker {
+            // DK: prefer verified payload deployment id (signed-empty only has it there).
+            // Team: always the serving team — a deployment-signed envelope must not rebind it.
+            principal: if new_key_fingerprint.is_some() {
+                signed_deployment_id.as_deref().or(new_principal)
+            } else {
+                new_principal
+            },
+>>>>>>> upstream/main:crates/codegen/xai-grok-cloud-config/src/managed_config/store.rs
             had_managed_config: body.has_managed_config(),
             had_requirements: body.has_requirements(),
             fail_closed: body.requirements_fail_closed(),
@@ -447,13 +480,13 @@ fn stage_refresh(
 
 /// Bounded local I/O, re-verified through [`apply_fetched`]; an unverifying build deletes it unread.
 pub(super) fn apply_staged_managed_config() {
-    let home = crate::util::grok_home::grok_home();
+    let home = xai_dirs::grok_home();
     let path = staged_refresh_path(&home);
     let Ok(json) = std::fs::read_to_string(&path) else {
         return;
     };
-    // Fetch-disabled and unverifiable builds discard a stage unread (fail-safe).
     if !is_fetch_enabled() || !xai_grok_config::signed_policy::verification_active() {
+        // Fetch-disabled and unverifiable builds discard a stage unread (fail-safe).
         let _ = std::fs::remove_file(&path);
         return;
     }
@@ -461,14 +494,20 @@ pub(super) fn apply_staged_managed_config() {
         let _ = std::fs::remove_file(&path);
         return;
     };
+<<<<<<< HEAD:crates/codegen/xai-grok-shell/src/managed_config/store.rs
     if staged.key_fingerprint.is_some() {
+=======
+    let current_fingerprint = resolve_deployment_key().map(|key| deployment_key_fingerprint(&key));
+    if staged.key_fingerprint != current_fingerprint {
+        // A key configured or rotated since the stage re-fetches instead of rebinding.
+>>>>>>> upstream/main:crates/codegen/xai-grok-cloud-config/src/managed_config/store.rs
         let _ = std::fs::remove_file(&path);
         return;
     }
-    // Early-out only; the authoritative freshness refusal runs under the apply flock.
     if staged.parked_at == 0
         || staged.parked_at < xai_grok_config::managed_config_synced_at(&home).unwrap_or(0)
     {
+        // Early-out only; the authoritative freshness refusal runs under the apply flock.
         let _ = std::fs::remove_file(&path);
         return;
     }
@@ -526,17 +565,60 @@ fn evict_prior_sidecars(home: &std::path::Path) {
     }
 }
 
+<<<<<<< HEAD:crates/codegen/xai-grok-shell/src/managed_config/store.rs
+=======
+/// Mirrors `clear_orphan`'s fail-safe checks (an unreadable `auth.json` keeps, not drops).
+fn credential_present(source: ManagedConfigSource) -> bool {
+    match source {
+        ManagedConfigSource::DeploymentKey => resolve_deployment_key().is_some(),
+        ManagedConfigSource::TeamOauth => team_principal_signed_in().unwrap_or(true),
+    }
+}
+
+/// The server deployment UUID on a marker fingerprint match, else UUIDv5 of the key.
+pub fn resolve_deployment_id(deployment_key: Option<&str>) -> Option<String> {
+    let key = deployment_key.filter(|k| !k.is_empty())?;
+    xai_grok_config::managed_deployment_id(&deployment_key_fingerprint(key))
+        .or_else(|| Some(xai_grok_telemetry::config::deployment_id_from_key(key)))
+}
+
+/// The GROK_DEPLOYMENT_KEY env beats the config file.
+/// A blank value is unset.
+pub fn resolve_deployment_key() -> Option<String> {
+    let config_val = xai_grok_config::effective_config::load_effective_config()
+        .map_err(|e| tracing::warn!("failed to load config files for deployment key: {e}"))
+        .ok()
+        .and_then(|root| {
+            root.get("endpoints")?
+                .get("deployment_key")?
+                .as_str()
+                .map(str::to_owned)
+        });
+    xai_grok_config::resolve_string_flag(None, "GROK_DEPLOYMENT_KEY", config_val.as_deref(), None)
+        .map(|resolved| resolved.value)
+}
+
+/// Deterministic so the same key matches its marker; the raw key is never written to disk.
+pub(super) fn deployment_key_fingerprint(key: &str) -> String {
+    blake3::hash(key.as_bytes()).to_hex().to_string()
+}
+
+>>>>>>> upstream/main:crates/codegen/xai-grok-cloud-config/src/managed_config/store.rs
 /// Overlay-free read: a `GROK_CONFIG` overlay must not suppress a policy-enforcement sync.
 pub fn is_fetch_enabled() -> bool {
-    if let Some(v) = crate::agent::config::env_bool("GROK_MANAGED_CONFIG") {
+    if !xai_grok_config::Distribution::current().allows(xai_grok_config::Capability::RemoteFetch) {
+        return false;
+    }
+    if let Some(v) = xai_grok_env::env_bool("GROK_MANAGED_CONFIG") {
         return v;
     }
-    crate::config::ConfigLayers::load()
+    xai_grok_config::ConfigLayers::load()
         .ok()
         .and_then(|layers| super::policy::managed_config_enabled_from_layers(&layers))
         .unwrap_or(true)
 }
 
+/// A deployment key, or a non-expired team sign-in. An unreadable `auth.json` counts as absent.
 pub fn has_principal() -> bool {
     read_active_team_auth().is_some()
 }
@@ -546,16 +628,26 @@ pub(super) fn managed_principal_present() -> bool {
     team_principal_signed_in().unwrap_or(true)
 }
 
+<<<<<<< HEAD:crates/codegen/xai-grok-shell/src/managed_config/store.rs
 fn serving_identity_from(team_id: Option<String>) -> crate::config::ServingIdentity {
     use crate::config::ServingIdentity;
+=======
+fn serving_identity_from(team_id: Option<String>) -> xai_grok_config::ServingIdentity {
+    use xai_grok_config::ServingIdentity;
+    if let Some(key) = resolve_deployment_key() {
+        return ServingIdentity::DeploymentKey {
+            fingerprint: deployment_key_fingerprint(&key),
+        };
+    }
+>>>>>>> upstream/main:crates/codegen/xai-grok-cloud-config/src/managed_config/store.rs
     // Trimmed and blank = unknown, matching the marker write.
-    match crate::config::normalize_identity(team_id.as_deref()) {
+    match xai_grok_config::normalize_identity(team_id.as_deref()) {
         Some(team_id) => ServingIdentity::Team(team_id),
         None => ServingIdentity::None,
     }
 }
 
-pub fn current_serving_identity() -> crate::config::ServingIdentity {
+pub fn current_serving_identity() -> xai_grok_config::ServingIdentity {
     serving_identity_from(read_active_team_auth().and_then(|a| a.team_id))
 }
 
@@ -563,10 +655,10 @@ pub fn current_serving_identity() -> crate::config::ServingIdentity {
 pub(super) fn active_team_id_any_expiry() -> Option<String> {
     let team = read_team_principal().ok().flatten()?;
     // The id must read the same everywhere it feeds (gate, purge, envelope binding).
-    crate::config::normalize_identity(team.team_id.as_deref())
+    xai_grok_config::normalize_identity(team.team_id.as_deref())
 }
 
-pub(super) fn current_serving_identity_any_expiry() -> crate::config::ServingIdentity {
+pub(super) fn current_serving_identity_any_expiry() -> xai_grok_config::ServingIdentity {
     serving_identity_from(active_team_id_any_expiry())
 }
 

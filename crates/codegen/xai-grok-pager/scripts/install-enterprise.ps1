@@ -386,16 +386,18 @@ try {
 
 # --- Persist installer config ---
 
+# [Text.Encoding]::UTF8 writes a BOM, which Grok Desktop's TOML parser rejects.
+$Utf8NoBom = New-Object System.Text.UTF8Encoding $false
 $ConfigFile = Join-Path $GrokDir 'config.toml'
 $cliLines = @('installer = "internal"', 'channel = "enterprise"')
 
 if (-not (Test-Path $ConfigFile)) {
     New-Item -ItemType Directory -Path (Split-Path $ConfigFile) -Force | Out-Null
     $content = "[cli]`r`n" + ($cliLines -join "`r`n") + "`r`n"
-    [System.IO.File]::WriteAllText($ConfigFile, $content, [System.Text.Encoding]::UTF8)
-} elseif ((Get-Content -Raw $ConfigFile) -match '(?m)^\[cli\]') {
+    [System.IO.File]::WriteAllText($ConfigFile, $content, $Utf8NoBom)
+} elseif ([System.IO.File]::ReadAllText($ConfigFile) -match '(?m)^\[cli\]') {
     # Section-aware: only replace installer/channel under [cli], not other sections.
-    $existingLines = Get-Content $ConfigFile
+    $existingLines = [System.IO.File]::ReadAllLines($ConfigFile)
     $output = [System.Collections.ArrayList]::new()
     $inCli = $false
 
@@ -414,11 +416,64 @@ if (-not (Test-Path $ConfigFile)) {
         }
         [void]$output.Add($line)
     }
-    [System.IO.File]::WriteAllLines($ConfigFile, [string[]]$output.ToArray(), [System.Text.Encoding]::UTF8)
+    [System.IO.File]::WriteAllLines($ConfigFile, [string[]]$output.ToArray(), $Utf8NoBom)
 } else {
-    Add-Content -Path $ConfigFile -Value "`r`n[cli]`r`n$($cliLines -join "`r`n")`r`n"
+    $existingText = [System.IO.File]::ReadAllText($ConfigFile)
+    $content = $existingText + "`r`n[cli]`r`n" + ($cliLines -join "`r`n") + "`r`n"
+    [System.IO.File]::WriteAllText($ConfigFile, $content, $Utf8NoBom)
 }
 
+<<<<<<< HEAD
+=======
+# --- Fetch deployment config (deployment key only) ---
+
+if ($env:GROK_DEPLOYMENT_KEY) {
+    $ProxyUrl = if ($env:GROK_PROXY_URL) { $env:GROK_PROXY_URL } else { 'https://cli-chat-proxy.grok.com/v1' }
+    # Refuse cleartext / userinfo / empty-host proxies before attaching the key.
+    try {
+        $proxyUri = [Uri]$ProxyUrl
+    } catch {
+        Write-Error "GROK_PROXY_URL must be an https:// URL."
+        exit 1
+    }
+    if (-not $proxyUri.IsAbsoluteUri -or $proxyUri.Scheme -ne 'https' -or -not $proxyUri.Host -or $proxyUri.UserInfo) {
+        Write-Error "GROK_PROXY_URL must be an https:// URL."
+        exit 1
+    }
+    Write-Host '  Fetching deployment config...' -ForegroundColor DarkGray
+    try {
+        $headers = @{ 'Authorization' = "Bearer $($env:GROK_DEPLOYMENT_KEY)" }
+        # IRM follows redirects and would resend the Bearer token.
+        $deployResponse = Invoke-RestMethod -Uri "$ProxyUrl/deployment/config" -Headers $headers -UseBasicParsing -MaximumRedirection 0
+    } catch {
+        Write-Host "  Warning: failed to fetch deployment config from $ProxyUrl/deployment/config" -ForegroundColor Yellow
+        $deployResponse = $null
+    }
+
+    if ($deployResponse) {
+        $managedConfig = $deployResponse.managed_config
+        $requirements = $deployResponse.requirements
+
+        $managedConfigPath = Join-Path $GrokDir 'managed_config.toml'
+        $requirementsPath = Join-Path $GrokDir 'requirements.toml'
+
+        if ($managedConfig -and $managedConfig -ne 'null') {
+            [System.IO.File]::WriteAllText($managedConfigPath, $managedConfig, $Utf8NoBom)
+            Write-Host '  Managed config applied.' -ForegroundColor DarkGray
+        } else {
+            if (Test-Path $managedConfigPath) { Remove-Item $managedConfigPath -Force }
+        }
+
+        if ($requirements -and $requirements -ne 'null') {
+            [System.IO.File]::WriteAllText($requirementsPath, $requirements, $Utf8NoBom)
+            Write-Host '  Requirements applied.' -ForegroundColor DarkGray
+        } else {
+            if (Test-Path $requirementsPath) { Remove-Item $requirementsPath -Force }
+        }
+    }
+}
+
+>>>>>>> upstream/main
 Write-Host "Grok $resolvedVersion installed to $BinDir\grok.exe" -ForegroundColor Green
 
 # --- Ensure grok is on PATH ---

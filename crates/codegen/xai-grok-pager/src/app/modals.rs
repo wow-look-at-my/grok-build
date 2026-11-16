@@ -18,10 +18,19 @@ use crate::theme::Theme;
 use crate::views::modal::{self, ActiveModal};
 
 impl AgentView {
+<<<<<<< HEAD
     /// `suggest_args` falls back to the model list when `query` opens no
     /// sub-phase.
     fn arg_items_are_a_sub_phase(items: &[crate::slash::command::ArgItem], query: &str) -> bool {
         !items.is_empty() && items.iter().all(|item| item.insert_text != query)
+=======
+    /// `suggest_args` falls back to model rows when `picked` is not a sub-phase; window and effort rows all extend it.
+    fn arg_items_extend_pick(items: &[crate::slash::command::ArgItem], picked: &str) -> bool {
+        !items.is_empty()
+            && items.iter().all(|item| {
+                item.insert_text.len() > picked.len() && item.insert_text.starts_with(picked)
+            })
+>>>>>>> upstream/main
     }
 
     /// Step the model ArgPicker from effort phase back to the model list.
@@ -655,7 +664,11 @@ impl AgentView {
                     if let Some(cmd) = self.prompt.slash_controller.registry().get(&command_clone) {
                         let ctx = self.prompt.slash_controller.app_ctx(&self.session.models);
                         if let Some(effort_items) = cmd.suggest_args(&ctx, &next_query)
+<<<<<<< HEAD
                             && Self::arg_items_are_a_sub_phase(&effort_items, &next_query)
+=======
+                            && Self::arg_items_extend_pick(&effort_items, &next_query)
+>>>>>>> upstream/main
                         {
                             let selected = cmd
                                 .preselected_arg(&ctx, &next_query)
@@ -1793,8 +1806,10 @@ impl AgentView {
             {
                 // Arg picker: ModalWindow chrome and picker content
                 let title = match command.as_str() {
-                    "model" | "m" if !args_query.is_empty() => "Pick reasoning effort",
-                    "model" | "m" => "Pick model",
+                    "model" | "m" => crate::slash::commands::model::picker_title(
+                        &self.session.models,
+                        args_query,
+                    ),
                     "theme" | "t" => "Pick theme",
                     _ => "Pick option",
                 };

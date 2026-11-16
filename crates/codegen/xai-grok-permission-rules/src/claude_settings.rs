@@ -6,8 +6,8 @@ use std::path::{Path, PathBuf};
 use serde::Deserialize;
 use tracing::{debug, warn};
 
-use crate::permission::rules::parse_permission_rule;
-use crate::permission::types::{PermissionConfig, RuleAction};
+use crate::rules::parse_permission_rule;
+use crate::types::{PermissionConfig, RuleAction};
 
 // ═════════════════════════════════════════════════════════════════════════════
 // Settings Types (Claude JSON subset)
@@ -348,7 +348,7 @@ pub(crate) fn claude_settings_paths_for_trust(cwd: &Path, project_trusted: bool)
 }
 
 /// Whether a project-tree `.claude/settings.json` / `settings.local.json` exists anywhere on the walk from `cwd` up to the repo root.
-/// The folder-trust detector shares that walk ([`collect_project_claude_paths`]) with the env/permission loaders, so detection can never drift.
+/// The folder-trust detector shares that walk (`collect_project_claude_paths`) with the env/permission loaders, so detection can never drift.
 /// A settings file in a SUBDIR, whose `env` is injected into every spawned subprocess, must flip the folder untrusted, not just one at the git root.
 /// Presence is type-agnostic to match the hook loader: a directory at the settings path must gate too.
 pub fn project_claude_settings_present(cwd: &Path) -> bool {
@@ -432,7 +432,7 @@ pub fn load_claude_env_with_project(cwd: &Path, project_trusted: bool) -> HashMa
     merged
 }
 
-// Phase 2 cutoff marker. Reader is local because gate consumers cannot depend on shell (cycle); caching omitted until this is a hotspot.
+// Gate consumers cannot depend on the shell, so this check stays in this crate.
 
 /// True when the user marked Claude settings imported (`claude_compat.imported` in config.json, or the test override).
 /// Public so callers that mirror this gate elsewhere use the same check.
@@ -442,6 +442,7 @@ pub fn is_claude_import_marked() -> bool {
     if std::env::var("_GROK_CLAUDE_MARKER_OVERRIDE").as_deref() == Ok("1") {
         return true;
     }
+<<<<<<< HEAD:crates/codegen/xai-grok-workspace/src/permission/claude_settings.rs
     let Some(config_path) = xai_grok_config::user_grok_home()
         .map(|g| xai_grok_config::format::resolve_config_file(&g, xai_grok_config::CONFIG_STEM))
     else {
@@ -455,6 +456,10 @@ pub fn is_claude_import_marked() -> bool {
         .and_then(|v| v.get("imported"))
         .and_then(|v| v.as_bool())
         .unwrap_or(false)
+=======
+    xai_grok_config::user_grok_home()
+        .is_some_and(|grok_home| xai_grok_config::is_claude_import_marked(&grok_home))
+>>>>>>> upstream/main:crates/codegen/xai-grok-permission-rules/src/claude_settings.rs
 }
 
 /// Logs a single info line the first time the gate is hit (per process) so we can confirm the cutoff is taking effect without flooding logs.

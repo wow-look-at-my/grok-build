@@ -2,6 +2,41 @@ use super::*;
 use serial_test::serial;
 use xai_grok_test_support::EnvGuard;
 #[test]
+fn coding_data_opt_out_does_not_block_uploads_to_own_bucket() {
+    let normal = xai_grok_login::GrokAuth::test_default();
+    let opted_out = xai_grok_login::GrokAuth {
+        coding_data_retention_opt_out: true,
+        ..xai_grok_login::GrokAuth::test_default()
+    };
+    let zdr = xai_grok_login::GrokAuth {
+        team_blocked_reasons: vec!["BLOCKED_REASON_NO_LOGS".into()],
+        ..xai_grok_login::GrokAuth::test_default()
+    };
+    let cases = [
+        (None, &normal, false),
+        (None, &opted_out, true),
+        (None, &zdr, true),
+        (Some("s3://acme-traces"), &normal, false),
+        (Some("s3://acme-traces"), &opted_out, false),
+        (Some("gs://acme-traces"), &opted_out, false),
+        (Some("s3://acme-traces"), &zdr, true),
+        (Some("ftp://acme-traces"), &opted_out, true),
+    ];
+    for (bucket, auth, expected) in cases {
+        let endpoints = EndpointsConfig {
+            trace_upload_bucket: bucket.map(str::to_owned),
+            ..EndpointsConfig::default()
+        };
+        assert_eq!(
+            expected,
+            endpoints.is_trace_upload_blocked_for(auth),
+            "bucket={bucket:?} opt_out={} zdr={}",
+            auth.coding_data_retention_opt_out,
+            auth.is_zdr_team()
+        );
+    }
+}
+#[test]
 fn main_cli_tools_override_preserves_profile_injection_policy() {
     let overrides = CliAgentOverrides {
         tools: Some(vec!["read_file".into()]),
@@ -1100,6 +1135,7 @@ fn provider_model_fails_closed_on_prefetched_custom_base_url() {
         "a prefetched custom base_url must fail closed, not leak the session token",
     );
 }
+<<<<<<< HEAD
 fn test_model_entry(
     model: &str,
     base_url: &str,
@@ -1125,6 +1161,8 @@ fn test_model_entry(
         api_base_url: api_base_url.map(|s| s.to_string()),
     }
 }
+=======
+>>>>>>> upstream/main
 /// The effective-model RE-support lookup must use the model ACTUALLY used: the resolved aux model when present, else the session model.
 /// An unresolvable slug resolves aux to `None`, so the session model's capability wins.
 #[test]
@@ -2154,6 +2192,57 @@ fn a_context_window_limit_stays_on_its_own_provider() {
     assert!(!alpha_pinned);
 }
 #[test]
+fn context_window_is_the_default_and_context_windows_are_the_choices() {
+    let raw_config: toml::Value = toml::from_str(
+        r#"
+            [model.my-custom-model]
+            model = "custom-llm"
+            base_url = "https://api.example.com/v1"
+            context_window = 256000
+            context_windows = [500000, 256000]
+            "#,
+    )
+    .unwrap();
+    let cfg = Config::new_from_toml_cfg(&raw_config).expect("config should parse");
+    let resolved = resolve_model_list(&cfg, None);
+    let model = resolved.get("my-custom-model").expect("model should exist");
+    assert_eq!(model.info.context_window.get(), 256_000);
+    let windows: Vec<u64> = model.info.context_windows.iter().map(|w| w.get()).collect();
+    assert_eq!(windows, [500_000, 256_000]);
+}
+#[rstest::rstest]
+#[case::scalar_without_list(Some(256_000), &[], Some((256_000, vec![])))]
+#[case::list_without_scalar(
+    None,
+    &[500_000,
+    256_000,
+    500_000],
+    Some((500_000, vec![500_000, 256_000]))
+)]
+#[case::scalar_missing_from_list_is_added(
+    Some(300_000),
+    &[256_000,
+    500_000],
+    Some((300_000, vec![300_000, 256_000, 500_000]))
+)]
+#[case::scalar_in_list_keeps_list_order(
+    Some(500_000),
+    &[256_000,
+    500_000],
+    Some((500_000, vec![256_000, 500_000]))
+)]
+#[case::neither(None, &[], None)]
+fn context_window_choices_resolve(
+    #[case] context_window: Option<u64>,
+    #[case] listed: &[u64],
+    #[case] expected: Option<(u64, Vec<u64>)>,
+) {
+    let listed: Vec<NonZeroU64> = listed.iter().filter_map(|w| NonZeroU64::new(*w)).collect();
+    let got = context_window_choices(context_window.and_then(NonZeroU64::new), &listed)
+        .map(|(default, choices)| (default.get(), choices.iter().map(|w| w.get()).collect()));
+    assert_eq!(got, expected);
+}
+#[test]
 fn sampling_config_context_window_from_entry_or_default() {
     let model = test_model_entry(
         "any-model",
@@ -2580,6 +2669,89 @@ fn acp_model_meta_always_includes_agent_type() {
     );
 }
 #[test]
+fn config_model_notice_reaches_acp_meta() {
+    use xai_grok_sampling_types::{ModelNotice, ModelNoticeSeverity, parse_model_notice_meta};
+    let raw_config: toml::Value = toml::from_str(
+        r#"
+            [model.old-model]
+            model = "old-model"
+            base_url = "https://api.example.com/v1"
+            context_window = 200000
+            notice = { severity = "warning", text = "Deprecated Oct 15", label = "deprecated" }
+            "#,
+    )
+    .expect("test TOML parses");
+    let cfg = Config::new_from_toml_cfg(&raw_config).expect("config should parse");
+    let models = resolve_model_list(&cfg, None);
+    let acp_models = to_acp_model_info(&models);
+    let meta = acp_models
+        .get(&acp::ModelId::new("old-model"))
+        .and_then(|model| model.meta.as_ref())
+        .expect("configured model has meta");
+    assert_eq!(
+        Some(
+            &serde_json::json!({"severity": "warning", "text": "Deprecated Oct 15", "label": "deprecated"})
+        ),
+        meta.get("notice")
+    );
+    assert_eq!(
+        Some(ModelNotice {
+            severity: ModelNoticeSeverity::Warning,
+            text: "Deprecated Oct 15".to_owned(),
+            label: Some("deprecated".to_owned()),
+        }),
+        parse_model_notice_meta(Some(meta))
+    );
+}
+#[test]
+fn config_blank_notice_clears_the_inherited_notice() {
+    use xai_grok_sampling_types::{ModelNotice, ModelNoticeSeverity};
+    let mut base = test_model_entry("old-model", "https://test.api/v1", None, None, None);
+    base.info.notice = Some(ModelNotice {
+        severity: ModelNoticeSeverity::Critical,
+        text: "Retired".to_owned(),
+        label: None,
+    });
+    let over: ConfigModelOverride =
+        toml::from_str(r#"notice = { text = "" }"#).expect("override TOML parses");
+    let entry = over.apply("old-model", Some(base), &EndpointsConfig::default());
+    assert_eq!(None, entry.info.notice);
+}
+#[test]
+fn acp_model_meta_omits_notice_when_unset() {
+    let mut models = IndexMap::new();
+    models.insert(
+        "m".to_owned(),
+        test_model_entry("m", "https://test.api/v1", None, None, None),
+    );
+    let acp_models = to_acp_model_info(&models);
+    let meta = acp_models
+        .values()
+        .next()
+        .and_then(|model| model.meta.as_ref())
+        .expect("model has meta");
+    assert_eq!(None, meta.get("notice"));
+}
+#[test]
+fn model_entry_config_notice_survives_a_serde_round_trip() {
+    use xai_grok_sampling_types::{ModelNotice, ModelNoticeSeverity};
+    let entry = ModelEntryConfig {
+        model: "old-model".to_owned(),
+        base_url: "https://test.api/v1".to_owned(),
+        context_window: NonZeroU64::new(200_000).expect("non-zero"),
+        notice: Some(ModelNotice {
+            severity: ModelNoticeSeverity::Warning,
+            text: "Deprecated Oct 15".to_owned(),
+            label: None,
+        }),
+        ..Default::default()
+    };
+    let json = serde_json::to_value(&entry).expect("entry serializes");
+    let back: ModelEntryConfig = serde_json::from_value(json).expect("entry deserializes");
+    assert_eq!(entry.notice, back.notice);
+    assert_eq!(entry.notice, ModelInfo::from_config(&back).notice);
+}
+#[test]
 fn acp_model_meta_emits_reasoning_effort_when_supported() {
     let mut models = IndexMap::new();
     let mut entry = test_model_entry("m", "https://test.api/v1", None, None, None);
@@ -2788,6 +2960,32 @@ fn acp_model_meta_always_has_context_window() {
     assert_eq!(
         meta.get("totalContextTokens"),
         Some(&serde_json::json!(200_000))
+    );
+    assert!(
+        !meta.contains_key("contextWindows"),
+        "a single-window model advertises no menu"
+    );
+}
+#[test]
+fn acp_model_meta_advertises_context_windows_menu() {
+    let mut models = IndexMap::new();
+    let mut entry = test_model_entry("multi-window", "https://test.api/v1", None, None, None);
+    entry.info.context_window = NonZeroU64::new(256_000).unwrap();
+    entry.info.context_windows = vec![
+        NonZeroU64::new(256_000).unwrap(),
+        NonZeroU64::new(500_000).unwrap(),
+    ];
+    models.insert("multi-window".to_string(), entry);
+    let acp_models = to_acp_model_info(&models);
+    let meta = acp_models.values().next().unwrap().meta.as_ref().unwrap();
+    assert_eq!(
+        meta.get("totalContextTokens"),
+        Some(&serde_json::json!(256_000)),
+        "the default stays the advertised total"
+    );
+    assert_eq!(
+        meta.get("contextWindows"),
+        Some(&serde_json::json!([256_000, 500_000]))
     );
 }
 #[test]
@@ -3310,7 +3508,7 @@ fn force_login_team_uuid_parses_string_and_array() {
     use xai_grok_login::ForceLoginTeam;
     let _g = crate::env::EnvVarGuard::remove("GROK_FORCE_LOGIN_TEAM_ID");
     assert!(
-        super::force_login_team_from_requirements().is_none(),
+        xai_grok_login::force_login_team_from_requirements().is_none(),
         "clear the force_login_team_uuid pin in requirements.toml to run this test",
     );
     let absent = Config::new_from_toml_cfg(&toml::from_str("").unwrap()).unwrap();
@@ -3362,7 +3560,7 @@ fn force_login_team_id_env_overrides_user_config() {
     use xai_grok_login::ForceLoginTeam;
     let _guard = crate::env::EnvVarGuard::set("GROK_FORCE_LOGIN_TEAM_ID", "env-team");
     assert!(
-        super::force_login_team_from_requirements().is_none(),
+        xai_grok_login::force_login_team_from_requirements().is_none(),
         "clear the force_login_team_uuid pin in requirements.toml to run this test",
     );
     let from_env = Config::new_from_toml_cfg(&toml::from_str("").unwrap()).unwrap();
@@ -3389,7 +3587,7 @@ fn force_login_team_id_env_unset_keeps_config_value() {
     use xai_grok_login::ForceLoginTeam;
     let _guard = crate::env::EnvVarGuard::remove("GROK_FORCE_LOGIN_TEAM_ID");
     assert!(
-        super::force_login_team_from_requirements().is_none(),
+        xai_grok_login::force_login_team_from_requirements().is_none(),
         "clear the force_login_team_uuid pin in requirements.toml to run this test",
     );
     let raw: toml::Value = toml::from_str(
@@ -5067,6 +5265,30 @@ fn resolve_trace_upload_explicit_config_cannot_reenable() {
 }
 #[test]
 #[serial]
+fn trace_upload_stays_off_under_a_requirements_pin_when_the_distribution_withholds_telemetry() {
+    unsafe { std::env::remove_var("GROK_TELEMETRY_ENABLED") };
+    unsafe { std::env::remove_var("GROK_TELEMETRY_TRACE_UPLOAD") };
+    let mut cfg = Config::default();
+    cfg.telemetry.trace_upload = Some(true);
+    cfg.requirements
+        .trace_upload
+        .pin(true, crate::config::RequirementSource::Unknown);
+    cfg.remote_settings = Some(crate::util::config::RemoteSettings {
+        trace_upload_enabled: Some(true),
+        ..Default::default()
+    });
+    let withheld = cfg.resolve_trace_upload_as(xai_grok_config::Distribution::withholding(&[
+        xai_grok_config::Capability::Telemetry,
+    ]));
+    assert!(!withheld.value);
+    assert_eq!(withheld.source, ConfigSource::Default);
+    assert!(
+        cfg.resolve_trace_upload_as(xai_grok_config::Distribution::STOCK)
+            .value
+    );
+}
+#[test]
+#[serial]
 fn trace_upload_decision_debug_reports_winning_source() {
     unsafe { std::env::remove_var("GROK_TELEMETRY_ENABLED") };
     unsafe { std::env::remove_var("GROK_TELEMETRY_TRACE_UPLOAD") };
@@ -6631,6 +6853,8 @@ fn config_accepts_all_known_sections() {
             respect_gitignore = false
             [desktop]
             some_key = "value"
+            [file_acceleration]
+            routes = "fuse=on"
         "#,
     );
     assert!(
@@ -6744,6 +6968,7 @@ fn unknown_key_still_warns_next_to_exempt_sections() {
         "exactly the typo'd key must be flagged"
     );
 }
+<<<<<<< HEAD
 #[test]
 fn otlp_traces_endpoint_precedence() {
     let proxy = "https://inference.acme.com/v1".to_string();
@@ -6990,6 +7215,28 @@ fn internal_otlp_headers_precedence() {
         vec![("legacy".to_string(), "1".to_string())]
     );
 }
+=======
+/// Regression: a deployment key with no OAuth token must resolve to Proxy.
+#[test]
+fn resolve_upload_method_accepts_deployment_key_without_oauth() {
+    use crate::session::repo_changes::UploadMethod;
+    let endpoints = EndpointsConfig {
+        deployment_key: Some("enterprise-key".to_string()),
+        ..Default::default()
+    };
+    match endpoints.resolve_upload_method(None) {
+        Some(UploadMethod::Proxy {
+            deployment_key,
+            user_token,
+            ..
+        }) => {
+            assert_eq!(deployment_key.as_deref(), Some("enterprise-key"));
+            assert_eq!(user_token, "");
+        }
+        other => panic!("expected Proxy upload method, got {other:?}"),
+    }
+}
+>>>>>>> upstream/main
 fn ext_env(pairs: &[(&str, &str)]) -> impl Fn(&str) -> Option<String> + use<> {
     let map: std::collections::HashMap<String, String> = pairs
         .iter()
@@ -7591,48 +7838,6 @@ fn external_otel_pin_prompts_true_omitted_assistant_stays_off() {
         "omitted CONTENT sibling must default off across the requirements boundary"
     );
 }
-/// Regression: an org enable via `[telemetry].otel_enabled` (managed config / requirements — no `GROK_EXTERNAL_OTEL` env var) must flip the master switch the *internal* pipeline keys off, so legacy `OTEL_EXPORTER_OTLP_*` repointing shuts off in lockstep with the external stream activating. A desync would point the internally-authed firehose at the customer collector while `internal_pipeline_consumed_otel_vars` blocks the external stream.
-#[test]
-fn external_otel_master_switch_resolves_from_all_layers() {
-    let enabled_table: toml::Value = toml::from_str("[telemetry]\notel_enabled = true").unwrap();
-    let disabled_table: toml::Value = toml::from_str("[telemetry]\notel_enabled = false").unwrap();
-    assert!(external_otel_master_switch_from(
-        None,
-        None,
-        Some(&enabled_table)
-    ));
-    assert!(!external_otel_master_switch_from(None, None, None));
-    assert!(!external_otel_master_switch_from(
-        None,
-        Some(false),
-        Some(&enabled_table)
-    ));
-    assert!(external_otel_master_switch_from(
-        None,
-        Some(true),
-        Some(&disabled_table)
-    ));
-    assert!(!external_otel_master_switch_from(
-        Some(&disabled_table),
-        Some(true),
-        Some(&enabled_table)
-    ));
-    assert!(external_otel_master_switch_from(
-        Some(&enabled_table),
-        Some(false),
-        None
-    ));
-    let cfg = EndpointsConfig {
-        otel_exporter_otlp_traces_endpoint: Some("https://collector.corp:4318/v1/traces".into()),
-        external_otel_master_switch: true,
-        ..internal_otlp_test_config()
-    };
-    assert!(!cfg.internal_otlp_consumed_standard_vars());
-    assert!(
-        !cfg.resolve_otlp_traces_endpoint()
-            .contains("collector.corp")
-    );
-}
 #[test]
 fn external_otel_carries_internal_consumed_flag() {
     let cfg = resolve_external_otel_config_with(
@@ -7669,11 +7874,12 @@ fn clear_managed_mcp_env_vars() {
     }
 }
 fn isolate_compat_env() -> Vec<EnvGuard> {
-    COMPAT_CELLS
+    xai_grok_tools::types::compat::COMPAT_CELLS
         .into_iter()
         .map(|cell| EnvGuard::unset(cell.env_var()))
         .collect()
 }
+<<<<<<< HEAD
 fn parse_compat(source: &str) -> CompatConfigToml {
     let raw: toml::Value = toml::from_str(source).unwrap();
     raw.get("compat").unwrap().clone().try_into().unwrap()
@@ -7901,6 +8107,8 @@ fn resolve_compat_precedence_env_over_config_over_remote() {
     assert!(resolved.cursor.sessions);
     assert!(resolved.claude.hooks);
 }
+=======
+>>>>>>> upstream/main
 #[test]
 #[serial]
 fn resolve_runtime_fields_compat_asymmetric_sources() {
@@ -8281,6 +8489,33 @@ fn resolve_telemetry_mode_stays_disabled_under_disable_env_opt_in_and_requiremen
     assert_eq!(
         (resolved.value, resolved.source),
         (TelemetryMode::Disabled, ConfigSource::Default)
+    );
+}
+#[test]
+#[serial]
+fn requirements_telemetry_pin_beats_user_config() {
+    unsafe { std::env::remove_var("DISABLE_TELEMETRY") };
+    unsafe { std::env::remove_var("GROK_TELEMETRY_ENABLED") };
+    let mut cfg = Config::default();
+    cfg.features.telemetry = Some(TelemetryMode::Enabled);
+    cfg.requirements.telemetry.pin(
+        TelemetryMode::Disabled,
+        crate::config::RequirementSource::Unknown,
+    );
+    let off = cfg.resolve_telemetry_mode();
+    assert_eq!(
+        (off.value, off.source),
+        (TelemetryMode::Disabled, ConfigSource::Requirement)
+    );
+    cfg.features.telemetry = Some(TelemetryMode::Disabled);
+    cfg.requirements.telemetry.pin(
+        TelemetryMode::Enabled,
+        crate::config::RequirementSource::Unknown,
+    );
+    let on = cfg.resolve_telemetry_mode();
+    assert_eq!(
+        (on.value, on.source),
+        (TelemetryMode::Enabled, ConfigSource::Requirement)
     );
 }
 #[test]
@@ -9021,6 +9256,7 @@ fn resolve_model_list_inherits_context_window_from_default_when_prefetched_has_f
     );
 }
 #[test]
+<<<<<<< HEAD
 fn config_model_without_explicit_window_inherits_prefetched_sibling_by_slug() {
     // A `[model.*]` config entry that shares.
     let mut cfg = Config::default();
@@ -9076,6 +9312,52 @@ fn a_configured_window_equal_to_the_default_is_not_replaced_by_a_sibling() {
         );
         assert!(entry.info.context_window_pinned);
     }
+=======
+fn choices_mark_the_window_explicit_and_donate_to_slug_siblings() {
+    let cfg = Config::default();
+    let dm = crate::models::default_model();
+    let choices = vec![
+        NonZeroU64::new(DEFAULT_CONTEXT_WINDOW).unwrap(),
+        NonZeroU64::new(500_000).unwrap(),
+    ];
+    let mut primary = prefetch_model_entry(dm, DEFAULT_CONTEXT_WINDOW, ApiBackend::default());
+    primary.info.context_windows = choices.clone();
+    let sibling = prefetch_model_entry(dm, DEFAULT_CONTEXT_WINDOW, ApiBackend::default());
+    let mut prefetched = IndexMap::new();
+    prefetched.insert(dm.to_owned(), primary);
+    prefetched.insert(format!("{dm}-alias"), sibling);
+    let resolved = resolve_model_list(&cfg, Some(prefetched));
+    let primary = resolved.get(dm).expect("primary must exist");
+    assert_eq!(primary.info.context_window.get(), DEFAULT_CONTEXT_WINDOW);
+    let sibling = resolved
+        .get(&format!("{dm}-alias"))
+        .expect("sibling must exist");
+    assert_eq!(sibling.info.context_windows, choices);
+}
+#[test]
+fn scalar_override_keeps_the_inherited_choices() {
+    let dm = crate::models::default_model();
+    let raw_config: toml::Value = toml::from_str(&format!(
+        r#"
+            [model."{dm}"]
+            context_window = 300000
+            "#
+    ))
+    .unwrap();
+    let cfg = Config::new_from_toml_cfg(&raw_config).expect("config should parse");
+    let mut entry = prefetch_model_entry(dm, DEFAULT_CONTEXT_WINDOW, ApiBackend::default());
+    entry.info.context_windows = vec![
+        NonZeroU64::new(DEFAULT_CONTEXT_WINDOW).unwrap(),
+        NonZeroU64::new(500_000).unwrap(),
+    ];
+    let mut prefetched = IndexMap::new();
+    prefetched.insert(dm.to_owned(), entry);
+    let resolved = resolve_model_list(&cfg, Some(prefetched));
+    let model = resolved.get(dm).expect("model must exist");
+    assert_eq!(model.info.context_window.get(), 300_000);
+    let windows: Vec<u64> = model.info.context_windows.iter().map(|w| w.get()).collect();
+    assert_eq!(windows, [300_000, DEFAULT_CONTEXT_WINDOW, 500_000]);
+>>>>>>> upstream/main
 }
 #[test]
 fn resolve_model_list_does_not_override_explicitly_set_context_window() {
@@ -9756,4 +10038,58 @@ async fn process_key_from_model_env_key() {
             .as_deref(),
         Some(TOKEN)
     );
+}
+#[test]
+fn external_auth_with_a_models_endpoint_ignores_model_tables_and_allowed_models() {
+    let parse = |auth: &str| {
+        let raw: toml::Value = toml::from_str(&format!(
+            r#"
+            {auth}
+            [models]
+            default = "corp-build"
+            allowed_models = ["corp-build"]
+
+            [endpoints]
+            models_base_url = "https://proxy.example.com/v1"
+
+            [model.corp-build]
+            model = "corp-build"
+            base_url = "https://proxy.example.com/v1/"
+            context_window = 500000
+            "#
+        ))
+        .expect("parse test toml");
+        Config::new_from_toml_cfg(&raw).expect("config should parse")
+    };
+    let external = parse("[auth]\nauth_provider_command = \"/usr/local/bin/provider\"");
+    let standard = parse("");
+    assert!(external.config_models.is_empty());
+    assert_eq!(None, external.models.allowed_models);
+    assert!(!resolve_model_list(&external, None).contains_key("corp-build"));
+    assert!(standard.config_models.contains_key("corp-build"));
+    assert_eq!(
+        Some(vec!["corp-build".to_owned()]),
+        standard.models.allowed_models
+    );
+}
+fn test_model_entry(
+    model: &str,
+    base_url: &str,
+    api_key: Option<&str>,
+    env_key: Option<&str>,
+    api_base_url: Option<&str>,
+) -> ModelEntry {
+    ModelEntry {
+        info: ModelInfo {
+            model: model.to_string(),
+            base_url: base_url.to_string(),
+            context_window: NonZeroU64::new(200_000).unwrap(),
+            ..Default::default()
+        },
+        mtls_cert_dir: None,
+        api_key: api_key.map(|s| s.to_string()),
+        env_key: env_key.map(EnvKeys::single),
+        auth_provider: None,
+        api_base_url: api_base_url.map(|s| s.to_string()),
+    }
 }

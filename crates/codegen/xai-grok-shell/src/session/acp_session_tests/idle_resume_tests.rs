@@ -187,6 +187,7 @@ async fn test_e2e_idle_resume_refreshes_model_metadata() {
                 rewind_pending_prompt: std::sync::Mutex::new(None),
                 startup_hints: StartupHints::default(),
                 forked_tool_override: None,
+<<<<<<< HEAD
                 compaction: crate::session::compaction_config::CompactionConfig {
                     threshold_percent: std::cell::Cell::new(85),
                     pending_manual_compact: std::cell::Cell::new(None),
@@ -203,6 +204,9 @@ async fn test_e2e_idle_resume_refreshes_model_metadata() {
                     cancel: Default::default(),
                     context_overflow_recovery: Default::default(),
                 },
+=======
+                compaction: test_compaction_config(85),
+>>>>>>> upstream/main
                 long_reasoning_reminder:
                     crate::session::long_reasoning_reminder::LongReasoningReminder {
                         enabled: false,

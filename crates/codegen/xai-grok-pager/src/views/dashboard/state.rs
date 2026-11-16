@@ -650,13 +650,14 @@ impl RenameDraft {
     }
 
     pub(crate) fn set_text(&mut self, text: impl Into<String>) {
-        let text = text
+        // The cap runs before the tag pass, so a cut can never leave half a flag
+        let capped: String = text
             .into()
             .chars()
             .filter(|character| rename_wire_character_allowed(*character))
             .take(MAX_RENAME_SCALARS)
-            .collect::<String>();
-        self.editor.set_text(text);
+            .collect();
+        self.editor.set_text(strip_loose_tags(&capped));
     }
 }
 
@@ -665,8 +666,43 @@ fn rename_character_allowed(character: char) -> bool {
 }
 
 fn rename_wire_character_allowed(character: char) -> bool {
-    // Preserve an existing emoji ZWJ sequence; interactive inserts still reject format chars.
-    character == '\u{200d}' || rename_character_allowed(character)
+    // Preserve an existing emoji ZWJ or flag tag sequence; interactive inserts still reject format chars.
+    matches!(character, '\u{200d}' | '\u{e0020}'..='\u{e007f}')
+        || rename_character_allowed(character)
+}
+
+/// Keeps tags only in a subdivision flag (black flag, 1 to 7 tag letters or digits, cancel tag); others hide text
+fn strip_loose_tags(text: &str) -> String {
+    let is_tag = |c: char| ('\u{e0020}'..='\u{e007f}').contains(&c);
+    let is_flag_tag = |c: char| matches!(c, '\u{e0030}'..='\u{e0039}' | '\u{e0061}'..='\u{e007a}');
+    let chars: Vec<char> = text.chars().collect();
+    let mut kept = String::with_capacity(text.len());
+    let mut at = 0;
+    while let Some(&character) = chars.get(at) {
+        at += 1;
+        if is_tag(character) {
+            continue;
+        }
+
+        kept.push(character);
+        if character != '\u{1f3f4}' {
+            continue;
+        }
+
+        let run: Vec<char> = chars
+            .iter()
+            .skip(at)
+            .take_while(|&&c| is_tag(c))
+            .copied()
+            .collect();
+        let valid = matches!(run.split_last(), Some((&'\u{e007f}', letters))
+            if (1..=7).contains(&letters.len()) && letters.iter().all(|&c| is_flag_tag(c)));
+        if valid {
+            kept.extend(&run);
+        }
+        at += run.len();
+    }
+    kept
 }
 
 /// One selectable directory in the location picker (see [`LocationPickerState`]).
@@ -4157,10 +4193,15 @@ fn handle_rename_key(draft: &mut RenameDraft, key: &KeyEvent) -> InputOutcome {
 
 fn handle_rename_paste(draft: &mut RenameDraft, text: &str) -> InputOutcome {
     let remaining = MAX_RENAME_SCALARS.saturating_sub(draft.text().chars().count());
-    let outcome =
-        draft
-            .editor
-            .insert_paste_with_policy(text, rename_wire_character_allowed, remaining);
+    let allowed = text
+        .chars()
+        .filter(|character| rename_wire_character_allowed(*character));
+    let capped: String = allowed.take(remaining).collect();
+    let outcome = draft.editor.insert_paste_with_policy(
+        &strip_loose_tags(&capped),
+        rename_wire_character_allowed,
+        remaining,
+    );
     rename_edit_outcome(outcome)
 }
 
@@ -4344,6 +4385,34 @@ pub fn write_persisted_to_path(
         }
         other => other,
     }
+<<<<<<< HEAD
+=======
+    t.insert("pinned", toml_edit::value(pin_arr));
+    let mut reorder_arr = toml_edit::Array::new();
+    for id in &p.reorder {
+        reorder_arr.push(id.to_key());
+    }
+    t.insert("reorder", toml_edit::value(reorder_arr));
+    // The onboarding hint was removed; drop the stale table so old configs don't carry a dead `[dashboard.onboarding]` key forever
+    t.remove("onboarding");
+    atomic_write(path, &doc.to_string())
+}
+
+/// Atomic write through a symlinked `config.toml`. Concurrent readers see either the old file or
+/// the new file, never a partial truncated copy that would parse as `None` and trigger the
+/// catastrophic clobber on the next writer.
+fn atomic_write(path: &std::path::Path, contents: &str) -> std::io::Result<()> {
+    xai_grok_config::fs_atomic::write_user_file_atomically(path, contents, None)?;
+    // Parent directory fsync (defense in depth on unusual filesystems / network mounts)
+    if let Some(parent) = path.parent()
+        && let Ok(dir) = std::fs::File::open(parent)
+    {
+        // sync_all on a directory is allowed on Unix and is a no-op on platforms that don't support it
+        // Swallow errors: the rename succeeded, and the durability question is moot if the OS won't fsync the directory
+        let _ = dir.sync_all();
+    }
+    Ok(())
+>>>>>>> upstream/main
 }
 
 fn config_path() -> Option<PathBuf> {

@@ -6,10 +6,6 @@ use schemars::JsonSchema;
 use serde::{Deserialize, Serialize};
 use xai_grok_shared::ui_config::UiConfig;
 
-// ============================================================================
-// Runtime Config (used by render code)
-// ============================================================================
-
 /// Background style for block content area.
 #[derive(Debug, Clone, Copy, Default, PartialEq, Eq, Hash)]
 pub enum BlockBackground {
@@ -1191,10 +1187,6 @@ impl From<RawBlockBackground> for BlockBackground {
     }
 }
 
-// ============================================================================
-// Raw → Runtime Conversion
-// ============================================================================
-
 impl From<RawAppearanceConfig> for AppearanceConfig {
     fn from(raw: RawAppearanceConfig) -> Self {
         Self {
@@ -1433,10 +1425,6 @@ impl From<RawThinkingConfig> for ThinkingConfig {
         }
     }
 }
-
-// ============================================================================
-// Color Parsing
-// ============================================================================
 
 /// An optional color that can be "none" or a color value.
 /// The string "none" is the explicit unset value.
@@ -1704,6 +1692,7 @@ fn lookup_named_color(name: &str) -> Result<Color, String> {
     Ok(color)
 }
 
+<<<<<<< HEAD
 // ============================================================================
 // pager.json
 // ============================================================================
@@ -1715,6 +1704,17 @@ pub fn parse_appearance_config(
     text: &str,
 ) -> Result<RawAppearanceConfig, String> {
     use xai_grok_config::format::{ConfigFormat, parse_plain_json_source, parse_toml_source};
+=======
+impl RawAppearanceConfig {
+    pub fn to_toml_with_comments() -> String {
+        let mut config = Self::default();
+        // These two keys default to None (the shell's `[ui] collapsed_edit_blocks` flag decides), which the serializer would omit entirely
+        // Show the flag-off shape as commented lines so the keys stay discoverable; commenting-out below keeps them inert
+        config.scrollback.blocks.edit.expanded_by_default = Some(true);
+        config.scrollback.blocks.edit.line_summary = Some(false);
+        let toml_str = toml_edit::ser::to_string_pretty(&config).expect("serialize default");
+        let mut doc: DocumentMut = toml_str.parse().expect("parse toml");
+>>>>>>> upstream/main
 
     let tree = match ConfigFormat::of(path) {
         ConfigFormat::Json => parse_plain_json_source(path, text),
@@ -1753,6 +1753,7 @@ fn persist_respect_manual_folds_in(home: &std::path::Path, enabled: bool) -> std
         .lock()
         .unwrap_or_else(|poisoned| poisoned.into_inner());
 
+<<<<<<< HEAD
     let path = writable_pager_config(home)?;
     xai_grok_config::format::edit_json_document_keeping_schema(
         &path,
@@ -1781,6 +1782,27 @@ fn writable_pager_config(home: &std::path::Path) -> std::io::Result<std::path::P
             "could not convert {} to pager.json; convert or delete it, then try again",
             path.display()
         )));
+=======
+    persist_respect_manual_folds_to(&crate::util::pager_toml_path(), enabled)
+}
+
+/// Path-taking body of [`persist_respect_manual_folds`]; the caller holds `PAGER_TOML_SAVE_LOCK`.
+fn persist_respect_manual_folds_to(path: &std::path::Path, enabled: bool) -> std::io::Result<()> {
+    use std::io::{Error, ErrorKind};
+
+    // Bind read + publish to one follow destination (path + inode).
+    let dest = xai_grok_config::fs_atomic::bind_follow_destination(path)?;
+    let content = match std::fs::read_to_string(dest.as_path()) {
+        Ok(c) => c,
+        Err(e) if e.kind() == ErrorKind::NotFound => String::new(),
+        Err(e) => return Err(e),
+    };
+    let dest = xai_grok_config::fs_atomic::require_same_bound_destination(path, &dest)?;
+    let updated = upsert_respect_manual_folds(&content, enabled)
+        .map_err(|e| Error::new(ErrorKind::InvalidData, e))?;
+    if let Some(dir) = dest.as_path().parent() {
+        std::fs::create_dir_all(dir)?;
+>>>>>>> upstream/main
     }
     Ok(path)
 }
@@ -1813,13 +1835,38 @@ fn set_json_member(
     Ok(())
 }
 
-// ============================================================================
-// Tests
-// ============================================================================
-
 #[cfg(test)]
 mod tests {
     use super::*;
+
+    /// The `/settings` toggle on a dotfile-managed `~/.grok/pager.toml` must reach the dotfile, not replace the link.
+    #[cfg(unix)]
+    #[test]
+    #[serial_test::serial]
+    fn persist_respect_manual_folds_writes_through_symlink() {
+        let dir = tempfile::tempdir().unwrap();
+        let _home = xai_grok_env::EnvVarGuard::set("GROK_HOME", dir.path().to_str().unwrap());
+        let target = dir.path().join("dotfiles").join("pager.toml");
+        std::fs::create_dir_all(target.parent().unwrap()).unwrap();
+        std::fs::write(&target, "[scrollback.scroll]\nanchor_on_fold = false\n").unwrap();
+        let link = dir.path().join("pager.toml");
+        std::os::unix::fs::symlink(&target, &link).unwrap();
+
+        persist_respect_manual_folds_to(&link, true).unwrap();
+
+        assert!(
+            std::fs::symlink_metadata(&link)
+                .unwrap()
+                .file_type()
+                .is_symlink(),
+            "pager.toml must stay a symlink"
+        );
+        let raw: RawAppearanceConfig =
+            toml::from_str(&std::fs::read_to_string(&target).unwrap()).unwrap();
+        let cfg: AppearanceConfig = raw.into();
+        assert!(cfg.scrollback.scroll.respect_manual_folds);
+        assert!(!cfg.scrollback.scroll.anchor_on_fold, "siblings preserved");
+    }
 
     #[test]
     fn test_parse_hex_color() {
@@ -2101,7 +2148,42 @@ mod tests {
         );
     }
 
+<<<<<<< HEAD
     // ── Terminal config (alt_screen) parsing ─────────────────────
+=======
+    /// The two flag-deferred edit keys default to `None` (omitted by the serializer).
+    /// The template must still document them as commented lines showing the flag-off shape.
+    #[test]
+    fn template_documents_flag_deferred_edit_keys() {
+        let template = RawAppearanceConfig::to_toml_with_comments();
+        assert!(
+            template.contains("# expanded_by_default = true"),
+            "expanded_by_default missing from template:\n{template}"
+        );
+        assert!(
+            template.contains("# line_summary = false"),
+            "line_summary missing from template:\n{template}"
+        );
+        assert!(
+            template.contains("collapsed_edit_blocks"),
+            "doc comments must point at the [ui] flag:\n{template}"
+        );
+    }
+
+    /// The `/settings` writer must insert an ACTIVE key into the inert template (whose keys are all comments).
+    /// It must not edit a commented line or fail.
+    #[test]
+    fn upsert_into_inert_template_inserts_active_key() {
+        let template = RawAppearanceConfig::to_toml_with_comments();
+        let updated = upsert_respect_manual_folds(&template, true).expect("upsert");
+        let parsed: RawAppearanceConfig =
+            toml::from_str(&updated).expect("updated template must parse");
+        assert!(
+            parsed.scrollback.scroll.respect_manual_folds,
+            "inserted key must be active:\n{updated}"
+        );
+    }
+>>>>>>> upstream/main
 
     #[test]
     fn terminal_alt_screen_auto_default() {
