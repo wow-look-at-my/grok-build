@@ -1033,7 +1033,7 @@ mod tests {
         assert_eq!(expected(&[]), annotated(call).await);
     }
 
-    /// An `x.ai/mcp/call` or resource read on the same client makes an untagged input request ambiguous.
+    /// An `example.invalid/mcp/call` or resource read on the same client makes an untagged input request ambiguous.
     #[tokio::test]
     async fn outbound_request_keeps_an_untagged_elicitation_off_the_tool_call() {
         let (inbox, bridge) = installed_bridge();

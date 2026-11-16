@@ -32,7 +32,7 @@ pub(super) struct ReplaySendUpdateFixture {
     pub(super) actor: SessionActor,
     pub(super) event_rx: mpsc::UnboundedReceiver<SessionEvent>,
     pub(super) sent: Arc<tokio::sync::Mutex<Vec<acp::SessionNotification>>>,
-    /// `x.ai/*` extension notifications such as `ModelChanged`.
+    /// `example.invalid/*` extension notifications such as `ModelChanged`.
     pub(super) sent_ext: Arc<tokio::sync::Mutex<Vec<acp::ExtNotification>>>,
     pub(super) persistence_rx: mpsc::UnboundedReceiver<PersistenceMsg>,
 }
