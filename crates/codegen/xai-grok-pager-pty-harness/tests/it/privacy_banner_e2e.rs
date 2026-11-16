@@ -29,18 +29,10 @@ async fn privacy_banner_persists_into_agent_view_and_opt_in_shares() {
     run_opt_in().await.expect("privacy banner opt-in e2e");
 }
 
-<<<<<<< HEAD:crates/codegen/xai-grok-pager-pty-harness/tests/it/privacy_banner_e2e.rs
-/// The banner's env preconditions: force the rollout flag on (the env
-/// override beats remote settings) and remove the sandbox's fake
-/// `XAI_API_KEY`.
-fn banner_env_ops() -> [EnvOp<'static>; 3] {
-    [
-=======
 /// The `GROK_PRIVACY_NOTICE_ROLLOUT` env override beats remote settings.
 /// The `[Opt in]` team principal would otherwise start a managed-config fetch the mock does not serve.
 fn banner_env_ops() -> Vec<EnvOp<'static>> {
     let mut ops = vec![
->>>>>>> upstream/main:crates/codegen/xai-grok-pager-pty-harness/tests/privacy_banner_e2e.rs
         EnvOp::set("GROK_PRIVACY_NOTICE_ROLLOUT", "1"),
         EnvOp::set("GROK_MANAGED_CONFIG", "0"),
     ];

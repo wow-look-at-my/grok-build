@@ -42,20 +42,10 @@ async fn team_member_with_unknown_capability_sees_no_banner_and_editable_row() {
         .expect("unknown-capability e2e");
 }
 
-<<<<<<< HEAD:crates/codegen/xai-grok-pager-pty-harness/tests/it/settings_locked_row_e2e.rs
-/// Rollout on so a plain opted-out user would see the banner. Fake API key
-/// removed so team OAuth is active. ZDR access must be enabled or the blocked
-/// welcome never reaches settings. Lock and suppression key off `is_zdr`.
-fn locked_row_env_ops() -> [EnvOp<'static>; 4] {
-    [
-=======
-/// With the rollout flag on, a plain opted-out user would see the banner.
-/// `oauth_credential_ops` makes the seeded team OAuth entry the active auth.
-/// ZDR access must be enabled or the blocked welcome never reaches settings. Lock and suppression key off `is_zdr`.
-/// The seeded team principal would otherwise start a managed-config fetch the mock does not serve.
+/// With the rollout flag on, a plain opted-out user would see the banner. `oauth_credential_ops` makes the seeded team OAuth entry the active auth. ZDR access must be enabled or the blocked welcome never reaches settings.
+/// Lock and suppression key off `is_zdr`.
 fn locked_row_env_ops() -> Vec<EnvOp<'static>> {
     let mut ops = vec![
->>>>>>> upstream/main:crates/codegen/xai-grok-pager-pty-harness/tests/settings_locked_row_e2e.rs
         EnvOp::set("GROK_PRIVACY_NOTICE_ROLLOUT", "1"),
         EnvOp::set("GROK_ZDR_ACCESS_ENABLED", "1"),
         EnvOp::set("GROK_MANAGED_CONFIG", "0"),

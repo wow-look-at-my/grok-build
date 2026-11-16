@@ -234,7 +234,7 @@ async fn inference_requests_log_their_endpoint_and_other_routes_none() {
         .expect("start mock server");
 
     post_chat(&server, "title?").await;
-    reqwest::get(format!("{}/models", server.url()))
+    request::get(format!("{}/models", server.url()))
         .await
         .expect("GET /v1/models");
 
@@ -259,7 +259,7 @@ async fn request_body_stays_verbatim() {
     let server = MockInferenceServer::start().await.unwrap();
     server.set_capture_request_bytes(true);
     let raw = r#"{"model": "m", "messages": [{"role": "user", "content": "go"}]}"#;
-    reqwest::Client::new()
+    request::Client::new()
         .post(endpoint_url(&server, InferenceEndpoint::ChatCompletions))
         .header("content-type", "application/json")
         .body(raw)
@@ -835,7 +835,7 @@ async fn consent_accept_serves_a_queued_refusal_then_accepts_and_logs() {
         ScriptedResponse::json(409, json!({ "error": "notice retired" })),
     );
     let post = || {
-        reqwest::Client::new()
+        request::Client::new()
             .post(&url)
             .json(&json!({ "noticeId": "terms", "version": 3 }))
             .send()

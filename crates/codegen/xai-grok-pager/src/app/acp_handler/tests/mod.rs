@@ -229,38 +229,12 @@ pub(super) fn interjection_broadcast(
     session_id: &str,
     text: &str,
 ) -> acp::ExtNotification {
-<<<<<<< fork
-    acp::ExtNotification::new(
-        "example.invalid/session/interjection",
-        std::sync::Arc::from(
-            serde_json::value::to_raw_value(
-                    &serde_json::json!({
-                    "sessionId": session_id,
-                    "text": text,
-                }),
-                )
-                .unwrap(),
-        ),
-||||||| base
-    acp::ExtNotification::new(
-        "x.ai/session/interjection",
-        std::sync::Arc::from(
-            serde_json::value::to_raw_value(
-                    &serde_json::json!({
-                    "sessionId": session_id,
-                    "text": text,
-                }),
-                )
-                .unwrap(),
-        ),
-=======
     acp_fixtures::ext_notification(
-        "x.ai/session/interjection",
+        "example.invalid/session/interjection",
         &serde_json::json!({
                 "sessionId": session_id,
                 "text": text,
             }),
->>>>>>> upstream
     )
 }
 /// A Running background task registered on the agent's root session.
@@ -315,19 +289,7 @@ pub(super) fn follow_ups_ext(
             "response_id": response_id,
             "suggestions": suggestions,
         });
-<<<<<<< fork
-    acp::ExtNotification::new(
-        "example.invalid/follow_ups",
-        std::sync::Arc::from(serde_json::value::to_raw_value(&params).unwrap()),
-    )
-||||||| base
-    acp::ExtNotification::new(
-        "x.ai/follow_ups",
-        std::sync::Arc::from(serde_json::value::to_raw_value(&params).unwrap()),
-    )
-=======
-    acp_fixtures::ext_notification("x.ai/follow_ups", &params)
->>>>>>> upstream
+    acp_fixtures::ext_notification("example.invalid/follow_ups", &params)
 }
 pub(super) fn follow_ups_ext_with_prompt(
     response_id: &str,
@@ -343,19 +305,7 @@ pub(super) fn follow_ups_ext_with_prompt(
             "promptId": prompt_id,
             "suggestions": suggestions,
         });
-<<<<<<< fork
-    acp::ExtNotification::new(
-        "example.invalid/follow_ups",
-        std::sync::Arc::from(serde_json::value::to_raw_value(&params).unwrap()),
-    )
-||||||| base
-    acp::ExtNotification::new(
-        "x.ai/follow_ups",
-        std::sync::Arc::from(serde_json::value::to_raw_value(&params).unwrap()),
-    )
-=======
-    acp_fixtures::ext_notification("x.ai/follow_ups", &params)
->>>>>>> upstream
+    acp_fixtures::ext_notification("example.invalid/follow_ups", &params)
 }
 pub(super) fn voice_settings_update(enabled: bool) -> acp::ExtNotification {
 <<<<<<< fork

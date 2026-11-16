@@ -1313,18 +1313,8 @@ pub(super) async fn run_session(
                         }
                         SessionCommand::CompactSession { respond_to } => {
                             let s = session.clone();
-<<<<<<< fork
                             xai_spawn::spawn_local(async move {
-                                s.compact_on_request(user_context, respond_to).await;
-||||||| base
-                            tokio::task::spawn_local(async move {
-                                let compact_session = s.run_compact(user_context).await;
-                                let _ = respond_to.send(compact_session);
-=======
-                            tokio::task::spawn_local(async move {
-                                let compact_session = s.run_compact().await;
-                                let _ = respond_to.send(compact_session);
->>>>>>> upstream
+                                s.compact_on_request(respond_to).await;
                             });
                         }
                         SessionCommand::ReloadPlugins { registry } => {

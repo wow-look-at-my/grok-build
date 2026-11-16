@@ -497,18 +497,9 @@ fn absent_claim_is_skipped() {
 fn auth_mode_classification() {
     use xai_grok_telemetry::startup::AuthMode;
     let err = || std::io::Error::other("unreadable");
-<<<<<<< HEAD:crates/codegen/xai-grok-shell/src/managed_config/tests.rs
     assert_eq!(auth_mode(&Ok(true)), AuthMode::Team);
     assert_eq!(auth_mode(&Ok(false)), AuthMode::Personal);
     assert_eq!(auth_mode(&Err(err())), AuthMode::Unknown);
-=======
-
-    assert_eq!(auth_mode(true, &Ok(true)), AuthMode::Deployment);
-    assert_eq!(auth_mode(true, &Err(err())), AuthMode::Deployment);
-    assert_eq!(auth_mode(false, &Ok(true)), AuthMode::Team);
-    assert_eq!(auth_mode(false, &Ok(false)), AuthMode::Personal);
-    assert_eq!(auth_mode(false, &Err(err())), AuthMode::Unknown);
->>>>>>> upstream/main:crates/codegen/xai-grok-cloud-config/src/managed_config/tests.rs
 }
 
 #[test]

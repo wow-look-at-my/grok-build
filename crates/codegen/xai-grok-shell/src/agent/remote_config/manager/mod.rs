@@ -1173,7 +1173,6 @@ impl ModelsManager {
         let current_model = match all_models.get(current_model_id.0.as_ref()) {
             Some(m) => m,
             None => {
-<<<<<<< fork
                 // Never swap in another model: its URL is one the user did not pick.
                 tracing::error!(
                     model = %current_model_id.0,
@@ -1181,18 +1180,6 @@ impl ModelsManager {
                 );
                 missing = ModelEntry::unreachable(current_model_id.0.as_ref());
                 &missing
-||||||| base
-                tracing::warn!("no models available in catalog; defaulting to bundled model");
-                let default_id = crate::models::default_model().to_string();
-                fallback = ModelEntry::fallback(&default_id, &config.endpoints);
-                &fallback
-=======
-                let current = Some(current_model_id.0.as_ref()).filter(|id| !id.is_empty());
-                let default_id = fallback_model_id(&config, current);
-                tracing::warn!(model = %default_id, "no models available in catalog; using the fallback model id");
-                fallback = ModelEntry::fallback(&default_id, &config.endpoints);
-                &fallback
->>>>>>> upstream
             }
         };
 
@@ -1205,16 +1192,6 @@ impl ModelsManager {
             credentials,
             config.endpoints.alpha_test_key.clone(),
             config.client_version.clone(),
-<<<<<<< fork
-||||||| base
-            crate::managed_config::resolve_deployment_id(
-                config.endpoints.deployment_key.as_deref(),
-            ),
-=======
-            xai_grok_cloud_config::managed_config::resolve_deployment_id(
-                config.endpoints.deployment_key.as_deref(),
-            ),
->>>>>>> upstream
             None,
         )
     }
