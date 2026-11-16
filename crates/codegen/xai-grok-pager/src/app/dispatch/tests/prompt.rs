@@ -3574,24 +3574,19 @@ fn palette_dispatch_preserves_prompt_draft() {
 }
 
 #[test]
-fn slash_compact_with_trailing_text_is_refused() {
+fn slash_compact_with_context_enqueues_command() {
     let mut app = test_app_with_agent();
-    let id = AgentId(0);
-
     let effects = dispatch(
         Action::SendPrompt("/compact focus on auth".into()),
         &mut app,
     );
-
-    assert!(effects.is_empty(), "nothing runs, got {effects:?}");
-    assert_eq!(
-        agent_ref(&app, id)
-            .toast
-            .as_ref()
-            .map(|(text, _)| text.as_str()),
-        Some("/compact takes no arguments."),
-        "the send path refuses before the command runs"
-    );
+    assert_eq!(effects.len(), 1);
+    assert!(matches!(effects.first(),Some(
+        Effect::Compact {
+            user_context: Some(ctx),
+            ..
+        }) if ctx == "focus on auth"
+    ));
 }
 
 #[test]
@@ -6174,7 +6169,13 @@ fn compact_with_images_toasts_and_drops() {
     let effects = dispatch(Action::SendPrompt(text), &mut app);
 
     assert!(
-        matches!(effects.as_slice(), [Effect::Compact { .. }]),
+        matches!(
+            effects.as_slice(),
+            [Effect::Compact {
+                user_context: None,
+                ..
+            }]
+        ),
         "the command must still run, got {effects:?}"
     );
     assert_eq!(

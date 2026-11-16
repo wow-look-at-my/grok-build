@@ -233,7 +233,7 @@ fn classify_response_event_error(code: Option<&str>, message: &str) -> CompactFa
 }
 
 /// Build the bare summarization prompt text without appending it to history.
-/// `user_context` is the active goal's objective, from `goal_compaction_user_context`.
+/// `user_context` is the `/compact <text>` argument merged with the active goal's objective, from `merge_goal_compaction_user_context`.
 pub(crate) fn build_compaction_prompt(
     user_context: Option<&str>,
     use_short_prompt: bool,
@@ -245,7 +245,7 @@ pub(crate) fn build_compaction_prompt(
     }
 }
 
-/// `SELF_SUMMARIZATION_PROMPT` with the goal objective appended in a `<user_provided_context>` tag.
+/// `SELF_SUMMARIZATION_PROMPT` with the user context appended in a `<user_provided_context>` tag.
 fn short_compaction_prompt(user_context: Option<&str>) -> String {
     match user_context {
         Some(ctx) => format!(
@@ -258,6 +258,7 @@ fn short_compaction_prompt(user_context: Option<&str>) -> String {
 }
 
 /// The default summarize prompt (grok-build, codex, ...). The grok-build models are RL-trained on it.
+/// `/compact <text>` goes into the `{user_context_section}` slot.
 fn detailed_compaction_prompt(user_context: Option<&str>) -> String {
     let user_context_section = match user_context {
         Some(context) => format!(

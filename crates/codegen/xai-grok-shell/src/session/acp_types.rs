@@ -34,21 +34,34 @@ pub(crate) struct AllSessionOverviewResponse {
 #[serde(try_from = "CompactConversationRequestWire")]
 pub(crate) struct CompactConversationRequest {
     pub session_id: String,
+    #[serde(default)]
+    pub user_context: Option<String>,
 }
 
 impl CompactConversationRequest {
     /// The keys [`session_id`](Self::session_id) is read under.
     pub(crate) const SESSION_ID_KEYS: xai_tool_types::Aliases =
         xai_tool_types::Aliases::new("session_id", &["sessionId"]);
+    /// The keys [`user_context`](Self::user_context) is read under. `/compact
+    /// <instructions>` has always travelled as `userContext`.
+    pub(crate) const USER_CONTEXT_KEYS: xai_tool_types::Aliases =
+        xai_tool_types::Aliases::new("user_context", &["userContext"]);
 }
 
-/// `CompactConversationRequest` as it arrives over ACP.
+/// `CompactConversationRequest` as it arrives over ACP. That
+/// `CompactConversationRequest` is with each key spelling its own field, so a
+/// request naming both folds them instead of tripping serde's duplicate-field
+/// check.
 #[derive(Debug, Default, serde::Deserialize)]
 struct CompactConversationRequestWire {
     #[serde(default)]
     session_id: Option<String>,
     #[serde(default, rename = "sessionId")]
     session_id_camel: Option<String>,
+    #[serde(default)]
+    user_context: Option<String>,
+    #[serde(default, rename = "userContext")]
+    user_context_camel: Option<String>,
 }
 
 impl TryFrom<CompactConversationRequestWire> for CompactConversationRequest {
@@ -59,6 +72,8 @@ impl TryFrom<CompactConversationRequestWire> for CompactConversationRequest {
             session_id: CompactConversationRequest::SESSION_ID_KEYS
                 .fold(vec![wire.session_id, wire.session_id_camel])?
                 .ok_or(CompactRequestError::MissingSessionId)?,
+            user_context: CompactConversationRequest::USER_CONTEXT_KEYS
+                .fold(vec![wire.user_context, wire.user_context_camel])?,
         })
     }
 }

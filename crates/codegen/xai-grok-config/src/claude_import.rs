@@ -1,4 +1,4 @@
-use std::path::{Path, PathBuf};
+use std::path::Path;
 
 #[derive(Debug, Clone, Copy, PartialEq, Eq)]
 pub enum ClaudeImport {
@@ -17,17 +17,14 @@ impl ClaudeImport {
     }
 }
 
-#[must_use]
-pub fn user_config_file(grok_home: &Path) -> PathBuf {
-    grok_home.join(crate::USER_CONFIG_FILENAME)
-}
-
-// A missing file, a missing key, or invalid TOML counts as not imported.
+/// Reads `claude_compat.imported` from the user config in `grok_home`: `config.json`, or a legacy `config.toml` when only that exists.
+/// A missing file, a missing key, or a file that does not parse counts as not imported.
 pub fn is_claude_import_marked(grok_home: &Path) -> bool {
-    let Ok(contents) = std::fs::read_to_string(user_config_file(grok_home)) else {
+    let path = crate::format::resolve_config_file(grok_home, crate::CONFIG_STEM);
+    let Ok(contents) = std::fs::read_to_string(&path) else {
         return false;
     };
-    let Ok(config) = toml::from_str::<toml::Value>(&contents) else {
+    let Ok(config) = crate::format::parse_config_source(&path, &contents) else {
         return false;
     };
     config

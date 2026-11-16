@@ -518,7 +518,6 @@ pub struct SetupReport {
     pub configured: bool,
     pub deployment_id: Option<String>,
     pub team_id: Option<String>,
-    /// This may contain the deployment key.
     pub managed_config: Option<String>,
     pub requirements: Option<String>,
     pub fail_closed: bool,
