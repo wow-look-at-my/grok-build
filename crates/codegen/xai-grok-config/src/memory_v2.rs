@@ -4,7 +4,9 @@
 use serde::{Deserialize, Serialize};
 
 /// Session-pinned memory-v2 rollout stage.
-#[derive(Debug, Clone, Copy, Default, PartialEq, Eq, Serialize, Deserialize)]
+#[derive(
+    Debug, Clone, Copy, Default, PartialEq, Eq, Serialize, Deserialize, schemars::JsonSchema,
+)]
 #[serde(rename_all = "snake_case")]
 pub enum MemoryV2Rollout {
     /// Disable every v2 read, capture, Dream, and write path.
@@ -60,10 +62,10 @@ impl MemoryV2Rollout {
 
 /// Raw top-level `[memory_v2]` enablement, rollout, kill-switch, and retention
 /// settings.
-#[derive(Debug, Clone, Default, PartialEq, Serialize, Deserialize)]
+#[derive(Debug, Clone, Default, PartialEq, Serialize, Deserialize, schemars::JsonSchema)]
 #[serde(default)]
 pub struct MemoryV2Settings {
-    /// Primary opt-in for the memory-v2 implementation. Absent or false falls
+    /// Selects the memory-v2 implementation. Absent means on. False falls
     /// through to legacy memory enablement.
     pub enabled: Option<bool>,
     /// Emit capture lifecycle notifications to the user interface. Intended
