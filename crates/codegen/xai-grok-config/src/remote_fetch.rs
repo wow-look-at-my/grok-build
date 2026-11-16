@@ -8,7 +8,7 @@ use crate::{Capability, Distribution};
 pub fn resolve_remote_fetch_enabled() -> bool {
     match crate::ConfigLayers::load() {
         Ok(layers) => remote_fetch_enabled_from_layers(&layers),
-        // A corrupt user `config.toml` must not discard the requirements and managed settings
+        // A corrupt user `config.json` must not discard the requirements and managed settings
         Err(_) => remote_fetch_enabled_from_policy_layers(
             crate::load_merged_requirements().as_ref(),
             crate::load_managed_config().ok().as_ref(),
@@ -47,7 +47,7 @@ pub fn remote_fetch_enabled_from_layers(layers: &crate::ConfigLayers) -> bool {
 
 /// The fallback for [`resolve_remote_fetch_enabled`] when `ConfigLayers::load` fails.
 /// `load_merged_requirements` lets MDM override system and system override user, like `remote_fetch_enabled_from_layers`.
-/// The user `config.toml` is skipped because it holds no deployment policy.
+/// The user `config.json` is skipped because it holds no deployment policy.
 fn remote_fetch_enabled_from_policy_layers(
     merged_requirements: Option<&toml::Value>,
     managed: Option<&toml::Value>,
