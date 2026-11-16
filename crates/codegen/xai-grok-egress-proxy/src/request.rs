@@ -199,12 +199,11 @@ pub(crate) fn parse_http_target(value: &str) -> Result<(String, String), ProxyEr
         return Err(ProxyError::Malformed);
     }
     let split = rest.find(['/', '?']).unwrap_or(rest.len());
-    let raw_authority = &rest[..split];
+    let (raw_authority, suffix) = rest.split_at(split);
     if raw_authority.is_empty() {
         return Err(ProxyError::Malformed);
     }
     let authority = normalize_authority(raw_authority, "http")?;
-    let suffix = &rest[split..];
     let target = if suffix.is_empty() {
         "/".to_owned()
     } else if suffix.starts_with('?') {

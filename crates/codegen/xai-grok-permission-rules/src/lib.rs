@@ -1,6 +1,12 @@
 //! Grok's permission rule engine. The agent, the tools, and the session code stay out, so a
 //! small consumer can link the rules alone.
 
+#![allow(clippy::cast_lossless)] // Hits predate the gate
+#![allow(clippy::cast_possible_truncation)] // Hits predate the gate
+#![allow(clippy::cast_possible_wrap)] // Hits predate the gate
+#![allow(clippy::expect_used)] // Hits predate the gate
+#![allow(clippy::string_slice)] // Hits predate the gate
+#![allow(clippy::unwrap_used)] // Hits predate the gate
 #![deny(clippy::indexing_slicing)]
 
 pub mod bash_command_splitting;

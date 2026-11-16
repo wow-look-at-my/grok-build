@@ -284,7 +284,8 @@ async fn copy_exact<S: ProxyIo>(
     tokio::time::timeout(timeout, async move {
         let mut buffer = [0u8; 16 * 1024];
         while remaining > 0 {
-            let limit = remaining.min(buffer.len() as u64) as usize;
+            let limit =
+                usize::try_from(remaining).map_or(buffer.len(), |left| left.min(buffer.len()));
             let count = source
                 .read(&mut buffer[..limit])
                 .await
