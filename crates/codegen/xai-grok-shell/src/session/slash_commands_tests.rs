@@ -189,6 +189,18 @@ fn resolve_builtin(name: &str, args: &str) -> Option<BuiltinAction> {
 }
 
 #[test]
+fn compact_parses_optional_context() {
+    assert!(matches!(
+        resolve_builtin("compact", ""),
+        Some(BuiltinAction::Compact { user_context: None })
+    ));
+    assert!(matches!(
+        resolve_builtin("compact", "keep auth"),
+        Some(BuiltinAction::Compact { user_context: Some(ctx) }) if ctx == "keep auth"
+    ));
+}
+
+#[test]
 fn always_approve_parses_on_off() {
     for arg in ["", "on", "true", "1", "yes", "enable"] {
         assert!(
@@ -234,7 +246,8 @@ fn resolve_routes_builtin() {
     .unwrap_err();
     assert!(matches!(
         outcome,
-        SlashCommandOutcome::Builtin(BuiltinAction::Compact)
+        SlashCommandOutcome::Builtin(BuiltinAction::Compact { user_context: Some(ctx) })
+        if ctx == "preserve auth"
     ));
 }
 
@@ -852,11 +865,8 @@ fn available_commands_populates_acp_fields() {
     let skills = vec![make_skill("commit", true)];
     let commands = available_commands(&skills, all_gated(), &[]);
 
-    let builtin = commands
-        .iter()
-        .find(|c| c.name == "always-approve")
-        .unwrap();
-    assert!(builtin.input.is_some()); // always-approve has argument_hint "on|off"
+    let builtin = commands.iter().find(|c| c.name == "compact").unwrap();
+    assert!(builtin.input.is_some());
 
     let flush = commands.iter().find(|c| c.name == "flush").unwrap();
     assert!(flush.input.is_none()); // no argument_hint
@@ -1300,7 +1310,9 @@ fn resolve_mixed_case_builtin() {
     .unwrap_err();
     assert!(matches!(
         outcome,
-        SlashCommandOutcome::Builtin(BuiltinAction::Compact)
+        SlashCommandOutcome::Builtin(BuiltinAction::Compact {
+            user_context: Some(ref ctx)
+        }) if ctx == "keep auth"
     ));
 }
 

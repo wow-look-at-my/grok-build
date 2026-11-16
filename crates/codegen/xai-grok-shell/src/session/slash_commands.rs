@@ -45,17 +45,26 @@ pub(crate) enum BuiltinGate {
     WorkflowLaunches,
     WorkflowManagement,
 }
+fn resolve_compact(args: &str) -> BuiltinAction {
+    BuiltinAction::Compact {
+        user_context: if args.is_empty() {
+            None
+        } else {
+            Some(args.to_string())
+        },
+    }
+}
 /// Order here is the display order in autocomplete.
 pub(super) const BUILTIN_COMMANDS: &[BuiltinCommand] = &[
     BuiltinCommand {
         name: "compact",
         description: "Compress conversation history to save context window",
-        argument_hint: None,
+        argument_hint: Some("optional context about what to preserve"),
         aliases: &[],
         model_authored_eligibility: ModelAuthoredEligibility::ExactCanonical,
         gate: BuiltinGate::AlwaysOn,
         workflow_projection: WorkflowProjection::None,
-        resolve: |_args| BuiltinAction::Compact,
+        resolve: resolve_compact,
     },
     BuiltinCommand {
         name: "always-approve",
@@ -1259,7 +1268,9 @@ pub(super) enum SlashCommandOutcome {
 }
 #[derive(Debug)]
 pub(super) enum BuiltinAction {
-    Compact,
+    Compact {
+        user_context: Option<String>,
+    },
     SetYolo {
         enabled: bool,
     },
@@ -1324,7 +1335,7 @@ pub(super) enum BuiltinAction {
 impl BuiltinAction {
     pub(crate) fn command_name(&self) -> &'static str {
         match self {
-            BuiltinAction::Compact => "compact",
+            BuiltinAction::Compact { .. } => "compact",
             BuiltinAction::SetYolo { .. } => "yolo",
             BuiltinAction::FlushMemory => "flush",
             BuiltinAction::Dream => "dream",
@@ -1357,7 +1368,7 @@ impl BuiltinAction {
     }
     pub(crate) fn args_provided(&self) -> bool {
         match self {
-            BuiltinAction::Compact => false,
+            BuiltinAction::Compact { user_context } => user_context.is_some(),
             BuiltinAction::SetYolo { .. } => true,
             BuiltinAction::FlushMemory => false,
             BuiltinAction::Dream => false,

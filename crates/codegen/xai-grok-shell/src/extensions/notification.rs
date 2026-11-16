@@ -1693,6 +1693,7 @@ pub struct CompactionSegmentFile {
 /// The compaction request sent to the model and the response (or final error) it produced.
 /// It is stored at `{session_dir}/compaction_requests/{request_id}.json`.
 /// The post-turn session archive uploads it to cloud storage.
+/// It records the `chat_history` sent, the prompt variant, any `/compact <text>` user context, the model, and the summary (or error).
 /// Replay the request locally to A/B test alternate prompt wordings against the same input.
 #[derive(Debug, Clone, serde::Serialize, serde::Deserialize)]
 #[serde(rename_all = "snake_case")]
@@ -1711,6 +1712,8 @@ pub struct CompactionRequestFile {
     pub prompt_variant: String,
     /// The model id that ran the summarization.
     pub model: String,
+    /// User-provided context from `/compact <text>`, if any.
+    pub user_context: Option<String>,
     /// The full `ConversationItem` list sent to the model, with the summarization prompt already appended as the final user message.
     /// Replaying this against any model reproduces the exact request.
     pub chat_history: Vec<crate::sampling::ConversationItem>,
@@ -1823,6 +1826,7 @@ mod tests {
             trigger: "auto".into(),
             prompt_variant: "detailed".into(),
             model: "grok".into(),
+            user_context: None,
             chat_history: vec![],
             tools: vec![],
             summary: Some("the accepted summary".into()),

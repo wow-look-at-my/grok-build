@@ -6,7 +6,9 @@ use xai_grok_test_support::acp_fixtures::text_block;
 fn model_authored_resolution_uses_exact_canonical_metadata() {
     assert!(matches!(
         resolve(&[text_block("/compact preserve auth")], BUILTIN_COMMANDS),
-        AuthorityResolution::StaticBuiltin(BuiltinAction::Compact)
+        AuthorityResolution::StaticBuiltin(BuiltinAction::Compact {
+            user_context: Some(context),
+        }) if context == "preserve auth"
     ));
 
     for text in ["/Compact", "/COMPACT", "/yolo", "/context", "/feedback"] {

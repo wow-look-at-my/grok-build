@@ -42,6 +42,7 @@ mod remote_announcement;
 mod remote_fetch;
 mod remote_settings;
 mod resolved;
+pub mod retry_budget;
 pub mod sandbox_mode;
 pub mod shell;
 pub mod signed_policy;

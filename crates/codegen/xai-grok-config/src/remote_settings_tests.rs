@@ -146,27 +146,19 @@ fn remote_settings_vendor_sessions_round_trip_and_default_absent() {
         (
             settings.cursor_sessions_enabled,
             settings.claude_sessions_enabled,
-            settings.codex_sessions_enabled,
         )
     };
     let json = r#"{
         "cursor_sessions_enabled": true,
-        "claude_sessions_enabled": false,
-        "codex_sessions_enabled": true
+        "claude_sessions_enabled": false
     }"#;
     let settings: RemoteSettings = serde_json::from_str(json).unwrap();
-    assert_eq!(
-        session_flags(&settings),
-        (Some(true), Some(false), Some(true))
-    );
+    assert_eq!(session_flags(&settings), (Some(true), Some(false)));
     let serialized = serde_json::to_string(&settings).unwrap();
     let round_trip: RemoteSettings = serde_json::from_str(&serialized).unwrap();
-    assert_eq!(
-        session_flags(&round_trip),
-        (Some(true), Some(false), Some(true))
-    );
+    assert_eq!(session_flags(&round_trip), (Some(true), Some(false)));
     let absent: RemoteSettings = serde_json::from_str("{}").unwrap();
-    assert_eq!(session_flags(&absent), (None, None, None));
+    assert_eq!(session_flags(&absent), (None, None));
 }
 #[test]
 fn remote_settings_image_description_model_round_trip() {
@@ -557,79 +549,86 @@ fn remote_settings_accept_request_encodings_unknown_tolerated_and_default_empty(
     let absent: RemoteSettings = serde_json::from_str("{}").unwrap();
     assert!(absent.accept_request_encodings.is_empty());
 }
-type JemallocFields<'a> = (Option<bool>, Option<&'a [u64]>, Option<u64>);
-fn jemalloc_fields(s: &RemoteSettings) -> JemallocFields<'_> {
-    (
-        s.jemalloc_heap_profile_enabled,
-        s.jemalloc_heap_profile_thresholds_bytes.as_deref(),
-        s.jemalloc_heap_profile_poll_interval_secs,
-    )
-}
-fn parse_remote(json: &str) -> RemoteSettings {
-    serde_json::from_str(json).unwrap_or_else(|e| panic!("parse failed for {json}: {e}"))
-}
-fn round_trip_remote(s: &RemoteSettings) -> RemoteSettings {
-    let out = serde_json::to_string(s).unwrap();
-    parse_remote(&out)
-}
-fn assert_jemalloc_round_trip(json: &str, expected: JemallocFields<'_>) {
-    let s = parse_remote(json);
-    assert_eq!(jemalloc_fields(&s), expected);
-    assert_eq!(jemalloc_fields(&round_trip_remote(&s)), expected);
-}
-fn assert_remote_parse_err(json: &str) {
-    assert!(
-        serde_json::from_str::<RemoteSettings>(json).is_err(),
-        "expected parse error for {json}"
-    );
-}
+/// A server can still send the removed heap-profile keys. They must not stop the other settings from loading.
 #[test]
-fn remote_settings_jemalloc_heap_profile_thresholds_populated_and_empty_round_trip() {
-    assert_jemalloc_round_trip(
-        r#"{
-            "jemalloc_heap_profile_thresholds_bytes": [2147483648, 5368709120, 10737418240]
-        }"#,
-        (
-            None,
-            Some(&[2_147_483_648, 5_368_709_120, 10_737_418_240]),
-            None,
-        ),
-    );
-    assert_jemalloc_round_trip(
-        r#"{"jemalloc_heap_profile_thresholds_bytes": []}"#,
-        (None, Some(&[]), None),
-    );
-    assert_jemalloc_round_trip(
+fn remote_settings_ignore_removed_heap_profile_keys() {
+    let s: RemoteSettings = serde_json::from_str(
         r#"{
             "jemalloc_heap_profile_enabled": true,
-            "jemalloc_heap_profile_thresholds_bytes": []
-        }"#,
-        (Some(true), Some(&[]), None),
-    );
-}
-#[test]
-fn remote_settings_jemalloc_heap_profile_malformed_fails_whole_parse() {
-    for json in [
-        r#"{"jemalloc_heap_profile_enabled": "yes"}"#,
-        r#"{"jemalloc_heap_profile_enabled": 1}"#,
-        r#"{"jemalloc_heap_profile_enabled": []}"#,
-        r#"{"jemalloc_heap_profile_enabled": {}}"#,
-        r#"{"jemalloc_heap_profile_thresholds_bytes": "2G"}"#,
-        r#"{"jemalloc_heap_profile_thresholds_bytes": {"bytes": 1}}"#,
-        r#"{"jemalloc_heap_profile_thresholds_bytes": [true]}"#,
-        r#"{"jemalloc_heap_profile_thresholds_bytes": ["2G"]}"#,
-        r#"{"jemalloc_heap_profile_thresholds_bytes": [-1]}"#,
-        r#"{"jemalloc_heap_profile_thresholds_bytes": [null]}"#,
-        r#"{"jemalloc_heap_profile_thresholds_bytes": [1, null, 2]}"#,
-        r#"{"jemalloc_heap_profile_poll_interval_secs": "30"}"#,
-        r#"{"jemalloc_heap_profile_poll_interval_secs": true}"#,
-        r#"{"jemalloc_heap_profile_poll_interval_secs": -1}"#,
-        r#"{
-            "jemalloc_heap_profile_enabled": true,
-            "jemalloc_heap_profile_thresholds_bytes": "bad",
+            "jemalloc_heap_profile_thresholds_bytes": [2147483648],
+            "jemalloc_heap_profile_poll_interval_secs": 30,
             "workspace_command_enabled": true
         }"#,
-    ] {
-        assert_remote_parse_err(json);
-    }
+    )
+    .expect("old remote settings still parse");
+    assert_eq!(s.workspace_command_enabled, Some(true));
+}
+
+/// A bare `#[serde(alias)]` made an entry that named both keys a `duplicate field` error, which costs the whole campaign patch.
+#[test]
+fn a_remote_campaign_names_its_id_under_either_key() {
+    let canonical: CampaignOverride = serde_json::from_str(r#"{"id":"c1","a":1}"#).unwrap();
+    let legacy: CampaignOverride = serde_json::from_str(r#"{"campaign_id":"c1","a":1}"#).unwrap();
+    assert_eq!(canonical.id.as_deref(), Some("c1"));
+    assert_eq!(canonical, legacy);
+}
+
+#[test]
+fn a_remote_campaign_naming_id_both_ways_under_one_value_parses_once() {
+    let both: CampaignOverride = serde_json::from_str(r#"{"id":"c1","campaign_id":"c1","a":1}"#)
+        .expect("one id named twice is one id");
+    assert_eq!(both.id.as_deref(), Some("c1"));
+    assert_eq!(
+        both.patch.get("a").cloned(),
+        Some(serde_json::Value::from(1)),
+        "the flattened patch must keep the keys that are not the id"
+    );
+}
+
+/// Different ids in one entry decide which campaign applies, so neither key may win in silence.
+#[test]
+fn a_remote_campaign_whose_id_spellings_disagree_is_an_error_naming_the_field() {
+    let err = serde_json::from_str::<CampaignOverride>(r#"{"id":"a","campaign_id":"b"}"#)
+        .expect_err("conflicting campaign ids must not resolve silently");
+    let message = err.to_string();
+    assert!(message.contains("id"), "{message}");
+    assert!(message.contains("campaign_id"), "{message}");
+}
+
+#[test]
+fn a_remote_campaign_writes_the_canonical_id_and_never_the_alias() {
+    let json = serde_json::to_value(CampaignOverride {
+        id: Some("c1".into()),
+        patch: serde_json::Map::from_iter([("a".into(), serde_json::Value::from(1))]),
+    })
+    .unwrap();
+    assert_eq!(json["id"], "c1");
+    assert!(json.get("campaign_id").is_none(), "{json}");
+}
+
+#[test]
+fn remote_grove_worktree_reads_either_key_and_both_when_they_agree() {
+    let parse = |json: &str| serde_json::from_str::<RemoteSettings>(json);
+    assert_eq!(
+        parse(r#"{"nfs_worktree":false}"#).unwrap().grove_worktree,
+        Some(false)
+    );
+    assert_eq!(
+        parse(r#"{"grove_worktree":true,"nfs_worktree":true}"#)
+            .expect("one value named twice is one value")
+            .grove_worktree,
+        Some(true)
+    );
+    assert_eq!(
+        parse(r#"{"grove_worktree":null,"nfs_worktree":false}"#)
+            .unwrap()
+            .grove_worktree,
+        Some(false)
+    );
+    let err = parse(r#"{"grove_worktree":true,"nfs_worktree":false}"#)
+        .expect_err("two different answers must not resolve silently");
+    assert!(err.to_string().contains("nfs_worktree"), "{err}");
+    let out = serde_json::to_value(parse(r#"{"nfs_worktree":true}"#).unwrap()).unwrap();
+    assert_eq!(out["grove_worktree"], true);
+    assert!(out.get("nfs_worktree").is_none(), "{out}");
 }

@@ -16,8 +16,8 @@ pub use permission::*;
 mod auth_provider;
 pub use auth_provider::*;
 mod privacy;
-pub mod retry_budget;
 pub use privacy::{PrivacyMode, SharedPrivacyMode};
+pub use xai_grok_config::retry_budget;
 mod sandbox;
 pub use sandbox::*;
 

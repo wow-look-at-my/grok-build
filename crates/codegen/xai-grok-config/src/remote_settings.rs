@@ -4,38 +4,66 @@ use crate::{DisplayRefreshSettings, MemoryV2Settings, RemoteAnnouncement};
 use serde::{Deserialize, Serialize};
 /// A remote `campaigns[]` entry: an `id` gate plus a flattened patch that can set any config key.
 /// It is the JSON sibling of a `[[campaigns]]` TOML override.
+/// `campaign_id` folds through [`CampaignOverride::ID_KEYS`], so an entry naming both keys still parses.
 #[derive(Debug, Clone, Default, Deserialize, Serialize, PartialEq, Eq)]
+#[serde(try_from = "CampaignOverrideWire")]
 pub struct CampaignOverride {
-    #[serde(default, alias = "campaign_id")]
     pub id: Option<String>,
     #[serde(flatten, default)]
     pub patch: serde_json::Map<String, serde_json::Value>,
+}
+
+impl CampaignOverride {
+    /// The keys [`id`](Self::id) is read under. This type writes the first; `campaign_id` is the TOML sibling's spelling.
+    pub const ID_KEYS: xai_tool_types::Aliases =
+        xai_tool_types::Aliases::new("id", &["campaign_id"]);
+}
+
+/// `CampaignOverride` as it arrives, with each id spelling as its own field, so the flattened patch keeps everything else.
+#[derive(Debug, Default, Deserialize)]
+struct CampaignOverrideWire {
+    #[serde(default)]
+    id: Option<String>,
+    #[serde(default, rename = "campaign_id")]
+    campaign_id: Option<String>,
+    #[serde(flatten, default)]
+    patch: serde_json::Map<String, serde_json::Value>,
+}
+
+impl TryFrom<CampaignOverrideWire> for CampaignOverride {
+    type Error = xai_tool_types::AliasConflict;
+
+    fn try_from(wire: CampaignOverrideWire) -> Result<Self, Self::Error> {
+        Ok(Self {
+            id: CampaignOverride::ID_KEYS.fold(vec![wire.id, wire.campaign_id])?,
+            patch: wire.patch,
+        })
+    }
 }
 /// Doom-loop recovery settings: one struct serves both the local `[doom_loop_recovery]` TOML table and the remote `doom_loop_recovery` JSON object.
 /// Every field is `Option` with a per-field default, so a partial object parses and unknown future keys are ignored.
 /// Unset fields fall through per-field in `resolve_doom_loop_recovery`: env, then TOML, then remote, then default.
 /// The namespace is distinct from the removed legacy `doom_loop_*` keys.
-#[derive(Debug, Clone, Default, Deserialize, Serialize, PartialEq, Eq)]
+#[derive(Debug, Clone, Default, Deserialize, Serialize, PartialEq, Eq, schemars::JsonSchema)]
 #[serde(default)]
 pub struct DoomLoopRecoverySettings {
     /// Send the `x-grok-doom-loop-check` header, parse the reported triggers, and resample confident loops.
     /// `Some(false)` is a kill-switch; absent uses the client default (on).
     #[serde(skip_serializing_if = "Option::is_none")]
     pub enabled: Option<bool>,
-    /// Highest `tail_repetition` threshold considered confident (clamped to 2..=64); absent uses the client default (64).
-    /// The server emits every fired threshold, and the client filters the returned trigger labels with this.
-    /// It is never sent as a request parameter.
+    /// Highest `tail_repetition` threshold considered confident.
     #[serde(skip_serializing_if = "Option::is_none")]
     pub max_threshold: Option<u32>,
-    /// Resample budget per turn (clamped to 0..=5); absent uses the client default (2).
-    #[serde(skip_serializing_if = "Option::is_none")]
+    /// Resample budget per turn. `-1` or `"unlimited"` never runs out.
+    #[serde(with = "crate::retry_budget", skip_serializing_if = "Option::is_none")]
+    #[schemars(schema_with = "crate::retry_budget::json_schema")]
     pub max_retries: Option<u32>,
     /// Detector window sent as the value of `x-grok-doom-loop-check` (honored in 512..=4096, otherwise 4096; absent uses the client default, 1024).
     #[serde(skip_serializing_if = "Option::is_none")]
     pub window_tokens: Option<u32>,
 }
 /// Shared shape of the `[long_reasoning_reminder]` TOML table and the remote `long_reasoning_reminder` object; unset fields fall through per field.
-#[derive(Debug, Clone, Default, Deserialize, Serialize, PartialEq, Eq)]
+#[derive(Debug, Clone, Default, Deserialize, Serialize, PartialEq, Eq, schemars::JsonSchema)]
 #[serde(default)]
 pub struct LongReasoningReminderSettings {
     /// Mid-turn reminder to reason briefly after a long hidden-reasoning call; default off.
@@ -60,6 +88,20 @@ impl Serialize for WorktreeKindMaxAge {
             Self::Secs(n) => serializer.serialize_u64(*n),
             Self::Never => serializer.serialize_str("never"),
         }
+    }
+}
+impl schemars::JsonSchema for WorktreeKindMaxAge {
+    fn schema_name() -> std::borrow::Cow<'static, str> {
+        "WorktreeKindMaxAge".into()
+    }
+    fn json_schema(_: &mut schemars::SchemaGenerator) -> schemars::Schema {
+        schemars::json_schema!({
+            "description": "Seconds, or \"never\".",
+            "anyOf": [
+                { "type": "integer", "minimum": 0 },
+                { "type": "string", "pattern": "^([Nn][Ee][Vv][Ee][Rr]|[0-9]+)$" }
+            ]
+        })
     }
 }
 impl<'de> Deserialize<'de> for WorktreeKindMaxAge {
@@ -99,7 +141,7 @@ impl<'de> Deserialize<'de> for WorktreeKindMaxAge {
 }
 /// Policy from the local `[worktree.auto_gc]` table or the remote `worktree_auto_gc` object.
 /// Each field deserializes tolerantly, so one bad key cannot drop a sibling kill-switch.
-#[derive(Debug, Clone, Default, Deserialize, Serialize, PartialEq, Eq)]
+#[derive(Debug, Clone, Default, Deserialize, Serialize, PartialEq, Eq, schemars::JsonSchema)]
 #[serde(default)]
 pub struct WorktreeAutoGcSettings {
     /// `Some(false)` is a kill-switch; absent defaults to on (an env kill still applies).
@@ -276,7 +318,10 @@ pub struct ConsentGate {
 /// - Missing fields from old servers are ignored
 /// - New fields added in the future don't break existing clients
 /// - Callers can distinguish "server said false" from "server didn't say"
+///
+/// `remote = "Self"` makes the derives inherent functions. The trait impls call them, and `Deserialize` folds `nfs_worktree` first.
 #[derive(Debug, Clone, Default, Deserialize, Serialize)]
+#[serde(remote = "Self")]
 pub struct RemoteSettings {
     /// When `Some(true)`, the server recommends enabling leader mode.
     /// It is the fallback when the user hasn't set `[cli] use_leader` locally.
@@ -399,11 +444,9 @@ pub struct RemoteSettings {
     #[serde(default)]
     pub active_agent_messages_enabled: Option<bool>,
     /// File toolset: `"standard"` or `"hashline"`.
-    /// This is the server-side default; local `[toolset] file_toolset` in config.toml takes precedence when set.
     #[serde(default)]
     pub file_toolset: Option<String>,
     /// Per-chunk idle timeout in seconds for inference streaming.
-    /// It is the fallback when no per-model `inference_idle_timeout_secs` is set in config.toml.
     #[serde(default)]
     pub inference_idle_timeout_secs: Option<u64>,
     #[serde(default)]
@@ -413,7 +456,7 @@ pub struct RemoteSettings {
     #[serde(default)]
     pub mcp_startup_timeout_secs: Option<u64>,
     /// Global default MCP tool-result inline cap (bytes), from remote settings `grok_build_settings.max_mcp_output_bytes`.
-    /// Requirements, env, and `config.toml [mcp] max_output_bytes` override it. The built-in default is 20_000.
+    /// Requirements, env, and `mcp.max_output_bytes` in config.json override it.
     #[serde(default)]
     pub max_mcp_output_bytes: Option<u64>,
     /// When `Some(true)`, enable session registry hooks (register, update, finalize, memory upload).
@@ -474,8 +517,6 @@ pub struct RemoteSettings {
     pub cursor_sessions_enabled: Option<bool>,
     #[serde(default)]
     pub claude_sessions_enabled: Option<bool>,
-    #[serde(default)]
-    pub codex_sessions_enabled: Option<bool>,
     /// When `Some(true)`, enable goal mode remotely.
     /// When `Some(false)`, force-disable it (kill-switch).
     /// Absent uses the client default (enabled).
@@ -587,7 +628,7 @@ pub struct RemoteSettings {
     pub slash_command_tags: Option<std::collections::BTreeMap<String, String>>,
     /// When present, controls the non-Git-repo warning at session start.
     /// It arrives as `non_git_warning` in `grok_build_settings`.
-    /// It takes precedence over `[features] non_git_warning` in config.toml.
+    /// It takes precedence over `features.non_git_warning` in config.json.
     /// `Some(true)` enables, `Some(false)` acts as a kill-switch, `None` falls back to local config.
     #[serde(default)]
     pub non_git_warning: Option<bool>,
@@ -610,7 +651,7 @@ pub struct RemoteSettings {
     #[serde(default)]
     pub image_description_model: Option<String>,
     /// Server-side pin for the next-prompt suggestion model (tab-autocomplete ghost text), from the `grok_build_settings` remote settings flag.
-    /// It sits below env (`GROK_PROMPT_SUGGESTIONS_MODEL`) and `[models] prompt_suggestion` in config.toml.
+    /// It sits below env (`GROK_PROMPT_SUGGESTIONS_MODEL`) and `models.prompt_suggestion` in config.json.
     /// It sits above the client hint and the built-in `grok-4.6` default.
     /// When the effective model is not in the shell's model catalog the suggestion request is skipped entirely; the session model is never used instead.
     /// See `ModelOverrideConfig::resolve` and `handle_suggest_prompt`.
@@ -622,7 +663,6 @@ pub struct RemoteSettings {
     #[serde(default)]
     pub campaigns: Vec<CampaignOverride>,
     /// When `Some(true)`, foreground commands that hit the default timeout are auto-backgrounded instead of killed.
-    /// It is the fallback when no local `[toolset.bash] auto_background_on_timeout` is set in config.toml.
     #[serde(default)]
     pub auto_background_on_timeout: Option<bool>,
     /// When `Some(false)`, foreground commands containing a background `&` operator are rejected.
@@ -639,7 +679,7 @@ pub struct RemoteSettings {
     pub ask_user_question_timeout_secs: Option<u64>,
     /// When `Some(true)`, a completed subagent's isolated worktree is snapshotted into a durable git ref and its directory deleted.
     /// Resume restores the worktree from the ref.
-    /// It is the fallback when no local `[features] subagent_worktree_snapshot` is set in config.toml; absent defaults to disabled.
+    /// It is the fallback when no local `features.subagent_worktree_snapshot` is set in config.json; absent defaults to disabled.
     #[serde(default)]
     pub subagent_worktree_snapshot_enabled: Option<bool>,
     /// Remote fallback for `[features] subagent_model_inheritance`; absent or null means off.
@@ -673,12 +713,10 @@ pub struct RemoteSettings {
     #[serde(default)]
     pub contextual_hints: Option<ContextualHintsRemote>,
     /// Server-recommended worktree creation type.
-    /// It is the fallback when no local `[cli] worktree_type` is set in config.toml.
     #[serde(default)]
     pub worktree_type: Option<String>,
     /// Grove-projected worktree strategy (`true` means grove-fuse or grove-nfs, `false` means copy).
-    /// `Some(false)` is the remote kill switch. `nfs_worktree` is a deserialize alias.
-    #[serde(default, alias = "nfs_worktree")]
+    #[serde(default)]
     pub grove_worktree: Option<bool>,
     /// Server-recommended default for `restore_code` in worktree resume.
     /// It applies only when the client omits `restoreCode`.
@@ -916,17 +954,6 @@ pub struct RemoteSettings {
     /// Set it remotely to stage a new default to a segment, cut everyone over, or revert it for a customer.
     #[serde(default)]
     pub keep_text_selection_default: Option<String>,
-    /// Master switch for jemalloc heap sampling and threshold dumps.
-    /// `Some(true)` enables, `Some(false)` is a kill-switch, `None` uses the client default (off).
-    #[serde(default)]
-    pub jemalloc_heap_profile_enabled: Option<bool>,
-    /// Resident-byte thresholds (e.g. 2G/5G/10G as byte counts).
-    /// `None` and `[]` are distinct on the wire.
-    #[serde(default)]
-    pub jemalloc_heap_profile_thresholds_bytes: Option<Vec<u64>>,
-    /// Stats poll interval in seconds when set.
-    #[serde(default)]
-    pub jemalloc_heap_profile_poll_interval_secs: Option<u64>,
 }
 /// A request body encoding advertised in [`RemoteSettings::accept_request_encodings`].
 #[derive(Debug, Clone, Copy, PartialEq, Eq, Deserialize, Serialize)]
@@ -936,6 +963,33 @@ pub enum RemoteRequestEncoding {
     /// Forward-compat: an encoding this build does not know.
     #[serde(other)]
     Unknown,
+}
+impl RemoteSettings {
+    /// The keys [`grove_worktree`](Self::grove_worktree) is read under.
+    pub const GROVE_WORKTREE_KEYS: xai_tool_types::Aliases =
+        xai_tool_types::Aliases::new("grove_worktree", &["nfs_worktree"]);
+}
+impl<'de> Deserialize<'de> for RemoteSettings {
+    /// Buffers the object, folds the grove-worktree spellings into the canonical key, and hands the rest to the derived reader.
+    fn deserialize<D: serde::Deserializer<'de>>(deserializer: D) -> Result<Self, D::Error> {
+        use serde::de::Error as _;
+        let mut map = serde_json::Map::<String, serde_json::Value>::deserialize(deserializer)?;
+        // A null says nothing, the same as an absent key.
+        let mut take = |key: &str| map.remove(key).filter(|v| !v.is_null());
+        let values = Self::GROVE_WORKTREE_KEYS.keys().map(&mut take).collect();
+        if let Some(value) = Self::GROVE_WORKTREE_KEYS
+            .fold(values)
+            .map_err(D::Error::custom)?
+        {
+            map.insert(Self::GROVE_WORKTREE_KEYS.canonical.to_owned(), value);
+        }
+        RemoteSettings::deserialize(serde_json::Value::Object(map)).map_err(D::Error::custom)
+    }
+}
+impl Serialize for RemoteSettings {
+    fn serialize<S: serde::Serializer>(&self, serializer: S) -> Result<S::Ok, S::Error> {
+        RemoteSettings::serialize(self, serializer)
+    }
 }
 impl RemoteSettings {
     /// Denylist check for an optional imagine tool.
@@ -1059,7 +1113,7 @@ where
 }
 /// A model and the harness whose system prompt and toolset flavor that model must run against.
 /// The pair is the atomic configurable unit because a model is only guaranteed to work with a compatible harness (cursor vs grok-build).
-#[derive(Debug, Clone, PartialEq, Eq, Serialize, Deserialize)]
+#[derive(Debug, Clone, PartialEq, Eq, Serialize, Deserialize, schemars::JsonSchema)]
 pub struct GoalRoleModel {
     /// Model id, e.g. "grok-4". It resolves against available models at spawn time; unknown or unauthorized fails open to the current model.
     pub model: String,
@@ -1069,7 +1123,7 @@ pub struct GoalRoleModel {
     /// The main session's env/ACP/strict-harness precedence chain plays no part.
     /// It is not a subagent type: the role always spawns `general-purpose`, so the harness only re-flavors that toolset.
     /// An `agent_type` that doesn't resolve, or whose role toolset can't satisfy the role, fails open to the session model and harness before commit.
-    /// One that resolves to a strict harness whose flavor the subagent system can't represent (e.g. `codex`) fails open the same way.
+    /// One that resolves to a strict harness whose flavor the subagent system can't represent fails open the same way.
     pub agent_type: String,
 }
 #[cfg(test)]
