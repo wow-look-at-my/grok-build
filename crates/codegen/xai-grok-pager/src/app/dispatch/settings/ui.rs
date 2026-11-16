@@ -20,7 +20,7 @@ use super::setters::{
     set_timestamps_inner, set_ttft_timeout_secs_inner, set_voice_capture_mode_inner,
     set_voice_keybind_enabled_inner, set_voice_stt_language_inner,
 };
-use crate::app::actions::{Action, Effect};
+use crate::app::actions::{Action, Effect, ModelChoice};
 use crate::app::app_view::{ActiveView, AppView};
 use crate::app::dispatch::ctx::with_active_agent;
 use crate::app::dispatch::modes::{set_yolo_mode_inner, sync_active_auto_flag};
@@ -1084,8 +1084,7 @@ pub(in crate::app::dispatch) fn apply_setting_rollback(
                             companion_effects.push(Effect::SwitchModel {
                                 agent_id: aid,
                                 session_id: sid,
-                                model_id: id,
-                                effort: None,
+                                choice: ModelChoice::new(id),
                                 prev_model_id: None,
                             });
                         }

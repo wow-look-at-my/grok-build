@@ -16,7 +16,9 @@ fn claim_refuses_stripped_sidecar_even_with_forged_marker() {
         fail_closed: false,
         ..Default::default()
     };
-    assert!(
+
+    assert_eq!(
+        Some(ManagedPolicyCompromise::SignatureMissing),
         managed_policy_compromised_decision(
             SignedVerdict::NoAuthenticSidecar,
             || true,
@@ -26,8 +28,9 @@ fn claim_refuses_stripped_sidecar_even_with_forged_marker() {
         ),
         "an imposing claim outranks the forged marker when the policy sidecar is gone"
     );
-    assert!(
-        !managed_policy_compromised_decision(
+    assert_eq!(
+        None,
+        managed_policy_compromised_decision(
             SignedVerdict::NoAuthenticSidecar,
             || false,
             Some(&forged),
@@ -51,8 +54,10 @@ fn claim_not_consulted_on_sidecar_read_blip() {
         fail_closed: true,
         ..Default::default()
     };
-    assert!(
-        !managed_policy_compromised_decision(
+
+    assert_eq!(
+        None,
+        managed_policy_compromised_decision(
             SignedVerdict::SidecarUnreadable,
             || true,
             Some(&served),
@@ -83,8 +88,10 @@ fn garbage_claim_without_fail_closed_is_not_imposing() {
         "{\"signed_payload\":\"{}\",\"signature\":\"\",\"key_id\":\"\"}",
     )
     .unwrap();
-    assert!(
-        !managed_policy_compromised_for_at(home, &team("team-a")),
+
+    assert_eq!(
+        None,
+        managed_policy_compromised_for_at(home, &team("team-a")),
         "garbage claim without fail-closed must not make the gate fail closed"
     );
     assert!(
@@ -114,8 +121,10 @@ fn claim_paths_are_inert_in_dark_build() {
             r#"{"signed_payload":"{}","signature":"","key_id":""}"#,
         )
         .unwrap();
-        assert!(
-            !managed_policy_compromised_for_at(home, &team("team-a")),
+
+        assert_eq!(
+            None,
+            managed_policy_compromised_for_at(home, &team("team-a")),
             "dark build: a claim file must not make the gate fail closed"
         );
         assert!(
