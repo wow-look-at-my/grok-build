@@ -1,5 +1,4 @@
-//! The user's `config.toml` writers write through a dotfile-managed symlink; a project link is
-//! replaced at the link name.
+//! The user's `config.toml` writers write through a dotfile-managed symlink.
 
 #![cfg(unix)]
 

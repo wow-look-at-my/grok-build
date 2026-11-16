@@ -35,8 +35,8 @@ const LIFECYCLE_EXEC_LOG_FILE: &str = "workspace-server-lifecycle.log";
 const LIFECYCLE_BROKER_START_TIMEOUT: Duration = Duration::from_secs(5);
 /// The pre-stop broker: image manifests from `image_dir`, registrations under the durable workspace home.
 ///
-/// Unix only. On Windows the diagnostics listener is loopback TCP, which every local account can reach, and the host
-/// never sends pre-stop to Windows guests, so the lifecycle routes are not served there.
+/// Unix only. On Windows the diagnostics listener is loopback TCP, which every local account can reach. The host
+/// never sends pre-stop to Windows guests. The lifecycle routes are not served there.
 #[cfg(unix)]
 fn lifecycle_broker(
     image_dir: &std::path::Path,

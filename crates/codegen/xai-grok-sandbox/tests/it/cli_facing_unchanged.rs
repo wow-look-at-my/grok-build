@@ -1,6 +1,4 @@
-//! Pins the process-wide surface the grok CLI calls: each entry point coerces to its declared
-//! fn-pointer type, and an unapplied process is inactive, unconfigured, with a no-op
-//! child-network filter.
+//! Pins the process-wide surface the grok CLI calls: each entry point coerces to its declared fn-pointer type, and an unapplied process is inactive.
 
 use std::path::Path;
 
@@ -55,7 +53,7 @@ fn cli_facing_process_wide_surface_unchanged() {
         let _: fn(&ProfileName, &Path) -> bool = xai_grok_sandbox::requires_read_deny;
     }
 
-    // The profile vocabulary the shell's `--sandbox` flag and `[sandbox] profile` parse into
+    // The profile vocabulary the shell's `--sandbox` flag and `[sandbox] profile` parse.
     let _ = ProfileName::Off;
     let _ = ProfileName::Custom("devbox-like".to_owned());
     assert_eq!(Ok(ProfileName::Off), "off".parse::<ProfileName>());

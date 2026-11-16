@@ -59,7 +59,7 @@ pub mod session;
 pub mod status_config;
 pub(crate) mod telemetry;
 #[cfg(test)]
-pub(crate) mod test_git;
+pub(crate) use xai_test_utils::test_git;
 pub use status_config::{ProactiveRefreshConfig, StatusConfig};
 pub mod trust;
 pub(crate) mod upload;

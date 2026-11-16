@@ -16,8 +16,7 @@ async fn storage_upload_parks_on_401_and_drains_after_recovery() {
     // Trace uploads are gated on first-party xAI OAuth.
     seed_fake_oauth(&content, "pty-park-e2e");
 
-    // Explicit overrides win over the sandbox defaults
-    // The seeded OAuth entry decides the auth mode
+    // Explicit overrides win over the sandbox defaults. The seeded OAuth entry decides the auth mode
     let mut overrides = Vec::from(oauth_credential_ops());
     overrides.extend([
         EnvOp::set("GROK_TRACE_UPLOAD", "true"),

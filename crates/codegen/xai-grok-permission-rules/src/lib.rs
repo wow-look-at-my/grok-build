@@ -28,7 +28,7 @@ pub mod util;
 mod worktree;
 
 #[cfg(test)]
-mod test_git;
+pub(crate) use xai_test_utils::test_git;
 #[cfg(test)]
 mod test_support;
 #[cfg(test)]

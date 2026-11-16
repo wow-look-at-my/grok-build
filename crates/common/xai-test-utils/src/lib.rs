@@ -25,6 +25,7 @@
 
 pub mod env;
 pub mod git;
+pub mod test_git;
 pub mod image;
 pub mod runfiles_util;
 pub mod tracing_capture;
