@@ -11,7 +11,7 @@ pub struct McpServerDetails {
     pub name: String,
     pub transport: McpServerTransport,
     pub source: McpServerSource,
-    /// Only a `config.toml` entry with the same name sets these timeouts.
+    /// Only a `config.json` entry with the same name sets these timeouts.
     pub timeouts: McpServerTimeouts,
     pub disabled_tools: BTreeSet<String>,
     pub oauth: Option<McpServerOAuth>,

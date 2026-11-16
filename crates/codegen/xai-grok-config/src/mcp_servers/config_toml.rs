@@ -156,7 +156,7 @@ fn toml_mcp_server_configs_from(
                 tracing::debug!(
                     count = project_servers.len(),
                     path = %config_path.display(),
-                    "Loaded project-scoped MCP servers from .grok/config.toml"
+                    "Loaded project-scoped MCP servers from the project config"
                 );
                 for (name, config) in project_servers {
                     servers.insert(name, (config, MCP_SCOPE_PROJECT));

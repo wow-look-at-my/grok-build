@@ -1,6 +1,6 @@
-//! The user `config.toml` comes before project `.grok/config.toml` files.
-//! A server with `enabled = false` still hides its name from later sources.
-//! Plugins come after those toml files.
+//! The user `config.json` comes before project `.grok/config.json` files.
+//! A server with `enabled` set to `false` still hides its name from later sources.
+//! Plugins come after those config files.
 //! `~/.claude.json` comes after plugins.
 //! Cursor project `mcp.json` comes before the Cursor user file.
 //! Project `.mcp.json` files come last.
@@ -63,7 +63,7 @@ pub struct McpServerSources {
 
 #[derive(Debug, Clone, PartialEq, Eq)]
 pub enum McpServerOrigin {
-    /// `path` is the user `config.toml` even for a project definition.
+    /// `path` is the user `config.json` even for a project definition.
     ConfigToml {
         path: PathBuf,
     },
