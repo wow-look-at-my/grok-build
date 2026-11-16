@@ -243,7 +243,7 @@ mod tests {
         };
 
         let from_async = ids(source.fetch_async(None).await.expect("async fetch"));
-        let from_blocking = ids(tokio::task::spawn_blocking(move || source.fetch(None))
+        let from_blocking = ids(xai_spawn::spawn_blocking(move || source.fetch(None))
             .await
             .expect("join")
             .expect("blocking fetch"));

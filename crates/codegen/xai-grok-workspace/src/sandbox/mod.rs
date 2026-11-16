@@ -244,7 +244,7 @@ static HOST_PROBE: tokio::sync::OnceCell<HostProbe> = tokio::sync::OnceCell::con
 pub async fn host_probe() -> HostProbe {
     HOST_PROBE
         .get_or_init(|| async {
-            match tokio::task::spawn_blocking(HostProbe::run).await {
+            match xai_spawn::spawn_blocking(HostProbe::run).await {
                 Ok(probe) => probe,
                 Err(error) => {
                     tracing::warn!(%error, "the sandbox host probe did not complete; no backend");

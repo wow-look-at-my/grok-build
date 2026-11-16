@@ -335,7 +335,7 @@ mod tests {
     ) {
         let (tx, mut rx) = tokio::sync::mpsc::unbounded_channel::<xai_acp_lib::AcpAgentMessage>();
         let (seen_tx, seen_rx) = tokio::sync::mpsc::unbounded_channel();
-        tokio::spawn(async move {
+        xai_spawn::spawn(async move {
             while let Some(msg) = rx.recv().await {
                 let xai_acp_lib::AcpAgentMessage::ExtMethod(args) = msg else {
                     panic!("unexpected ACP message");

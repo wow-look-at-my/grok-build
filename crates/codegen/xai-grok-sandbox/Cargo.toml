@@ -9,6 +9,7 @@ autotests = false
 [dependencies]
 anyhow = { workspace = true }
 chrono = { workspace = true, features = ["serde"] }
+xai-spawn = { workspace = true }
 xai-dirs = { workspace = true }
 dunce = { workspace = true }
 # The advisory lock every writer of a grants file takes around its read-modify-write.

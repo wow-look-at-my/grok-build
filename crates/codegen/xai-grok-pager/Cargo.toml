@@ -190,6 +190,7 @@ xai-grok-gboom = { path = "../xai-grok-gboom", features = ["test-support"] }
 xai-grok-login = { workspace = true, features = ["test-support"] }
 xai-grok-shell = { path = "../xai-grok-shell", default-features = false, features = ["test-support"] }
 pretty_assertions = { workspace = true }
+rstest = { workspace = true }
 insta = { workspace = true }
 criterion = { workspace = true }
 tempfile = { workspace = true }

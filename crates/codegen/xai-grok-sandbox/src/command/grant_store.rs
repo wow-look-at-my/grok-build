@@ -147,7 +147,7 @@ impl PersistedRows {
     ) -> Result<bool, GrantError> {
         let (persisted, rules) = (self.clone(), rules.clone());
         let context = self.path.display().to_string();
-        tokio::task::spawn_blocking(move || edit_rows_locked(&persisted, &rules, now, store, edit))
+        xai_spawn::spawn_blocking(move || edit_rows_locked(&persisted, &rules, now, store, edit))
             .await
             .map_err(|e| GrantError::Io {
                 context,
@@ -161,7 +161,7 @@ impl PersistedRows {
         let (path, rules) = (self.path.clone(), rules.clone());
         let grok_home = self.grok_home.clone();
         let commit = self.commit.clone();
-        let reload = tokio::task::spawn_blocking(move || {
+        let reload = xai_spawn::spawn_blocking(move || {
             let mut held = lock_value(&commit.signature);
             let signature = signature_from(std::fs::symlink_metadata(&path));
             if signature == *held {
@@ -244,7 +244,7 @@ impl GrantStore {
                 git_env: &GitConfigEnv::from_host(),
             })
         };
-        let protected = match tokio::task::spawn_blocking(build.clone()).await {
+        let protected = match xai_spawn::spawn_blocking(build.clone()).await {
             Ok(protected) => protected,
             Err(error) if error.is_panic() => std::panic::resume_unwind(error.into_panic()),
             // Cancelled by the runtime's shutdown: the floor is still owed, so build it here
@@ -621,7 +621,7 @@ async fn read_rows(
     now: i64,
 ) -> Option<Vec<Grant>> {
     let (owned, home) = (path.to_path_buf(), grok_home.to_path_buf());
-    let text = match tokio::task::spawn_blocking(move || read_rows_text(&owned, &home)).await {
+    let text = match xai_spawn::spawn_blocking(move || read_rows_text(&owned, &home)).await {
         Ok(text) => text,
         Err(error) if error.is_panic() => std::panic::resume_unwind(error.into_panic()),
         Err(error) => Err(std::io::Error::other(error)),

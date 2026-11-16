@@ -1235,43 +1235,49 @@ fn system_notes(agent: &AgentView) -> Vec<String> {
         .collect()
 }
 
-fn minimal_type(agent: &mut AgentView, keys: &[KeyCode]) {
+fn type_keys(agent: &mut AgentView, keys: &[KeyCode]) {
     use crossterm::event::Event;
     let registry = ActionRegistry::defaults();
     for code in keys {
-        let _ = agent.handle_minimal_input(
+        let _ = agent.handle_input(
             &Event::Key(KeyEvent::new(*code, KeyModifiers::NONE)),
             &registry,
         );
     }
 }
 
-/// Minimal keeps the prompt pane focused and routes keys through its `/btw` panel before the shared router.
-fn minimal_agent_with_btw() -> AgentView {
-    let mut agent = make_agent();
-    agent
-        .prompt
-        .set_screen_mode(crate::app::ScreenMode::Minimal);
-    agent.set_active_pane(AgentPane::Prompt, true);
-    let request_id = crate::minimal_api::start_minimal_btw(&mut agent, "q".into());
-    assert!(crate::minimal_api::finish_minimal_btw(
-        &mut agent,
-        request_id,
-        Ok("answer".into())
+/// Opens a one-text-field form card whose request id is `mcp-elicit-test`.
+fn open_named_elicitation(agent: &mut AgentView, server_name: &str, message: &str) {
+    use crate::views::elicitation_view::ElicitationViewState;
+    use xai_grok_tools::mcp_elicitation::{McpElicitExtRequest, McpElicitModeFields};
+    agent.elicitation_view = Some(ElicitationViewState::from_request(
+        McpElicitExtRequest {
+            session_id: "s".to_owned(),
+            tool_call_id: "mcp-elicit-test".to_owned(),
+            server_name: server_name.to_owned(),
+            message: message.to_owned(),
+            mode: McpElicitModeFields::Form {
+                requested_schema: Some(serde_json::json!({
+                    "type": "object",
+                    "properties": { "title": { "type": "string", "title": "Ticket title" } },
+                    "required": ["title"]
+                })),
+            },
+        },
+        None,
+        None,
     ));
-    agent.btw_focused = true;
-    agent
 }
 
 #[test]
-fn minimal_keys_answer_the_elicitation_card_and_submit_it() {
-    let mut agent = minimal_agent_with_btw();
+fn keys_answer_the_elicitation_card_and_submit_it() {
+    let mut agent = make_agent();
     let mut rx = open_elicitation(&mut agent);
     assert!(agent.is_awaiting_user_answer());
 
     let mut keys: Vec<KeyCode> = "a@b.co".chars().map(KeyCode::Char).collect();
     keys.extend([KeyCode::Enter, KeyCode::Tab, KeyCode::Char('y')]);
-    minimal_type(&mut agent, &keys);
+    type_keys(&mut agent, &keys);
 
     assert_eq!(
         serde_json::json!({ "outcome": "accept", "content": { "email": "a@b.co" } }),
@@ -1282,18 +1288,14 @@ fn minimal_keys_answer_the_elicitation_card_and_submit_it() {
         "the card closes on accept"
     );
     assert_eq!("", agent.prompt.text(), "no key leaked into the composer");
-    assert!(
-        agent.btw_state.is_some(),
-        "the /btw panel never saw the keys"
-    );
     assert_eq!(Vec::<String>::new(), system_notes(&agent));
 }
 
 #[test]
 fn declined_elicitation_tells_the_server_and_leaves_a_notice() {
-    let mut agent = minimal_agent_with_btw();
+    let mut agent = make_agent();
     let mut rx = open_elicitation(&mut agent);
-    minimal_type(&mut agent, &[KeyCode::Tab, KeyCode::Char('d')]);
+    type_keys(&mut agent, &[KeyCode::Tab, KeyCode::Char('d')]);
 
     assert_eq!(
         serde_json::json!({ "outcome": "decline" }),
@@ -1309,9 +1311,9 @@ fn declined_elicitation_tells_the_server_and_leaves_a_notice() {
 #[test]
 fn cancelled_elicitation_tells_the_server_and_leaves_a_notice() {
     use crossterm::event::Event;
-    let mut agent = minimal_agent_with_btw();
+    let mut agent = make_agent();
     let mut rx = open_elicitation(&mut agent);
-    let _ = agent.handle_minimal_input(
+    let _ = agent.handle_input(
         &Event::Key(KeyEvent::new(KeyCode::Char('c'), KeyModifiers::CONTROL)),
         &ActionRegistry::defaults(),
     );
@@ -1328,11 +1330,11 @@ fn cancelled_elicitation_tells_the_server_and_leaves_a_notice() {
 
 #[test]
 fn accept_after_the_server_gave_up_leaves_a_notice() {
-    let mut agent = minimal_agent_with_btw();
+    let mut agent = make_agent();
     drop(open_elicitation(&mut agent));
     let mut keys: Vec<KeyCode> = "a@b.co".chars().map(KeyCode::Char).collect();
     keys.extend([KeyCode::Enter, KeyCode::Tab, KeyCode::Char('y')]);
-    minimal_type(&mut agent, &keys);
+    type_keys(&mut agent, &keys);
 
     assert!(agent.elicitation_view.is_none());
     assert_eq!(
@@ -1347,7 +1349,7 @@ fn accept_after_the_server_gave_up_leaves_a_notice() {
 #[test]
 fn notice_quotes_only_catalog_name_characters_of_the_server() {
     let mut agent = make_agent();
-    crate::minimal_api::open_test_elicitation(
+    open_named_elicitation(
         &mut agent,
         "x” approved. Visit https://evil.example",
         "Create ticket?",

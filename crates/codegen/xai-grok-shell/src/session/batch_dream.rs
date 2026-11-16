@@ -169,7 +169,7 @@ fn storage_stop(
 async fn blocking<T: Send + 'static>(
     operation: impl FnOnce() -> Result<T, BatchDreamError> + Send + 'static,
 ) -> Result<T, BatchDreamError> {
-    tokio::task::spawn_blocking(operation)
+    xai_spawn::spawn_blocking(operation)
         .await
         .map_err(|error| BatchDreamError::Invalid(format!("storage task failed: {error}")))?
 }
@@ -179,7 +179,7 @@ async fn with_session<T: Send + 'static>(
     clock: SharedV2Clock,
     operation: impl FnOnce(&mut BatchDreamSession, i64) -> T + Send + 'static,
 ) -> Result<(BatchDreamSession, T), BatchDreamError> {
-    tokio::task::spawn_blocking(move || {
+    xai_spawn::spawn_blocking(move || {
         let mut session = session;
         let result = operation(&mut session, clock.now_unix_seconds());
         (session, result)
@@ -226,7 +226,7 @@ impl LeaseGuard {
         };
         let options = self.options.clone();
         if let Err(error) =
-            tokio::task::spawn_blocking(move || LeaseGuard::release_sync(&options, &lease)).await
+            xai_spawn::spawn_blocking(move || LeaseGuard::release_sync(&options, &lease)).await
         {
             tracing::warn!(target: xai_grok_telemetry::memory_log::TARGET, error = %error, "batch Dream lease release task failed");
         }
@@ -239,7 +239,7 @@ impl Drop for LeaseGuard {
             return;
         };
         let options = self.options.clone();
-        tokio::task::spawn_blocking(move || LeaseGuard::release_sync(&options, &lease));
+        xai_spawn::spawn_blocking(move || LeaseGuard::release_sync(&options, &lease));
     }
 }
 
@@ -262,7 +262,7 @@ where
     let control = BatchDreamControl::with_deadline(deadline.into_std());
     let _control_guard = ControlGuard {
         control: control.clone(),
-        _watcher: tokio_util::task::AbortOnDropHandle::new(tokio::spawn({
+        _watcher: tokio_util::task::AbortOnDropHandle::new(xai_spawn::spawn({
             let control = control.clone();
             let cancel = cancel.clone();
             async move {

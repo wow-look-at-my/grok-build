@@ -1546,7 +1546,7 @@ mod tests {
             ..model_policy::TaskParams::default()
         }));
         let shared = resources.into_shared();
-        let handle = tokio::spawn(async move {
+        let handle = xai_spawn::spawn(async move {
             let request = unwrap_spawn(rx.recv().await.expect("spawn"));
             assert_eq!("general-purpose", request.subagent_type);
             request
