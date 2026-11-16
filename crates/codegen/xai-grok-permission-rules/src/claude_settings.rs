@@ -442,7 +442,6 @@ pub fn is_claude_import_marked() -> bool {
     if std::env::var("_GROK_CLAUDE_MARKER_OVERRIDE").as_deref() == Ok("1") {
         return true;
     }
-<<<<<<< HEAD:crates/codegen/xai-grok-workspace/src/permission/claude_settings.rs
     let Some(config_path) = xai_grok_config::user_grok_home()
         .map(|g| xai_grok_config::format::resolve_config_file(&g, xai_grok_config::CONFIG_STEM))
     else {
@@ -456,10 +455,6 @@ pub fn is_claude_import_marked() -> bool {
         .and_then(|v| v.get("imported"))
         .and_then(|v| v.as_bool())
         .unwrap_or(false)
-=======
-    xai_grok_config::user_grok_home()
-        .is_some_and(|grok_home| xai_grok_config::is_claude_import_marked(&grok_home))
->>>>>>> upstream/main:crates/codegen/xai-grok-permission-rules/src/claude_settings.rs
 }
 
 /// Logs a single info line the first time the gate is hit (per process) so we can confirm the cutoff is taking effect without flooding logs.

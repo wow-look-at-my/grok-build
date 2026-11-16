@@ -88,10 +88,10 @@ pub(crate) struct SkillsToggleRequest {
     pub cwd: Option<String>,
 }
 
-pub const SKILLS_LIST_METHOD: &str = "x.ai/skills/list";
-pub const SKILLS_TOGGLE_METHOD: &str = "x.ai/skills/toggle";
+pub const SKILLS_LIST_METHOD: &str = "example.invalid/skills/list";
+pub const SKILLS_TOGGLE_METHOD: &str = "example.invalid/skills/toggle";
 
-/// Wire DTO for the `x.ai/skills/list` ext request. `pub` with both serde directions so ACP
+/// Wire DTO for the `example.invalid/skills/list` ext request. `pub` with both serde directions so ACP
 /// clients (xai-grok-pager) build the request from the same type the agent parses.
 #[derive(Debug, Clone, Serialize, Deserialize)]
 #[serde(rename_all = "camelCase")]
@@ -112,7 +112,7 @@ struct WorkflowsListRequest {
     session_id: acp::SessionId,
 }
 
-/// Wire DTO for the `x.ai/skills/list` and `x.ai/skills/toggle` answers, in both serde directions
+/// Wire DTO for the `example.invalid/skills/list` and `example.invalid/skills/toggle` answers, in both serde directions
 /// for the same reason as [`SkillsListRequest`].
 #[derive(Debug, Clone, Default, Serialize, Deserialize)]
 #[serde(rename_all = "camelCase")]
@@ -486,13 +486,7 @@ pub async fn handle(
             super::to_ext_response(Ok(SkillsResetResponse { skills, message }))
         }
 
-<<<<<<< fork
-        "example.invalid/skills/list" => {
-||||||| base
-        "x.ai/skills/list" => {
-=======
         SKILLS_LIST_METHOD => {
->>>>>>> upstream
             let req: SkillsListRequest = serde_json::from_str(args.params.get())?;
             let skills = reload_skills(&req.cwd, plugin_registry, compat).await;
             // Sessions otherwise learn about disk changes only from inotify,
@@ -583,13 +577,7 @@ pub async fn handle(
             }))
         }
 
-<<<<<<< fork
-        "example.invalid/skills/toggle" => {
-||||||| base
-        "x.ai/skills/toggle" => {
-=======
         SKILLS_TOGGLE_METHOD => {
->>>>>>> upstream
             let req: SkillsToggleRequest = serde_json::from_str(args.params.get())?;
             let cwd = req.cwd.as_deref().unwrap_or(".");
 

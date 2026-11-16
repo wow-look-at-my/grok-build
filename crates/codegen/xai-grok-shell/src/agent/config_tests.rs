@@ -8784,8 +8784,8 @@ fn a_configured_window_equal_to_the_default_is_not_replaced_by_a_sibling() {
         );
         assert!(entry.info.context_window_pinned);
     }
-||||||| base
-=======
+}
+#[test]
 fn choices_mark_the_window_explicit_and_donate_to_slug_siblings() {
     let cfg = Config::default();
     let dm = crate::models::default_model();
@@ -8830,7 +8830,6 @@ fn scalar_override_keeps_the_inherited_choices() {
     assert_eq!(model.info.context_window.get(), 300_000);
     let windows: Vec<u64> = model.info.context_windows.iter().map(|w| w.get()).collect();
     assert_eq!(windows, [300_000, DEFAULT_CONTEXT_WINDOW, 500_000]);
->>>>>>> upstream
 }
 #[test]
 fn resolve_model_list_does_not_override_explicitly_set_context_window() {

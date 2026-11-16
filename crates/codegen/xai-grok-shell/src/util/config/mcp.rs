@@ -369,12 +369,6 @@ pub async fn save_mcp_server_enabled_in(
         modified.push(user_path);
     }
 
-<<<<<<< fork
-    // Enable-only: unstick the nearest (winning) project def with `enabled = false`
-||||||| base
-    // Enable-only: unstick the nearest (winning) project def with `enabled = false` via toml_edit (preserves comments/layout)
-=======
->>>>>>> upstream
     // Disable is personal (user `disabled_mcp_servers`) and must not dirty shared files
     if enabled && let Some(path) = nearest_project_mcp_definition(cwd, server_name) {
         match clear_sticky_project_disabled_at(&path, server_name).await {
@@ -407,18 +401,8 @@ pub(crate) async fn save_user_mcp_server_enabled(server_name: &str, enabled: boo
     .map(|_| ())
 }
 
-<<<<<<< fork
-/// Undo a prior [`save_mcp_server_enabled_in`]`(…, true, …)` using the paths that call returned. Restores only the tiers that were written. Restores an **equivalent** disabled state, not necessarily the original encoding.
-/// User-tier restore always goes through [`save_user_mcp_server_enabled`]`(…, false)` (personal `disabled_mcp_servers`). Project-tier restore re-sticks `enabled = false`.
-/// A server disabled only via a sticky project field may therefore pick up a personal list entry if the user tier was also written during enable.
-||||||| base
-/// Undo a prior [`save_mcp_server_enabled_in`]`(…, true, …)` using the paths that call returned. Restores only the tiers that were written. Restores an **equivalent** disabled state, not necessarily the original encoding.
-/// User-tier restore always goes through [`save_user_mcp_server_enabled`]`(…, false)` (personal `disabled_mcp_servers`). Project-tier restore re-sticks `enabled = false` via toml_edit.
-/// A server disabled only via a sticky project field may therefore pick up a personal list entry if the user tier was also written during enable.
-=======
 /// Restores an equivalent disabled state, not necessarily the original encoding: a server disabled only
 /// by a sticky project field may pick up a personal `disabled_mcp_servers` entry.
->>>>>>> upstream
 pub(crate) async fn restore_mcp_server_enabled_after_enable(
     server_name: &str,
     modified_paths: &[PathBuf],
@@ -442,12 +426,6 @@ fn nearest_project_mcp_definition(cwd: &std::path::Path, server_name: &str) -> O
         .find(|path| mcp_server_defined_at(path, server_name))
 }
 
-<<<<<<< fork
-/// User `$GROK_HOME/config.json`. [`config_path`] is live (`grok_home()` is OnceLock).
-||||||| base
-/// User `$GROK_HOME/config.toml`. [`config_path`] is live (`grok_home()` is OnceLock).
-=======
->>>>>>> upstream
 fn is_user_config_path(path: &std::path::Path) -> bool {
     path == config_path().as_path()
 }
