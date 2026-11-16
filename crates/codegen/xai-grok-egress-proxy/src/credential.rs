@@ -30,7 +30,9 @@ pub struct ProxyToken(String);
 impl ProxyToken {
     pub(crate) fn generate() -> io::Result<ProxyToken> {
         let mut bytes = [0u8; 32];
-        SysRng.try_fill_bytes(&mut bytes).map_err(io::Error::other)?;
+        SysRng
+            .try_fill_bytes(&mut bytes)
+            .map_err(io::Error::other)?;
         Ok(ProxyToken(
             base64::engine::general_purpose::URL_SAFE_NO_PAD.encode(bytes),
         ))

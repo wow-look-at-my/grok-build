@@ -345,123 +345,7 @@ pub(crate) fn resolve_enabled(
 }
 pub(crate) use xai_grok_telemetry::config::env_telemetry_mode;
 pub use xai_grok_telemetry::config::{TelemetryConfig, TelemetryMode};
-<<<<<<< fork
-/// Plugin system configuration from `[plugins]` section in config.toml.
-#[derive(Clone, Debug, Default, Serialize, Deserialize, schemars::JsonSchema)]
-pub struct PluginsConfig {
-    /// Additional plugin directory paths to load.
-    #[serde(default)]
-    pub paths: Vec<String>,
-    /// Plugin IDs or names to disable.
-    /// Disabled plugins are discovered but their components are not loaded into the session.
-    #[serde(default)]
-    pub disabled: Vec<String>,
-    /// Plugin IDs or names to explicitly enable.
-    /// Used for project-scope plugins, which are disabled by default; adding a plugin here overrides that default.
-    #[serde(default)]
-    pub enabled: Vec<String>,
-    /// CLI `--plugin-dir` paths (populated by CLI arg processing, not config file).
-    #[serde(skip)]
-    pub cli_plugin_dirs: Vec<std::path::PathBuf>,
-}
-impl PluginsConfig {
-    /// Merge `enabledPlugins` from Claude settings files into this config. Reads `enabledPlugins` from `~/.claude/settings.json` only (user scope).
-    /// Project-level `<git_root>/.claude/settings.json` is intentionally NOT read here. A malicious repo could pre-populate `enabledPlugins` to bypass the project-plugin auto-disable logic in `populate_plugin_lists`.
-    /// That would enable attacker-controlled hooks (e.g. a SessionStart hook running arbitrary code). Native `.grok/config.toml` entries already present take precedence: a name is only added if it isn't already in the opposite list.
-    pub(crate) fn merge_claude_enabled_plugins(&mut self, _cwd: Option<&std::path::Path>) {
-        if crate::claude_import::is_claude_import_marked_with_log("merge_claude_enabled_plugins") {
-            return;
-        }
-        let mut paths = Vec::new();
-        if let Some(home) = xai_dirs::home_dir() {
-            paths.push(home.join(".claude").join("settings.json"));
-        }
-        for path in &paths {
-            let (claude_enabled, claude_disabled) =
-                xai_grok_agent::plugins::marketplace::load_enabled_disabled_plugins(path);
-            for name in claude_enabled {
-                if !self.disabled.contains(&name) && !self.enabled.contains(&name) {
-                    self.enabled.push(name);
-                }
-            }
-            for name in claude_disabled {
-                if !self.enabled.contains(&name) && !self.disabled.contains(&name) {
-                    self.disabled.push(name);
-                }
-            }
-        }
-    }
-    pub(crate) fn to_discovery_config(
-        &self,
-    ) -> xai_grok_agent::plugins::discovery::DiscoveryConfig {
-        xai_grok_agent::plugins::discovery::DiscoveryConfig {
-            cli_plugin_dirs: self.cli_plugin_dirs.clone(),
-            config_paths: self.paths.iter().map(std::path::PathBuf::from).collect(),
-            disabled: self.disabled.clone(),
-            enabled: self.enabled.clone(),
-        }
-    }
-}
-||||||| base
-/// Plugin system configuration from `[plugins]` section in config.toml.
-#[derive(Clone, Debug, Default, Serialize, Deserialize)]
-pub struct PluginsConfig {
-    /// Additional plugin directory paths to load.
-    #[serde(default)]
-    pub paths: Vec<String>,
-    /// Plugin IDs or names to disable.
-    /// Disabled plugins are discovered but their components are not loaded into the session.
-    #[serde(default)]
-    pub disabled: Vec<String>,
-    /// Plugin IDs or names to explicitly enable.
-    /// Used for project-scope plugins, which are disabled by default; adding a plugin here overrides that default.
-    #[serde(default)]
-    pub enabled: Vec<String>,
-    /// CLI `--plugin-dir` paths (populated by CLI arg processing, not config file).
-    #[serde(skip)]
-    pub cli_plugin_dirs: Vec<std::path::PathBuf>,
-}
-impl PluginsConfig {
-    /// Merge `enabledPlugins` from Claude settings files into this config. Reads `enabledPlugins` from `~/.claude/settings.json` only (user scope).
-    /// Project-level `<git_root>/.claude/settings.json` is intentionally NOT read here. A malicious repo could pre-populate `enabledPlugins` to bypass the project-plugin auto-disable logic in `populate_plugin_lists`.
-    /// That would enable attacker-controlled hooks (e.g. a SessionStart hook running arbitrary code). Native `.grok/config.toml` entries already present take precedence: a name is only added if it isn't already in the opposite list.
-    pub(crate) fn merge_claude_enabled_plugins(&mut self, _cwd: Option<&std::path::Path>) {
-        if crate::claude_import::is_claude_import_marked_with_log("merge_claude_enabled_plugins") {
-            return;
-        }
-        let mut paths = Vec::new();
-        if let Some(home) = xai_dirs::home_dir() {
-            paths.push(home.join(".claude").join("settings.json"));
-        }
-        for path in &paths {
-            let (claude_enabled, claude_disabled) =
-                xai_grok_agent::plugins::marketplace::load_enabled_disabled_plugins(path);
-            for name in claude_enabled {
-                if !self.disabled.contains(&name) && !self.enabled.contains(&name) {
-                    self.enabled.push(name);
-                }
-            }
-            for name in claude_disabled {
-                if !self.enabled.contains(&name) && !self.disabled.contains(&name) {
-                    self.disabled.push(name);
-                }
-            }
-        }
-    }
-    pub(crate) fn to_discovery_config(
-        &self,
-    ) -> xai_grok_agent::plugins::discovery::DiscoveryConfig {
-        xai_grok_agent::plugins::discovery::DiscoveryConfig {
-            cli_plugin_dirs: self.cli_plugin_dirs.clone(),
-            config_paths: self.paths.iter().map(std::path::PathBuf::from).collect(),
-            disabled: self.disabled.clone(),
-            enabled: self.enabled.clone(),
-        }
-    }
-}
-=======
 pub use xai_grok_workspace::plugins::PluginsConfig;
->>>>>>> upstream
 /// Feedback submission configuration (`[feedback]` in config.toml).
 #[derive(Clone, Debug, Default, Serialize, Deserialize, schemars::JsonSchema)]
 #[serde(default)]
@@ -1530,16 +1414,10 @@ impl Config {
         Ok((config, unrecognized_keys))
     }
     pub fn new_from_toml_cfg(raw_config: &toml::Value) -> Result<Self, String> {
-<<<<<<< fork
         if let Some(removed) = removed_direct_upload_env_error() {
             return Err(removed);
         }
-        let raw_config = &Self::expand_auth_alias(raw_config);
-||||||| base
-        let raw_config = &Self::expand_auth_alias(raw_config);
-=======
         let raw_config = &xai_grok_login::expand_auth_alias(raw_config);
->>>>>>> upstream
         let super::config_model_override_parse::ParsedModelOverrides {
             models: config_models,
             warnings: config_warnings,
@@ -2005,15 +1883,8 @@ impl Config {
         self.is_feature_enabled(Feature::TwoPassCompaction)
     }
     pub(crate) fn resolve_telemetry_mode(&self) -> Resolved<TelemetryMode> {
-<<<<<<< fork
         return Resolved::new(TelemetryMode::Disabled, ConfigSource::Default);
         #[allow(unreachable_code)]
-||||||| base
-=======
-        if !Distribution::current().allows(Capability::Telemetry) {
-            return Resolved::new(TelemetryMode::Disabled, ConfigSource::Default);
-        }
->>>>>>> upstream
         if let Some(mode) = self.requirements.telemetry.pinned() {
             return Resolved::new(mode, ConfigSource::Requirement);
         }
@@ -2039,20 +1910,14 @@ impl Config {
         Resolved::new(TelemetryMode::Disabled, ConfigSource::Default)
     }
     pub(crate) fn resolve_trace_upload(&self) -> Resolved<bool> {
-<<<<<<< fork
-        // Trace upload is hard-disabled in this build: no env var (GROK_TELEMETRY_TRACE_UPLOAD), config key, requirement pin.
-        return Resolved::new(false, ConfigSource::Default);
-
-        #[allow(unreachable_code)]
-||||||| base
-=======
         self.resolve_trace_upload_as(Distribution::current())
     }
     fn resolve_trace_upload_as(&self, distribution: Distribution) -> Resolved<bool> {
-        if !distribution.allows(Capability::Telemetry) {
-            return Resolved::new(false, ConfigSource::Default);
-        }
->>>>>>> upstream
+        // Trace upload is hard-disabled in this build: no env var (GROK_TELEMETRY_TRACE_UPLOAD), config key, requirement pin.
+        let _ = distribution;
+        return Resolved::new(false, ConfigSource::Default);
+
+        #[allow(unreachable_code)]
         let mode = self.resolve_telemetry_mode();
         let ff = if mode.value.is_disabled() {
             None
@@ -3064,7 +2929,6 @@ fn managed_settings_env_flag(key: &str) -> Option<bool> {
     let json: serde_json::Value = serde_json::from_str(&content).ok()?;
     xai_grok_workspace::permission::resolution::json_env_flag(json.get("env"), key)
 }
-<<<<<<< fork
 /// Pin an unresolved provider-backed model to a credential that cannot mint, so
 /// the session bearer never reaches a third party's endpoint.
 fn fail_closed_on_provider_endpoint(entry: &mut ModelEntry, provider_id: &str) {
@@ -3170,8 +3034,6 @@ pub(crate) fn first_provider_with_own_credentials(cfg: &Config) -> Option<&str> 
         .map(|(id, _)| id.as_str())
 }
 
-||||||| base
-=======
 /// External auth with a custom models endpoint takes every model from that endpoint.
 /// `[model.*]` tables then never reach the catalog, inference routing, or credential choice.
 /// `[models] allowed_models` is ignored too. A `requirements.toml` pin still applies.
@@ -3194,7 +3056,6 @@ fn drop_model_tables_under_external_auth(config: &mut Config) {
         );
         });
 }
->>>>>>> upstream
 /// Assemble the final model map. Priority (highest wins):
 /// config.toml `[model.*]` > prefetched (remote) > hardcoded defaults.
 pub(crate) fn resolve_model_list(
@@ -3319,12 +3180,11 @@ pub(crate) fn resolve_model_list(
     }
     {
         let default_cw = DEFAULT_CONTEXT_WINDOW;
-<<<<<<< fork
         // Entries that carry a real (non-default) context window. A limit the user set in `[model.<key>]` belongs to that key's provider route, so only a
         // sibling on the same route inherits it.
         let cw_sources: IndexMap<String, ModelEntry> = resolved
             .iter()
-            .filter(|(_, e)| e.info.context_window.get() != default_cw)
+            .filter(|(_, e)| has_explicit_context_window(&e.info, default_cw))
             .map(|(k, e)| (k.clone(), e.clone()))
             .collect();
         // A `[model.<key>]` window reaches only entries on the same URL, not another provider.
@@ -3346,38 +3206,8 @@ pub(crate) fn resolve_model_list(
         // api_backend inherits from a sibling with the same routing slug.
         let backend_donors: std::collections::HashMap<String, ApiBackend> = resolved
             .values()
-            .filter(|e| e.info.context_window.get() != default_cw)
-            .map(|e| (e.info.model.clone(), e.info.api_backend.clone()))
-||||||| base
-        let donors: std::collections::HashMap<String, (std::num::NonZeroU64, ApiBackend)> =
-            resolved
-                .values()
-                .filter(|e| e.info.context_window.get() != default_cw)
-                .map(|e| {
-                    (
-                        e.info.model.clone(),
-                        (e.info.context_window, e.info.api_backend.clone()),
-                    )
-                })
-                .collect();
-=======
-        let donors: std::collections::HashMap<
-            String,
-            (std::num::NonZeroU64, Vec<std::num::NonZeroU64>, ApiBackend),
-        > = resolved
-            .values()
             .filter(|e| has_explicit_context_window(&e.info, default_cw))
-            .map(|e| {
-                (
-                    e.info.model.clone(),
-                    (
-                        e.info.context_window,
-                        e.info.context_windows.clone(),
-                        e.info.api_backend.clone(),
-                    ),
-                )
-            })
->>>>>>> upstream
+            .map(|e| (e.info.model.clone(), e.info.api_backend.clone()))
             .collect();
         let mut menu_donors: std::collections::HashMap<String, (Vec<ReasoningEffortOption>, bool)> =
             std::collections::HashMap::new();
@@ -3400,36 +3230,29 @@ pub(crate) fn resolve_model_list(
             }
         }
         for (key, entry) in resolved.iter_mut() {
-<<<<<<< fork
-            if !entry.info.context_window_pinned && entry.info.context_window.get() == default_cw {
+            if !entry.info.context_window_pinned
+                && !has_explicit_context_window(&entry.info, default_cw)
+            {
                 let url = route_url(&entry.info.base_url);
                 let donors = sources_by_url
                     .entry(url)
                     .or_insert_with_key(|url| donors_on(url));
-                let resolved_cw =
-                    crate::agent::remote_config::resolve_context_window(&entry.info.model, donors);
-                if resolved_cw.get() != default_cw {
-||||||| base
-            if let Some((donor_cw, donor_backend)) = donors.get(&entry.info.model) {
-                if entry.info.context_window.get() == default_cw {
-=======
-            if let Some((donor_cw, donor_choices, donor_backend)) = donors.get(&entry.info.model) {
-                if !has_explicit_context_window(&entry.info, default_cw) {
->>>>>>> upstream
+                let donor = donors
+                    .get(&entry.info.model)
+                    .or_else(|| donors.values().find(|d| d.info.model == entry.info.model));
+                if let Some(donor) = donor {
+                    let resolved_cw = donor.info.context_window;
                     tracing::debug!(
                         model = %entry.info.model,
                         from = default_cw,
                         to = resolved_cw.get(),
                         "context_window resolved per exact slug from sibling entry on the same route"
                     );
-<<<<<<< fork
                     entry.info.context_window = resolved_cw;
-||||||| base
-                    entry.info.context_window = *donor_cw;
-=======
-                    entry.info.context_window = *donor_cw;
-                    entry.info.context_windows.clone_from(donor_choices);
->>>>>>> upstream
+                    entry
+                        .info
+                        .context_windows
+                        .clone_from(&donor.info.context_windows);
                 }
             }
             // BYOK/custom-base gap: the sibling resolve above (and the generic /v1/models prefetch) only ever sees the xAI
@@ -3679,24 +3502,15 @@ fn default_models(endpoints: &EndpointsConfig) -> IndexMap<String, ModelEntryCon
                 m.id
             );
             let key = m.id.clone().unwrap_or_else(|| m.model.clone());
-<<<<<<< fork
-            let context_window = m.context_window.unwrap_or_else(|| {
-                NonZeroU64::new(CONFIG_DEFAULT_CONTEXT_WINDOW).expect("200000 is non-zero")
-||||||| base
-            let context_window = m
-                .context_window
-                .unwrap_or_else(|| NonZeroU64::new(200_000).expect("200000 is non-zero"));
-=======
             let (context_window, context_windows) = context_window_choices(
                 m.context_window,
                 m.context_windows.as_deref().unwrap_or_default(),
             )
             .unwrap_or_else(|| {
                 (
-                    NonZeroU64::new(200_000).expect("200000 is non-zero"),
+                    NonZeroU64::new(CONFIG_DEFAULT_CONTEXT_WINDOW).expect("200000 is non-zero"),
                     Vec::new(),
                 )
->>>>>>> upstream
             });
             let config = ModelEntryConfig {
                 id: m.id,
@@ -4112,7 +3926,10 @@ impl ConfigModelOverride {
         if is_new_entry
             && self.base_url.is_none()
             && self.api_base_url.is_none()
-            && blank_as_unset(&endpoints.models_base_url).is_none()
+            && endpoints
+                .models_base_url
+                .as_deref()
+                .is_none_or(|url| url.trim().is_empty())
         {
             tracing::error!(
                 model_key = %key,
@@ -4179,12 +3996,8 @@ impl ConfigModelOverride {
         };
         if let Some((cw, choices)) = windows {
             entry.info.context_window = cw;
-<<<<<<< fork
             entry.info.context_window_pinned = true;
-||||||| base
-=======
             entry.info.context_windows = choices;
->>>>>>> upstream
         }
         if self.max_request_bytes.is_some() {
             entry.info.max_request_bytes = self.max_request_bytes;
@@ -4436,14 +4249,8 @@ impl ModelInfo {
             extra_headers: IndexMap::new(),
             query_params: IndexMap::new(),
             env_http_headers: IndexMap::new(),
-<<<<<<< fork
             context_window: NonZeroU64::new(DEFAULT_CONTEXT_WINDOW).unwrap(),
-||||||| base
-            context_window: NonZeroU64::new(200_000).unwrap(),
-=======
-            context_window: NonZeroU64::new(200_000).unwrap(),
             context_windows: Vec::new(),
->>>>>>> upstream
             max_request_bytes: None,
             auto_compact_threshold_percent: None,
             system_prompt_label: None,
@@ -5775,98 +5582,6 @@ pub(crate) fn to_acp_model_info(
         .map(|(key, model)| {
             let info = model.info();
             let model_id = acp::ModelId::new(Arc::from(key.clone()));
-<<<<<<< fork
-            let total_context_tokens = info.context_window.get();
-            let meta = {
-                let mut map = serde_json::Map::new();
-                map.insert(
-                    "totalContextTokens".to_string(),
-                    serde_json::Value::Number(total_context_tokens.into()),
-                );
-                map.insert(
-                    "agentType".to_string(),
-                    serde_json::Value::String(info.agent_type.clone()),
-                );
-                if let Some(provider) = info.model_provider.as_deref() {
-                    map.insert(
-                        PROVIDER_META_KEY.to_string(),
-                        serde_json::Value::String(provider.to_owned()),
-                    );
-                }
-                // The picker tells a couple of rows with one name apart by
-                // where they route.
-                if let Some(host) = endpoint_host(&info.base_url) {
-                    map.insert(
-                        ENDPOINT_META_KEY.to_string(),
-                        serde_json::Value::String(host),
-                    );
-                }
-                // The picker opens on the favorites and searches past them, so
-                // the flag has to cross the wire with the entry.
-                if info.favorite {
-                    map.insert(FAVORITE_META_KEY.to_string(), serde_json::Value::Bool(true));
-                }
-                if info.supports_reasoning_effort {
-                    map.insert(
-                        "supportsReasoningEffort".to_string(),
-                        serde_json::Value::Bool(true),
-                    );
-                    if let Some(effort) = info.reasoning_effort {
-                        map.insert(
-                            REASONING_EFFORT_META_KEY.to_string(),
-                            reasoning_effort_meta_value(effort),
-                        );
-                    }
-                }
-                if !info.reasoning_efforts.is_empty() {
-                    map.insert(
-                        REASONING_EFFORTS_META_KEY.to_string(),
-                        reasoning_efforts_meta_value(&info.reasoning_efforts),
-                    );
-                }
-                // Only a provider that REPORTS residency writes this key.
-                if let Some(loaded) = info.loaded_in_vram {
-                    map.insert(
-                        LOADED_IN_VRAM_META_KEY.to_string(),
-                        serde_json::Value::Bool(loaded),
-                    );
-                }
-                if map.is_empty() { None } else { Some(map) }
-            };
-||||||| base
-            let total_context_tokens = info.context_window.get();
-            let meta = {
-                let mut map = serde_json::Map::new();
-                map.insert(
-                    "totalContextTokens".to_string(),
-                    serde_json::Value::Number(total_context_tokens.into()),
-                );
-                map.insert(
-                    "agentType".to_string(),
-                    serde_json::Value::String(info.agent_type.clone()),
-                );
-                if info.supports_reasoning_effort {
-                    map.insert(
-                        "supportsReasoningEffort".to_string(),
-                        serde_json::Value::Bool(true),
-                    );
-                    if let Some(effort) = info.reasoning_effort {
-                        map.insert(
-                            REASONING_EFFORT_META_KEY.to_string(),
-                            reasoning_effort_meta_value(effort),
-                        );
-                    }
-                }
-                if !info.reasoning_efforts.is_empty() {
-                    map.insert(
-                        REASONING_EFFORTS_META_KEY.to_string(),
-                        reasoning_efforts_meta_value(&info.reasoning_efforts),
-                    );
-                }
-                if map.is_empty() { None } else { Some(map) }
-            };
-=======
->>>>>>> upstream
             (
                 model_id.clone(),
                 acp::ModelInfo::new(
@@ -5891,6 +5606,25 @@ fn acp_model_meta(info: &ModelInfo) -> serde_json::Map<String, serde_json::Value
         "agentType".to_string(),
         serde_json::Value::String(info.agent_type.clone()),
     );
+    if let Some(provider) = info.model_provider.as_deref() {
+        map.insert(
+            PROVIDER_META_KEY.to_string(),
+            serde_json::Value::String(provider.to_owned()),
+        );
+    }
+    // The picker tells a couple of rows with one name apart by
+    // where they route.
+    if let Some(host) = endpoint_host(&info.base_url) {
+        map.insert(
+            ENDPOINT_META_KEY.to_string(),
+            serde_json::Value::String(host),
+        );
+    }
+    // The picker opens on the favorites and searches past them, so
+    // the flag has to cross the wire with the entry.
+    if info.favorite {
+        map.insert(FAVORITE_META_KEY.to_string(), serde_json::Value::Bool(true));
+    }
     if info.supports_reasoning_effort {
         map.insert(
             "supportsReasoningEffort".to_string(),
@@ -5907,6 +5641,13 @@ fn acp_model_meta(info: &ModelInfo) -> serde_json::Map<String, serde_json::Value
         map.insert(
             REASONING_EFFORTS_META_KEY.to_string(),
             reasoning_efforts_meta_value(&info.reasoning_efforts),
+        );
+    }
+    // Only a provider that REPORTS residency writes this key.
+    if let Some(loaded) = info.loaded_in_vram {
+        map.insert(
+            LOADED_IN_VRAM_META_KEY.to_string(),
+            serde_json::Value::Bool(loaded),
         );
     }
     if info.context_windows.len() > 1 {
@@ -5968,25 +5709,6 @@ impl ModelSwitchIncompatibleAgentError {
         )
     }
 }
-<<<<<<< fork
-/// The `force_login_team_uuid` pin from the merged `requirements.toml` / MDM
-/// layers; the non-overridable tier in `resolve_force_login_team`.
-fn force_login_team_from_requirements() -> Option<xai_grok_login::ForceLoginTeam> {
-    xai_grok_login::force_login_team_from_requirements_value(
-        &crate::config::load_merged_requirements()?,
-    )
-}
-||||||| base
-/// The `force_login_team_uuid` pin from the merged `requirements.toml` / MDM layers; the non-overridable tier in `resolve_force_login_team`.
-/// Read at call time so the clamp holds on config-load paths that build `GrokComConfig` without a separate `apply_requirements` pass.
-/// Shell loads the requirements here and hands auth the parsed value.
-fn force_login_team_from_requirements() -> Option<xai_grok_login::ForceLoginTeam> {
-    xai_grok_login::force_login_team_from_requirements_value(
-        &crate::config::load_merged_requirements()?,
-    )
-}
-=======
->>>>>>> upstream
 #[cfg(test)]
 #[path = "config_tests.rs"]
 mod tests;

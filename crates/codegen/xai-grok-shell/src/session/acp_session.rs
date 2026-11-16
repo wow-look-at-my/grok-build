@@ -218,10 +218,10 @@ use extensions::*;
 #[path = "acp_session_impl/memory_dream.rs"]
 mod memory_dream;
 use memory_dream::*;
-#[path = "acp_session_impl/goal_hold.rs"]
-mod goal_hold;
 #[path = "acp_session_impl/batch_memory_dream.rs"]
 mod batch_memory_dream;
+#[path = "acp_session_impl/goal_hold.rs"]
+mod goal_hold;
 #[path = "acp_session_impl/goal_support.rs"]
 mod goal_support;
 #[path = "acp_session_impl/memory_capture.rs"]

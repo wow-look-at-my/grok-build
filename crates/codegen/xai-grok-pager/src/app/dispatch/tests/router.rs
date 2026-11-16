@@ -134,9 +134,11 @@ fn resume_foreign_session_consumes_hint_and_uses_each_tools_prompt() {
         seed_foreign_resume_hint(&mut app, tool);
         let effects = dispatch(Action::ResumeForeignSession, &mut app);
         assert!(app.foreign_resume_hint().is_none());
-        assert!(effects
-            .iter()
-            .any(|effect| matches!(effect, Effect::CreateSession { .. })));
+        assert!(
+            effects
+                .iter()
+                .any(|effect| matches!(effect, Effect::CreateSession { .. }))
+        );
         assert_eq!(
             agent_ref(&app, AgentId(0))
                 .session
@@ -939,9 +941,11 @@ fn slash_new_does_not_cancel_running_turn() {
             .any(|e| matches!(e, Effect::CreateSession { .. })),
         "expected CreateSession, got: {effects:?}",
     );
-    assert!(!effects
-        .iter()
-        .any(|e| matches!(e, Effect::CancelTurn { .. })));
+    assert!(
+        !effects
+            .iter()
+            .any(|e| matches!(e, Effect::CancelTurn { .. }))
+    );
     assert!(
         agent_ref(&app, id).session.state.is_turn_running(),
         "old agent's turn must remain running"
@@ -1139,14 +1143,13 @@ fn acp_command_colliding_with_builtin_skipped_in_autocomplete() {
 #[test]
 fn acp_command_with_arg_hint_shows_placeholder() {
     let mut app = test_app();
-    app.bootstrap_acp_commands =
-        vec![
-            acp::AvailableCommand::new("search".to_string(), "Search codebase".to_string()).input(
-                Some(acp::AvailableCommandInput::Unstructured(
-                    acp::UnstructuredCommandInput::new("<query>".to_string()),
-                )),
-            ),
-        ];
+    app.bootstrap_acp_commands = vec![
+        acp::AvailableCommand::new("search".to_string(), "Search codebase".to_string()).input(
+            Some(acp::AvailableCommandInput::Unstructured(
+                acp::UnstructuredCommandInput::new("<query>".to_string()),
+            )),
+        ),
+    ];
     dispatch(Action::NewSession, &mut app);
     let id = AgentId(0);
     {
@@ -1166,14 +1169,13 @@ fn acp_command_with_arg_hint_shows_placeholder() {
 #[test]
 fn acp_command_with_args_passthrough_includes_args() {
     let mut app = test_app();
-    app.bootstrap_acp_commands =
-        vec![
-            acp::AvailableCommand::new("search".to_string(), "Search codebase".to_string()).input(
-                Some(acp::AvailableCommandInput::Unstructured(
-                    acp::UnstructuredCommandInput::new("<query>".to_string()),
-                )),
-            ),
-        ];
+    app.bootstrap_acp_commands = vec![
+        acp::AvailableCommand::new("search".to_string(), "Search codebase".to_string()).input(
+            Some(acp::AvailableCommandInput::Unstructured(
+                acp::UnstructuredCommandInput::new("<query>".to_string()),
+            )),
+        ),
+    ];
     dispatch(Action::NewSession, &mut app);
     let id = AgentId(0);
     app.agents.get_mut(&id).unwrap().session.session_id = Some("sess-1".into());
@@ -1262,11 +1264,13 @@ fn tick_propagates_available_commands_to_bootstrap() {
     dispatch(Action::NewSession, &mut app);
     let new_id = AgentId(1);
     assert_eq!(agent_ref(&app, new_id).session.available_commands.len(), 2);
-    assert!(agent_ref(&app, new_id)
-        .session
-        .available_commands
-        .iter()
-        .any(|c| c.name == "pick-best"));
+    assert!(
+        agent_ref(&app, new_id)
+            .session
+            .available_commands
+            .iter()
+            .any(|c| c.name == "pick-best")
+    );
 }
 #[test]
 fn all_constructor_paths_initialize_slash_fields() {
@@ -2100,7 +2104,7 @@ fn toggle_todos_no_active_agent_is_noop() {
 }
 #[test]
 fn classify_top_level_branches() {
-    use crate::views::dashboard::{classify_top_level, RowState};
+    use crate::views::dashboard::{RowState, classify_top_level};
     let mut app = test_app_with_agent();
     let agent = app.agents.get(&AgentId(0)).unwrap();
     assert_eq!(classify_top_level(agent), RowState::Idle);
@@ -2260,7 +2264,7 @@ fn peek_label_reflects_last_response_type() {
 /// agent.question_view.is_some() classifies as NeedsInput.
 #[test]
 fn classify_top_level_question_view_some_is_needs_input() {
-    use crate::views::dashboard::{classify_top_level, RowState};
+    use crate::views::dashboard::{RowState, classify_top_level};
     use crate::views::question_view::QuestionViewState;
     let mut app = test_app_with_agent();
     let agent = app.agents.get_mut(&AgentId(0)).unwrap();
@@ -2581,13 +2585,15 @@ fn welcome_expand_skips_conversation_and_routes_build_card_detail() {
         },
         &mut app,
     );
-    let [Effect::LoadCardDetail {
-        host: SessionPickerHost::Welcome,
-        generation,
-        session_id,
-        seq,
-        ..
-    }] = effects.as_slice()
+    let [
+        Effect::LoadCardDetail {
+            host: SessionPickerHost::Welcome,
+            generation,
+            session_id,
+            seq,
+            ..
+        },
+    ] = effects.as_slice()
     else {
         panic!("expected a welcome-stamped LoadCardDetail, got {effects:?}");
     };
@@ -2723,10 +2729,12 @@ fn open_managed_connectors_starts_wait_when_modal_open() {
         Some(ExtensionsModalState::new(ExtensionsTab::McpServers));
     let effects = dispatch(Action::OpenManagedConnectors, &mut app);
     assert!(effects.is_empty());
-    assert!(agent_ref(&app, id)
-        .extensions_modal
-        .as_ref()
-        .is_some_and(|modal| modal.is_managed_connectors_wait()));
+    assert!(
+        agent_ref(&app, id)
+            .extensions_modal
+            .as_ref()
+            .is_some_and(|modal| modal.is_managed_connectors_wait())
+    );
     let recorded = std::fs::read_to_string(&url_file).unwrap_or_default();
     assert!(
         recorded

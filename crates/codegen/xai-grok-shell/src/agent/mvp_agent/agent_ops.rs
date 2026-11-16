@@ -2118,6 +2118,7 @@ impl MvpAgent {
             self,
             acp::SetSessionModelRequest::new(session_id.clone(), default_model.clone()),
             crate::agent::handlers::model_switch::SwitchEffort::Preserve,
+            crate::agent::handlers::model_switch::SwitchContextWindow::Preserve,
             crate::agent::handlers::model_switch::ConfigNotice::Send,
         )
         .await

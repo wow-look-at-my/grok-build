@@ -48,11 +48,13 @@ fn remember_save_without_session_defers_to_disk_mode() {
     let mut app = test_app_with_agent();
     let id = AgentId(0);
     app.agents.get_mut(&id).unwrap().session.session_id = None;
-    assert!(dispatch(
-        Action::SendRememberNote("pre-session note".to_owned()),
-        &mut app,
-    )
-    .is_empty());
+    assert!(
+        dispatch(
+            Action::SendRememberNote("pre-session note".to_owned()),
+            &mut app,
+        )
+        .is_empty()
+    );
     let save = dispatch(Action::SaveRememberNoteFromModal, &mut app);
     assert!(matches!(
         save.as_slice(),
@@ -298,14 +300,16 @@ fn btw_no_session_toasts() {
 
     let mut fullscreen = test_app_with_agent();
     fullscreen.agents.get_mut(&id).unwrap().session.session_id = None;
-    assert!(dispatch(
-        Action::SendBtw {
-            question: "q".into(),
-            images: Vec::new(),
-        },
-        &mut fullscreen,
-    )
-    .is_empty());
+    assert!(
+        dispatch(
+            Action::SendBtw {
+                question: "q".into(),
+                images: Vec::new(),
+            },
+            &mut fullscreen,
+        )
+        .is_empty()
+    );
     assert_eq!(
         agent_ref(&fullscreen, id)
             .toast
@@ -442,15 +446,17 @@ fn inline_feedback_sends_immediately_while_a_turn_runs() {
     }
     let composed = test_agent(&app, id).prompt.text().to_string();
     let effects = dispatch(Action::SendPrompt(composed), &mut app);
-    let [Effect::SendFeedback {
-        feedback_text,
-        images,
-        metadata,
-        request_trace_upload_token,
-        draft,
-        origin,
-        ..
-    }] = effects.as_slice()
+    let [
+        Effect::SendFeedback {
+            feedback_text,
+            images,
+            metadata,
+            request_trace_upload_token,
+            draft,
+            origin,
+            ..
+        },
+    ] = effects.as_slice()
     else {
         panic!("Enter must emit exactly one feedback POST, got {effects:?}");
     };
@@ -617,11 +623,13 @@ fn draft_preserving_feedback_uses_the_submitted_command_without_draft_images() {
         Action::SendSlashCommandPreservingDraft("/feedback submitted report".into()),
         &mut app,
     );
-    let [Effect::SendFeedback {
-        feedback_text,
-        images,
-        ..
-    }] = effects.as_slice()
+    let [
+        Effect::SendFeedback {
+            feedback_text,
+            images,
+            ..
+        },
+    ] = effects.as_slice()
     else {
         panic!("expected one feedback POST, got {effects:?}");
     };
@@ -968,12 +976,14 @@ fn feedback_modal_submit_closes_immediately_and_failure_keeps_a_draft() {
     let modal_id = open_feedback_modal(&mut app, Some("clipboard broke"));
     let effects = dispatch(Action::SubmitFeedbackModal { modal_id }, &mut app);
     let origin = match effects.as_slice() {
-        [Effect::SendFeedback {
-            feedback_text,
-            metadata: Some(metadata),
-            origin: origin @ FeedbackSendOrigin::Modal { .. },
-            ..
-        }] if feedback_text == "clipboard broke" => {
+        [
+            Effect::SendFeedback {
+                feedback_text,
+                metadata: Some(metadata),
+                origin: origin @ FeedbackSendOrigin::Modal { .. },
+                ..
+            },
+        ] if feedback_text == "clipboard broke" => {
             assert_eq!(
                 *metadata,
                 serde_json::json!({
@@ -1058,10 +1068,12 @@ fn edited_enums_ride_the_send_feedback_metadata() {
     };
     let effects = dispatch(Action::SubmitFeedbackModal { modal_id }, &mut app);
     match effects.as_slice() {
-        [Effect::SendFeedback {
-            metadata: Some(metadata),
-            ..
-        }] => {
+        [
+            Effect::SendFeedback {
+                metadata: Some(metadata),
+                ..
+            },
+        ] => {
             assert_eq!(
                 *metadata,
                 serde_json::json!({
@@ -1143,12 +1155,14 @@ fn drafts_with_optional_taxonomy_omitted_remain_sendable() {
             );
         let effects = dispatch(Action::SubmitFeedbackModal { modal_id }, &mut app);
         match effects.as_slice() {
-            [Effect::SendFeedback {
-                metadata,
-                draft: Some(draft),
-                origin: crate::app::actions::FeedbackSendOrigin::Modal { is_draft: true, .. },
-                ..
-            }] => {
+            [
+                Effect::SendFeedback {
+                    metadata,
+                    draft: Some(draft),
+                    origin: crate::app::actions::FeedbackSendOrigin::Modal { is_draft: true, .. },
+                    ..
+                },
+            ] => {
                 assert_eq!(metadata, &expected_metadata);
                 assert_eq!(draft.title, "Stored feedback");
                 assert_eq!(draft.details, "stored feedback");
@@ -1524,8 +1538,10 @@ fn permission_ingress_displaces_feedback_modal() {
         "",
         "the discarded draft must not land in the composer"
     );
-    assert!(last_system_text(&app, AgentId(0))
-        .contains("Feedback closed because a permission request needs an answer"));
+    assert!(
+        last_system_text(&app, AgentId(0))
+            .contains("Feedback closed because a permission request needs an answer")
+    );
 }
 /// The cancel-turn prompt evicts the open modal immediately before it installs.
 #[test]
@@ -1641,10 +1657,12 @@ fn confirm_trace_choice(
 }
 fn expect_single_modal_post(effects: &[Effect]) -> crate::app::actions::FeedbackSendOrigin {
     match effects {
-        [Effect::SendFeedback {
-            origin: origin @ crate::app::actions::FeedbackSendOrigin::Modal { .. },
-            ..
-        }] => *origin,
+        [
+            Effect::SendFeedback {
+                origin: origin @ crate::app::actions::FeedbackSendOrigin::Modal { .. },
+                ..
+            },
+        ] => *origin,
         other => panic!("expected only the modal-origin POST, got {other:?}"),
     }
 }
@@ -1735,12 +1753,14 @@ fn trace_offer_sequences_post_then_exactly_one_upload() {
         &mut app,
     );
     match effects.as_slice() {
-        [Effect::UploadFeedbackTrace {
-            session_id,
-            submission_id: Some(sid),
-            intent: Some(FeedbackTraceUploadIntent::SendThisSession),
-            ..
-        }] => {
+        [
+            Effect::UploadFeedbackTrace {
+                session_id,
+                submission_id: Some(sid),
+                intent: Some(FeedbackTraceUploadIntent::SendThisSession),
+                ..
+            },
+        ] => {
             assert_eq!(
                 *sid, submission_id,
                 "the upload correlates to the exact POST"
@@ -1841,21 +1861,25 @@ fn ninth_trace_submit_is_rejected_without_revoking_confirmed_consent() {
         &mut app,
     );
     let submission_id = match effects.as_slice() {
-        [Effect::UploadFeedbackTrace {
-            submission_id: Some(submission_id),
-            ..
-        }] => *submission_id,
+        [
+            Effect::UploadFeedbackTrace {
+                submission_id: Some(submission_id),
+                ..
+            },
+        ] => *submission_id,
         _ => panic!("the oldest confirmed consent must survive: {effects:?}"),
     };
-    assert!(dispatch(
-        Action::TaskComplete(TaskResult::FeedbackTraceUploaded {
-            agent_id: AgentId(0),
-            submission_id: Some(submission_id),
-            error: None,
-        }),
-        &mut app,
-    )
-    .is_empty());
+    assert!(
+        dispatch(
+            Action::TaskComplete(TaskResult::FeedbackTraceUploaded {
+                agent_id: AgentId(0),
+                submission_id: Some(submission_id),
+                error: None,
+            }),
+            &mut app,
+        )
+        .is_empty()
+    );
     let effects = confirm_trace_choice(
         &mut app,
         crate::views::feedback_modal::FeedbackTraceChoice::SendThisSession,
@@ -1904,9 +1928,11 @@ fn feedback_complete_without_token_keeps_parked_consent() {
         matches!(effects.as_slice(), [Effect::UploadFeedbackTrace { .. }]),
         "a later token still starts the upload: {effects:?}"
     );
-    assert!(agent_ref(&app, AgentId(0))
-        .parked_feedback_trace_consents
-        .is_empty());
+    assert!(
+        agent_ref(&app, AgentId(0))
+            .parked_feedback_trace_consents
+            .is_empty()
+    );
 }
 /// A failed POST yields zero uploads and drops the parked consent; a stale success arriving
 /// after the failure cannot resurrect the upload.
@@ -1998,11 +2024,14 @@ fn feedback_only_and_never_ask_upload_nothing_and_never_persist_trace_upload() {
     let _ = dispatch(Action::SubmitFeedbackModal { modal_id }, &mut app);
     let effects = confirm_trace_choice(&mut app, ModalTraceChoice::NeverAsk);
     match effects.as_slice() {
-        [Effect::SendFeedback { .. }, Effect::PersistSetting {
-            key: "feedback_trace_card",
-            value: crate::settings::SettingValue::Bool(false),
-            ..
-        }] => {}
+        [
+            Effect::SendFeedback { .. },
+            Effect::PersistSetting {
+                key: "feedback_trace_card",
+                value: crate::settings::SettingValue::Bool(false),
+                ..
+            },
+        ] => {}
         other => panic!("expected the POST plus the card latch, got {other:?}"),
     }
     assert!(
@@ -2217,12 +2246,14 @@ fn todo_capture_requests_and_shows_a_running_block() {
         &mut app,
     );
 
-    let [Effect::SendTodo {
-        request,
-        urgent,
-        capture_id,
-        ..
-    }] = effects.as_slice()
+    let [
+        Effect::SendTodo {
+            request,
+            urgent,
+            capture_id,
+            ..
+        },
+    ] = effects.as_slice()
     else {
         panic!("expected SendTodo effect, got {effects:?}");
     };
