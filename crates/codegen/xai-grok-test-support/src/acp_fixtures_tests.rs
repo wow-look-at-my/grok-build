@@ -5,7 +5,7 @@ use super::*;
 
 #[test]
 fn ext_notification_serializes_to_its_params_alone() {
-    let notification = ext_notification("x.ai/session/update", &json!({ "sessionId": "s1" }));
+    let notification = ext_notification("example.invalid/session/update", &json!({ "sessionId": "s1" }));
 
     assert_eq!(
         json!({ "sessionId": "s1" }),

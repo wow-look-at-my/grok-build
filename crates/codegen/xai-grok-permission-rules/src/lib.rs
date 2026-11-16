@@ -28,6 +28,8 @@ pub mod util;
 mod worktree;
 
 #[cfg(test)]
+mod test_git;
+#[cfg(test)]
 mod test_support;
 #[cfg(test)]
 pub(crate) use test_support::{ENV_TEST_LOCK, TestEnvGuard, capturing_warn_logs};

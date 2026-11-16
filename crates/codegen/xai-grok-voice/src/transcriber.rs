@@ -1,4 +1,4 @@
-//! Whole-clip transcription, the second STT route. When the login holds no credential `api.x.ai` accepts
+//! Whole-clip transcription, the second STT route. When the login holds no credential `api.example.invalid` accepts
 //! ([`crate::auth::VoiceAuthError::ForeignSession`]) the pipeline records to a buffer and hands the clip to a
 //! host-provided [`ClipTranscriber`]. The host owns the client and credentials; this crate only defines the seam.
 

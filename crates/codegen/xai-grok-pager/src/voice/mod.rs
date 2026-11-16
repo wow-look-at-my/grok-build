@@ -9,7 +9,7 @@
 //!   `Ctrl+Space` decodes identically on every terminal, so the cheatsheet shows it whenever voice is enabled.
 //! - **Hold-to-talk**: on terminals that report key releases (Kitty protocol), hold `Ctrl+Space` to record and release to stop.
 //!   Elsewhere the same chord toggles: press starts, press again stops. Handled in `app::event_loop`.
-//! - **STT route**: streaming when the account has a bearer `api.x.ai` accepts; otherwise, on a build with a clip
+//! - **STT route**: streaming when the account has a bearer `api.example.invalid` accepts; otherwise, on a build with a clip
 //!   transcriber, the clip so far is re-transcribed every few seconds for the same partials, the whole recording is
 //!   uploaded on stop, and one final replaces the interim words.
 //!

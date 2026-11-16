@@ -187,7 +187,7 @@
             meta: None,
         };
         let raw = serde_json::value::to_raw_value(&payload).unwrap();
-        let notif = acp::ExtNotification::new("x.ai/session_notification", std::sync::Arc::from(raw));
+        let notif = acp::ExtNotification::new("example.invalid/session_notification", std::sync::Arc::from(raw));
         assert!(handle_ext_notification(&notif, &mut app), "the footer changed");
 
         let agent = app.agents.get_mut(&AgentId(0)).unwrap();
@@ -475,7 +475,7 @@
         );
         let state = acp::SessionModelState::new(acp_fixtures::model_id("grok-4"), vec![listed]);
 
-        handle_ext_notification(&acp_fixtures::ext_notification("x.ai/models/update", &state), &mut app);
+        handle_ext_notification(&acp_fixtures::ext_notification("example.invalid/models/update", &state), &mut app);
 
         let agent = app.agents.get(&AgentId(0)).expect("agent under test");
         let context = agent.context_state.as_ref().expect("context state");

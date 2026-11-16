@@ -3081,7 +3081,7 @@ async fn rewind_points_are_asked_only_after_the_cancel_is_answered() {
         .send(Ok(acp::ExtResponse::new(Arc::from(body))))
         .expect("the listing waits on points");
     assert_eq!("sess-1", cancel.request.session_id.0.as_ref());
-    assert_eq!("x.ai/rewind/points", points.request.method.as_ref());
+    assert_eq!("example.invalid/rewind/points", points.request.method.as_ref());
     match listing.await.expect("the listing task finishes") {
         TaskResult::RewindPointsLoaded { agent_id, points } => {
             assert_eq!((AgentId(0), 0), (agent_id, points.len()));

@@ -8,7 +8,7 @@ use std::path::{Path, PathBuf};
 
 use agent_client_protocol as acp;
 
-const META_KEY: &str = "x.ai/mcp/bearerTokenFile";
+const META_KEY: &str = "example.invalid/mcp/bearerTokenFile";
 
 pub(crate) fn bearer_token_file_meta(configured: &str) -> acp::Meta {
     acp::Meta::from_iter([(

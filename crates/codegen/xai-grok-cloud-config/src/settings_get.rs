@@ -23,7 +23,7 @@ use crate::{Commit, PolicyRepairPending, SettingsEndpoint, SettingsFetch};
 pub struct SettingsQuery {
     auth: Option<GrokAuth>,
     endpoint: SettingsEndpoint,
-    /// The grok.com config that disk auth was resolved under, for the commit-time identity recheck.
+    /// The grok.invalid config that disk auth was resolved under, for the commit-time identity recheck.
     /// The env-only default config would see a file or managed IdP as a changed credential.
     auth_config: Option<GrokComConfig>,
 }

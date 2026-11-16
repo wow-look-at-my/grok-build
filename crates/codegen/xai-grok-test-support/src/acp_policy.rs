@@ -107,7 +107,7 @@ pub struct ClientHook {
     reply: ClientHookReply,
 }
 
-const CLIENT_HOOKS_META_KEY: &str = "x.ai/hooks";
+const CLIENT_HOOKS_META_KEY: &str = "example.invalid/hooks";
 const CLIENT_HOOK_CALLBACK_ID: &str = "conformance-client-hook";
 
 impl ClientHook {
@@ -295,7 +295,7 @@ impl QuestionDecision {
 }
 
 impl TrustDecision {
-    /// The reply the GUI client sends to `x.ai/folder_trust/request`.
+    /// The reply the GUI client sends to `example.invalid/folder_trust/request`.
     /// Only `{ "outcome": "trust" }` grants folder trust.
     pub(crate) fn reply(self) -> Result<Value, acp::Error> {
         match self {

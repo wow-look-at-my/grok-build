@@ -1135,56 +1135,6 @@ fn provider_model_fails_closed_on_prefetched_custom_base_url() {
         "a prefetched custom base_url must fail closed, not leak the session token",
     );
 }
-<<<<<<< fork
-fn test_model_entry(
-    model: &str,
-    base_url: &str,
-    api_key: Option<&str>,
-    env_key: Option<&str>,
-    api_base_url: Option<&str>,
-) -> ModelEntry {
-    ModelEntry {
-        info: ModelInfo {
-            user_selectable: true,
-            favorite: false,
-            model_provider: None,
-            id: None,
-            model: model.to_string(),
-            base_url: base_url.to_string(),
-            context_window: NonZeroU64::new(200_000).unwrap(),
-            ..Default::default()
-        },
-        mtls_cert_dir: None,
-        api_key: api_key.map(|s| s.to_string()),
-        env_key: env_key.map(EnvKeys::single),
-        auth_provider: None,
-        api_base_url: api_base_url.map(|s| s.to_string()),
-    }
-}
-||||||| base
-fn test_model_entry(
-    model: &str,
-    base_url: &str,
-    api_key: Option<&str>,
-    env_key: Option<&str>,
-    api_base_url: Option<&str>,
-) -> ModelEntry {
-    ModelEntry {
-        info: ModelInfo {
-            model: model.to_string(),
-            base_url: base_url.to_string(),
-            context_window: NonZeroU64::new(200_000).unwrap(),
-            ..Default::default()
-        },
-        mtls_cert_dir: None,
-        api_key: api_key.map(|s| s.to_string()),
-        env_key: env_key.map(EnvKeys::single),
-        auth_provider: None,
-        api_base_url: api_base_url.map(|s| s.to_string()),
-    }
-}
-=======
->>>>>>> upstream
 /// The effective-model RE-support lookup must use the model ACTUALLY used: the resolved aux model when present, else the session model.
 /// An unresolvable slug resolves aux to `None`, so the session model's capability wins.
 #[test]
@@ -10606,6 +10556,10 @@ fn test_model_entry(
 ) -> ModelEntry {
     ModelEntry {
         info: ModelInfo {
+            user_selectable: true,
+            favorite: false,
+            model_provider: None,
+            id: None,
             model: model.to_string(),
             base_url: base_url.to_string(),
             context_window: NonZeroU64::new(200_000).unwrap(),

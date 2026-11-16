@@ -149,7 +149,7 @@ async fn hook_run_request_gets_the_client_hook_reply() {
 
     let reply = client
         .ext_method(ext_request(
-            "x.ai/hooks/run",
+            "example.invalid/hooks/run",
             &json!({ "hookCallbackId": "cb" }),
         ))
         .await

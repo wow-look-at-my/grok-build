@@ -24,7 +24,7 @@ const FOLDER_TRUST_REQUEST_METHOD: &str = "example.invalid/folder_trust/request"
 const MCP_ELICIT_METHOD: &str = "example.invalid/mcp/elicit";
 
 /// The reverse request an agent sends to run a hook the client registered.
-const HOOK_RUN_METHOD: &str = "x.ai/hooks/run";
+const HOOK_RUN_METHOD: &str = "example.invalid/hooks/run";
 
 /// A policy for one kind of request plus the count of arrivals so far, numbered from 1 to match
 /// `RequestPolicy::with_nth`.

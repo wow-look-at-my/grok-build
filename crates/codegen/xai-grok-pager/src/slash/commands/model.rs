@@ -420,7 +420,12 @@ fn split_model_rest<'a>(models: &ModelState, args: &'a str) -> Option<(acp::Mode
 
 /// A trailing space on a model with a window or effort sub-menu signals "more input expected" to the prompt widget.
 /// Enter then advances to that sub-menu instead of submitting.
-fn chained_insert(models: &ModelState, id: &acp::ModelId, token: &str, info: &acp::ModelInfo) -> String {
+fn chained_insert(
+    models: &ModelState,
+    id: &acp::ModelId,
+    token: &str,
+    info: &acp::ModelInfo,
+) -> String {
     if has_chained_args(models, id, info) {
         format!("{token} ")
     } else {
@@ -497,25 +502,15 @@ fn build_route_items(models: &ModelState, group: &[&acp::ModelId]) -> Vec<ArgIte
     items
 }
 
-<<<<<<< fork
-/// One row per model name. Reasoning models get a trailing space in
-/// `insert_text` so the prompt widget chains into the effort sub-menu. A name
-/// that several models share is one row. It inserts the name and a space,
-/// which opens the route phase: one row per provider serving it.
+/// One row per model name. A model with a window or effort sub-menu gets a trailing space in `insert_text`, so the prompt widget chains into it.
+/// A name that several models share is one row. It inserts the name and a space, which opens the route phase: one row per provider serving it.
 /// Every model is listed, except a batch route the session is not running.
 /// The ones the config marked come first, then the newest of each family.
-||||||| base
-/// One row per logical model.
-/// Reasoning models get a trailing space in `insert_text` so the prompt widget chains into the effort sub-menu.
-=======
-/// One row per logical model.
->>>>>>> upstream
 fn build_model_items(models: &ModelState) -> Vec<ArgItem> {
     let current_id = models.current.as_ref();
     let mut items: Vec<ArgItem> = Vec::with_capacity(models.available.len());
     let mut grouped: Vec<String> = Vec::new();
     for (id, info) in &models.available {
-<<<<<<< fork
         if is_batch_model(id.0.as_ref()) && current_id != Some(id) {
             continue;
         }
@@ -559,53 +554,17 @@ fn build_model_items(models: &ModelState) -> Vec<ArgItem> {
             });
             continue;
         }
-||||||| base
-        let is_current = current_id == Some(id);
-        let supports = supports_reasoning_effort(info);
 
-        let display = if is_current {
-            format!("{} (current)", info.name)
-        } else {
-            info.name.clone()
-        };
-=======
-        let is_current = current_id == Some(id);
-        let chains = has_chained_args(models, id, info);
-
-        let display = if is_current {
-            format!("{} (current)", info.name)
-        } else {
-            info.name.clone()
-        };
->>>>>>> upstream
-
-<<<<<<< fork
         let is_current = current_id == Some(id);
         let mut display = info.name.clone();
         if is_current {
             display.push_str(" (current)");
         }
-||||||| base
-        // A trailing space on reasoning models signals "more input expected" to the prompt widget
-        // Enter then advances to the effort phase instead of submitting
-        let insert_text = if supports {
-            format!("{} ", info.name)
-        } else {
-            info.name.clone()
-        };
-=======
-        // The trailing space makes Enter advance to the window or effort phase instead of submitting
-        let insert_text = if chains {
-            format!("{} ", info.name)
-        } else {
-            info.name.clone()
-        };
->>>>>>> upstream
 
         let token = pick_token(models, id);
         items.push(ArgItem {
             display,
-            insert_text: chained_insert(&token, info),
+            insert_text: chained_insert(models, id, &token, info),
             match_text: token,
             description: row_description(info),
             // Only a provider that reports residency answers this, so the dot appears beside local models and nowhere else.

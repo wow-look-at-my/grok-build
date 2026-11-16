@@ -170,15 +170,8 @@ pub fn is_xai_oauth2_issuer(issuer: &str) -> bool {
     issuer == XAI_OAUTH2_ISSUER || issuer == XAI_OAUTH2_LOCAL_ISSUER
 }
 /// auth.json scope key used by the pre-OIDC `grok login --legacy` flow.
-<<<<<<< fork
 /// Matches the key format produced by the original `accounts.example.invalid` relay auth.
 pub const LEGACY_AUTH_SCOPE: &str = "https://accounts.example.invalid/sign-in";
-||||||| base
-/// Matches the key format produced by the original `accounts.x.ai` relay auth.
-pub const LEGACY_AUTH_SCOPE: &str = "https://accounts.x.ai/sign-in";
-=======
-/// Matches the key format produced by the original `accounts.x.ai` relay auth.
-pub const LEGACY_AUTH_SCOPE: &str = "https://accounts.x.ai/sign-in";
 /// `[grok_com_config]` as a config writes it. A field it omits keeps the value it is merged over,
 /// down to a single field of a provider table: the provider fields' serde default is `None`, so
 /// parsing the section as a [`GrokComConfig`] would drop the default provider instead.
@@ -267,7 +260,6 @@ impl OAuth2ProviderSection {
         }
     }
 }
->>>>>>> upstream
 impl GrokComConfig {
     /// The login config of an effective `config`, as every process resolves it: `[auth]` folded
     /// into `[grok_com_config]`, the fields it names merged over [`GrokComConfig::default`],

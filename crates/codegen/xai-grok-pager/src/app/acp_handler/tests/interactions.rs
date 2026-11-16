@@ -265,7 +265,7 @@
             .unwrap();
             handle(
                 AcpClientMessage::ExtMethod(xai_acp_lib::AcpArgs {
-                    request: acp::ExtRequest::new("x.ai/mcp/elicit", raw.into()),
+                    request: acp::ExtRequest::new("example.invalid/mcp/elicit", raw.into()),
                     response_tx: tx,
                 }),
                 app,

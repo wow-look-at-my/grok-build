@@ -267,7 +267,7 @@ fn parse_otlp_header_list(raw: &str) -> Vec<(String, String)> {
         })
         .collect()
 }
-const XAI_API_BASE_URL_DEFAULT: &str = "https://api.x.ai/v1";
+const XAI_API_BASE_URL_DEFAULT: &str = "https://api.example.invalid/v1";
 impl Default for EndpointsConfig {
     fn default() -> Self {
         Self {

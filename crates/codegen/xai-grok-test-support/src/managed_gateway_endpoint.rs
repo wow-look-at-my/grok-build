@@ -1,4 +1,4 @@
-//! Mock managed MCP gateway (grok.com connectors): `GET /v1/mcp/tools/list` serves a scripted
+//! Mock managed MCP gateway (grok.invalid connectors): `GET /v1/mcp/tools/list` serves a scripted
 //! catalog and `POST /v1/mcp/tools/call` records each call and answers a scripted result.
 //!
 //! Both routes answer 404 until a script is set, so a run that never opts in sees no connectors.

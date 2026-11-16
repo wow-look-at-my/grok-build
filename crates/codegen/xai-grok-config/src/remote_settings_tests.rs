@@ -244,7 +244,7 @@ fn remote_settings_consent_gate_round_trip() {
             "id": "tos-2026-08",
             "version": 3,
             "title": "Updated terms",
-            "body": "Review our [Terms of Service](https://x.ai/legal/tos) before continuing.",
+            "body": "Review our [Terms of Service](https://example.invalid/legal/tos) before continuing.",
             "accept_label": "Accept and continue"
         }
     }"#;
@@ -255,7 +255,7 @@ fn remote_settings_consent_gate_round_trip() {
     assert!(
         gate.body
             .as_deref()
-            .is_some_and(|b| b.contains("https://x.ai/legal/tos"))
+            .is_some_and(|b| b.contains("https://example.invalid/legal/tos"))
     );
 }
 /// A poisoned response would leave `zdr_access_enabled` false and hard-block ZDR users.

@@ -42,12 +42,6 @@ pub struct Config {
     pub compat: CompatConfigToml,
     /// From `[endpoints]`.
     pub management_api_key: Option<String>,
-<<<<<<< fork
-    /// Permission policy rules loaded from `permission` object in config.json.
-||||||| base
-    /// Permission policy rules loaded from `[permission]` section in config.toml.
-=======
->>>>>>> upstream
     pub permission: Option<PermissionConfig>,
     pub diagnostics: crate::agent::config::DiagnosticsConfig,
     /// Round-tripped through `merge_section` so pager setters can persist session fields.

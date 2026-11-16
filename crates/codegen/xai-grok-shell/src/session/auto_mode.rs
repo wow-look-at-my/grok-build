@@ -31,7 +31,7 @@ pub fn session_permission_mode(
     PermissionMode::from_flags(yolo, auto)
 }
 
-/// The fields of an `x.ai/yolo_mode_changed` payload that set yolo and auto mode.
+/// The fields of an `example.invalid/yolo_mode_changed` payload that set yolo and auto mode.
 #[derive(Debug)]
 pub struct PermissionModeChange {
     yolo_mode: Option<bool>,
