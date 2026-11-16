@@ -246,56 +246,6 @@ User-level configuration lives in `$GROK_HOME/config.json` (default `~/.grok/con
 | `mcp.servers.<name>.tool_timeouts` | `table` | `yes` | `user` | `mcp.servers.<name>` `tool_timeouts` on a stdio or HTTP MCP server. |
 | `mcp.servers.<name>.type` | `string` | `yes` | `user` | `mcp.servers.<name>` `type` on a stdio or HTTP MCP server. |
 | `mcp.servers.<name>.url` | `string` | `yes` | `user` | `mcp.servers.<name>` `url` on a stdio or HTTP MCP server. |
-||||||| base
-
-### `mcp_servers`
-
-| Key | Type / Values | Requirements | Managed | Details |
-| --- | --- | --- | --- | --- |
-| `mcp_servers.<name>.args` | `string[]` | `yes` | `user` | `[mcp_servers.<name>]` `args` on a stdio or HTTP MCP server. |
-| `mcp_servers.<name>.bearer_token_env_var` | `string` | `yes` | `user` | `[mcp_servers.<name>]` `bearer_token_env_var` on a stdio or HTTP MCP server. |
-| `mcp_servers.<name>.command` | `string` | `yes` | `user` | `[mcp_servers.<name>]` `command` on a stdio or HTTP MCP server. |
-| `mcp_servers.<name>.cwd` | `string` | `yes` | `user` | `[mcp_servers.<name>]` `cwd` on a stdio or HTTP MCP server. |
-| `mcp_servers.<name>.enabled` | `boolean` | `yes` | `user` | `[mcp_servers.<name>]` `enabled` on a stdio or HTTP MCP server. |
-| `mcp_servers.<name>.env` | `table` | `yes` | `user` | `[mcp_servers.<name>]` `env` on a stdio or HTTP MCP server. |
-| `mcp_servers.<name>.expose_image_base64` | `boolean` | `yes` | `user` | `[mcp_servers.<name>]` `expose_image_base64` on a stdio or HTTP MCP server. |
-| `mcp_servers.<name>.headers` | `table` | `yes` | `user` | `[mcp_servers.<name>]` `headers` on a stdio or HTTP MCP server. |
-| `mcp_servers.<name>.oauth` | `table` | `yes` | `user` | `[mcp_servers.<name>]` `oauth` on a stdio or HTTP MCP server. |
-| `mcp_servers.<name>.oauth_client_id` | `string` | `yes` | `user` | `[mcp_servers.<name>]` `oauth_client_id` on a stdio or HTTP MCP server. |
-| `mcp_servers.<name>.oauth_client_secret_env_var` | `string` | `yes` | `user` | `[mcp_servers.<name>]` `oauth_client_secret_env_var` on a stdio or HTTP MCP server. |
-| `mcp_servers.<name>.oauth_scopes` | `string[]` | `yes` | `user` | `[mcp_servers.<name>]` `oauth_scopes` on a stdio or HTTP MCP server. |
-| `mcp_servers.<name>.setup` | `table` | `yes` | `user` | `[mcp_servers.<name>]` `setup` on a stdio or HTTP MCP server. |
-| `mcp_servers.<name>.startup_timeout_sec` | `number` | `yes` | `user` | `[mcp_servers.<name>]` `startup_timeout_sec` on a stdio or HTTP MCP server. |
-| `mcp_servers.<name>.tool_timeout_sec` | `number` | `yes` | `user` | `[mcp_servers.<name>]` `tool_timeout_sec` on a stdio or HTTP MCP server. |
-| `mcp_servers.<name>.tool_timeouts` | `table` | `yes` | `user` | `[mcp_servers.<name>]` `tool_timeouts` on a stdio or HTTP MCP server. |
-| `mcp_servers.<name>.type` | `string` | `yes` | `user` | `[mcp_servers.<name>]` `type` on a stdio or HTTP MCP server. |
-| `mcp_servers.<name>.url` | `string` | `yes` | `user` | `[mcp_servers.<name>]` `url` on a stdio or HTTP MCP server. |
-=======
-
-### `mcp_servers`
-
-| Key | Type / Values | Requirements | Managed | Details |
-| --- | --- | --- | --- | --- |
-| `mcp_servers.<name>.args` | `string[]` | `yes` | `user` | `[mcp_servers.<name>]` `args` on a stdio or HTTP MCP server. |
-| `mcp_servers.<name>.bearer_token_env_var` | `string` | `yes` | `user` | `[mcp_servers.<name>]` `bearer_token_env_var` on a stdio or HTTP MCP server. |
-| `mcp_servers.<name>.bearer_token_file` | `string` | `yes` | `user` | `[mcp_servers.<name>]` `bearer_token_file` on an HTTP MCP server: absolute or `~/` path to a bearer token, re-read on every request. |
-| `mcp_servers.<name>.command` | `string` | `yes` | `user` | `[mcp_servers.<name>]` `command` on a stdio or HTTP MCP server. |
-| `mcp_servers.<name>.cwd` | `string` | `yes` | `user` | `[mcp_servers.<name>]` `cwd` on a stdio or HTTP MCP server. |
-| `mcp_servers.<name>.enabled` | `boolean` | `yes` | `user` | `[mcp_servers.<name>]` `enabled` on a stdio or HTTP MCP server. |
-| `mcp_servers.<name>.env` | `table` | `yes` | `user` | `[mcp_servers.<name>]` `env` on a stdio or HTTP MCP server. |
-| `mcp_servers.<name>.expose_image_base64` | `boolean` | `yes` | `user` | `[mcp_servers.<name>]` `expose_image_base64` on a stdio or HTTP MCP server. |
-| `mcp_servers.<name>.headers` | `table` | `yes` | `user` | `[mcp_servers.<name>]` `headers` on a stdio or HTTP MCP server. |
-| `mcp_servers.<name>.oauth` | `table` | `yes` | `user` | `[mcp_servers.<name>]` `oauth` on a stdio or HTTP MCP server. |
-| `mcp_servers.<name>.oauth_client_id` | `string` | `yes` | `user` | `[mcp_servers.<name>]` `oauth_client_id` on a stdio or HTTP MCP server. |
-| `mcp_servers.<name>.oauth_client_secret_env_var` | `string` | `yes` | `user` | `[mcp_servers.<name>]` `oauth_client_secret_env_var` on a stdio or HTTP MCP server. |
-| `mcp_servers.<name>.oauth_scopes` | `string[]` | `yes` | `user` | `[mcp_servers.<name>]` `oauth_scopes` on a stdio or HTTP MCP server. |
-| `mcp_servers.<name>.setup` | `table` | `yes` | `user` | `[mcp_servers.<name>]` `setup` on a stdio or HTTP MCP server. |
-| `mcp_servers.<name>.startup_timeout_sec` | `number` | `yes` | `user` | `[mcp_servers.<name>]` `startup_timeout_sec` on a stdio or HTTP MCP server. |
-| `mcp_servers.<name>.tool_timeout_sec` | `number` | `yes` | `user` | `[mcp_servers.<name>]` `tool_timeout_sec` on a stdio or HTTP MCP server. |
-| `mcp_servers.<name>.tool_timeouts` | `table` | `yes` | `user` | `[mcp_servers.<name>]` `tool_timeouts` on a stdio or HTTP MCP server. |
-| `mcp_servers.<name>.type` | `string` | `yes` | `user` | `[mcp_servers.<name>]` `type` on a stdio or HTTP MCP server. |
-| `mcp_servers.<name>.url` | `string` | `yes` | `user` | `[mcp_servers.<name>]` `url` on a stdio or HTTP MCP server. |
->>>>>>> upstream
 
 ### `memory`
 

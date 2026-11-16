@@ -2,16 +2,16 @@ use serde_json::{Value, json};
 
 use crate::{ManagedGatewayCall, MockInferenceServer};
 
-async fn list(server: &MockInferenceServer) -> reqwest::Response {
-    reqwest::Client::new()
+async fn list(server: &MockInferenceServer) -> request::Response {
+    request::Client::new()
         .get(format!("{}/mcp/tools/list", server.url()))
         .send()
         .await
         .expect("GET /v1/mcp/tools/list")
 }
 
-async fn call(server: &MockInferenceServer, body: &Value) -> reqwest::Response {
-    reqwest::Client::new()
+async fn call(server: &MockInferenceServer, body: &Value) -> request::Response {
+    request::Client::new()
         .post(format!("{}/mcp/tools/call", server.url()))
         .header("authorization", "Bearer gateway-token")
         .json(body)
@@ -24,10 +24,10 @@ async fn call(server: &MockInferenceServer, body: &Value) -> reqwest::Response {
 async fn unscripted_gateway_answers_404_and_records_nothing() {
     let server = MockInferenceServer::start().await.unwrap();
 
-    assert_eq!(reqwest::StatusCode::NOT_FOUND, list(&server).await.status());
+    assert_eq!(request::StatusCode::NOT_FOUND, list(&server).await.status());
     let response = call(&server, &json!({ "call_id": "x", "arguments": {} })).await;
 
-    assert_eq!(reqwest::StatusCode::NOT_FOUND, response.status());
+    assert_eq!(request::StatusCode::NOT_FOUND, response.status());
     assert_eq!(
         Vec::<ManagedGatewayCall>::new(),
         server.managed_gateway_calls()
@@ -42,7 +42,7 @@ async fn scripted_gateway_serves_catalog_and_records_calls() {
     server.set_managed_gateway(catalog.clone(), result.clone());
 
     let listed = list(&server).await;
-    assert_eq!(reqwest::StatusCode::OK, listed.status());
+    assert_eq!(request::StatusCode::OK, listed.status());
     assert_eq!(catalog, listed.json::<Value>().await.unwrap());
     let answered = call(
         &server,
@@ -50,7 +50,7 @@ async fn scripted_gateway_serves_catalog_and_records_calls() {
     )
     .await;
 
-    assert_eq!(reqwest::StatusCode::OK, answered.status());
+    assert_eq!(request::StatusCode::OK, answered.status());
     assert_eq!(
         json!({ "result": result, "connectors_needing_reauth": [] }),
         answered.json::<Value>().await.unwrap()
