@@ -155,6 +155,7 @@ CI is the source of truth and builds every pushed branch. A branch that is only 
 - Explore keeps a todo list (`TodoWriteTool` in `explore_toolset`). The list is session state. The workspace stays read-only. `every_shift_tab_agent_keeps_a_todo_list` is the guard.
 - The harness spawns each `/goal` role (planner, skeptic, summarizer, strategist) as a `general-purpose` child. `SubagentRuntimeOverrides::harness_role` exempts that spawn from the parent's `allowed_subagent_types`, which limits the model's own spawns. `[subagents.toggle]` still applies.
 - A role child keeps its own tools under an explore parent. The planner writes the plan file, and a skeptic can run a command.
+- A todo item's verifier is different: the model writes its condition, so the allow-list applies. Under a list that leaves out `general-purpose`, it runs as the first allowed type that can run (`verifier_subagent_type` in `grok_build/todo/mod.rs`).
 
 ## A give-up claim is reviewed, not counted
 
