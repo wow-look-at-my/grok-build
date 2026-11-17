@@ -4507,13 +4507,30 @@ mod tests {
         let backend = std::sync::Arc::new(LocalTerminalBackend::new_with_tick_interval(
             Duration::from_millis(20),
         ));
+        let marker = std::env::temp_dir().join(format!(
+            "terminal-test-drain-kill-{}-{}.marker",
+            std::process::id(),
+            std::time::SystemTime::now()
+                .duration_since(std::time::UNIX_EPOCH)
+                .unwrap()
+                .as_nanos()
+        ));
+        let command = format!("sleep 5 &\necho done\ntouch '{}'", marker.display());
         let run = xai_spawn::spawn({
             let backend = backend.clone();
-            async move { backend.run(make_request("sleep 5 &\necho done")).await }
+            async move { backend.run(make_request(&command)).await }
         });
 
-        tokio::time::sleep(Duration::from_millis(500)).await;
+        // The shell touches the marker as its last act.
+        let deadline = Instant::now() + Duration::from_secs(20);
+        while !marker.exists() {
+            assert!(Instant::now() < deadline, "the shell never reached its end");
+            tokio::time::sleep(Duration::from_millis(10)).await;
+        }
+        // Enough ticks for the backend to see the exit and start the drain.
+        tokio::time::sleep(Duration::from_millis(300)).await;
         backend.kill_foreground_commands().await;
+        let _ = std::fs::remove_file(&marker);
 
         let result = run.await.unwrap().expect("run returns a result");
         assert_eq!(result.exit_code, Some(0), "signal={:?}", result.signal);
