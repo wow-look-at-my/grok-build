@@ -146,9 +146,16 @@ CI is the source of truth and builds every pushed branch. A branch that is only 
 ## Lite `/goal` mode
 
 - `/goal --lite <objective>` (the flag may also be the last token) runs no planner and no skeptic panel. `GoalOrchestration::mode` holds the choice. A snapshot with no `mode` field reads as `Full`.
-- A lite goal starts the way `/todo <objective>` does. So does a full goal when the planner is off. `setup_goal` runs the capture (`run_todo_capture`) before it creates the goal. A capture that adds nothing returns an error, and no goal starts. A goal never runs without todos.
+- A lite goal starts the way `/todo <objective>` does. So does a full goal when the planner is off. `setup_goal` runs the capture (`run_todo_capture`) before it creates the goal. A capture that adds nothing returns an error, and no goal starts. An agent with no todo tool has no list. Its goal starts with no capture (`TodoCaptureError::NoTodoTool`). The evaluator is the check.
 - The per-round evaluator (`goal_evaluator.rs`) is the whole check. Its `candidate_complete` ends the goal (`complete_lite_goal`). Any other verdict sends the model back. And the directive carries the evaluator's evidence as the reason. The evaluator prompt changes with the mode, because a lite verdict is last.
 - Every planner entry and plan-path read goes through `goal_planner_on()`, which is false for a lite goal. That includes the load-time reconcile, which otherwise pauses an active goal that has no plan.
+
+## `/goal` in explore mode
+
+- Explore keeps a todo list (`TodoWriteTool` in `explore_toolset`). The list is session state. The workspace stays read-only. `every_shift_tab_agent_keeps_a_todo_list` is the guard.
+- The harness spawns each `/goal` role (planner, skeptic, summarizer, strategist) as a `general-purpose` child. `SubagentRuntimeOverrides::harness_role` exempts that spawn from the parent's `allowed_subagent_types`, which limits the model's own spawns. `[subagents.toggle]` still applies.
+- A role child keeps its own tools under an explore parent. The planner writes the plan file, and a skeptic can run a command.
+
 ## A give-up claim is reviewed, not counted
 
 - The agent claims it cannot finish with a `## Cannot complete` section in its reply. The round end calls `review_blocked_claim` (`acp_session_impl/goal.rs`) before the todo bounce. Lite and full share this path.

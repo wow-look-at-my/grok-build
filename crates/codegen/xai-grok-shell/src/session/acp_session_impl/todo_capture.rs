@@ -51,10 +51,8 @@ pub enum TodoCaptureError {
     Sampling(#[from] SamplingError),
     #[error("failed to prepare client: {0}")]
     PrepareClient(String),
-    #[error(
-        "/todo needs a task-list tool whose items carry ids (`todo_write`); this session's is `{0}`, which identifies items by their text alone, so a capture cannot address the one it adds"
-    )]
-    UnsupportedTodoTool(String),
+    #[error("/todo needs a task-list tool, and this session's agent has none")]
+    NoTodoTool,
     #[error(
         "the capture agent finished without adding a todo ({reason}). Transcript: {transcript}"
     )]
@@ -648,22 +646,17 @@ impl SessionActor {
         .await;
     }
 
-    /// The name this session advertises the append-capable todo tool under,
-    /// or why `/todo` cannot run here. Kind alone is not enough: opencode's
-    /// `todowrite` is also [`ToolKind::Plan`] and replaces the whole list
-    /// instead of merging into it. An append cannot be expressed through it.
+    /// The name this session advertises its todo tool under. Any tool of
+    /// [`ToolKind::Plan`] serves: [`Self::append_capture_todos`] picks the
+    /// append path that the tool's namespace supports.
     pub(super) async fn resolve_capture_todo_tool(
         &self,
         bridge: &xai_grok_tools::bridge::ToolBridge,
     ) -> Result<String, TodoCaptureError> {
-        use xai_grok_tools::types::tool::ToolNamespace;
-        let Some(name) = bridge.tool_for_kind(ToolKind::Plan).await else {
-            return Err(TodoCaptureError::UnsupportedTodoTool("none".into()));
-        };
-        match bridge.tool_namespace(&name) {
-            Some(ToolNamespace::GrokBuild) => Ok(name),
-            _ => Err(TodoCaptureError::UnsupportedTodoTool(name)),
-        }
+        bridge
+            .tool_for_kind(ToolKind::Plan)
+            .await
+            .ok_or(TodoCaptureError::NoTodoTool)
     }
 
     /// The capture agent's instruction, appended after the snapshot as the
@@ -775,12 +768,19 @@ impl SessionActor {
     /// session's advertised name with canonical parameter names. The registry
     /// reverse-maps client names onto canonical ones and leaves everything
     /// else alone, so canonical keys arrive as themselves under any rename.
+    /// A todo tool of another namespace takes no id and no position, so its
+    /// append goes to the state itself.
     pub(super) async fn append_capture_todos(
         &self,
         todo_tool: &str,
         call_id: &str,
         args: serde_json::Value,
     ) -> Result<String, xai_tool_runtime::ToolError> {
+        use xai_grok_tools::types::tool::ToolNamespace;
+        let namespace = self.agent.borrow().tool_bridge().tool_namespace(todo_tool);
+        if namespace != Some(ToolNamespace::GrokBuild) {
+            return Ok(self.append_todos_to_state(&args).await);
+        }
         let result = self
             .workspace_ops
             .call_tool(todo_tool, args, call_id, Some(&self.session_info.id.0))
@@ -789,6 +789,72 @@ impl SessionActor {
             self.send_update(acp::SessionUpdate::Plan(plan), None).await;
         }
         Ok(result.prompt_text)
+    }
+
+    /// Add the items of append-only `todo_write` arguments to the todo state
+    /// itself. Every todo tool reads this state, so the session's own tool
+    /// sees the items on its next call. No tool call saves the state here, so
+    /// this saves it and sends the client the new list.
+    async fn append_todos_to_state(&self, args: &serde_json::Value) -> String {
+        use crate::tools::todo::{
+            TodoItem, TodoPriority, TodoState, TodoStatus, plan_entry_from_todo_item,
+        };
+        use xai_grok_tools::types::resources::State;
+        let prepend = args
+            .get("prepend")
+            .and_then(serde_json::Value::as_bool)
+            .unwrap_or(false);
+        let items: Vec<(String, String)> = args
+            .get("todos")
+            .and_then(serde_json::Value::as_array)
+            .map(|todos| {
+                todos
+                    .iter()
+                    .filter_map(|t| {
+                        let id = t.get("id")?.as_str()?;
+                        let content = t.get("content")?.as_str()?;
+                        Some((id.to_owned(), content.to_owned()))
+                    })
+                    .collect()
+            })
+            .unwrap_or_default();
+        let bridge = self.agent.borrow().tool_bridge().clone();
+        let shared = bridge.shared_resources().await;
+        let entries: Vec<acp::PlanEntry> = {
+            let mut res = shared.lock().await;
+            let state = res.get_or_default::<State<TodoState>>();
+            for (front, (id, content)) in items.iter().enumerate() {
+                let item = TodoItem {
+                    content: content.clone(),
+                    priority: TodoPriority::default(),
+                    status: TodoStatus::Pending,
+                    meta: None,
+                    verification: None,
+                    verification_passed: false,
+                    archived: false,
+                };
+                if prepend {
+                    state.0.insert_at(front, id.clone(), item);
+                } else {
+                    state.0.push(id.clone(), item);
+                }
+            }
+            state
+                .0
+                .todo_items()
+                .cloned()
+                .map(plan_entry_from_todo_item)
+                .collect()
+        };
+        bridge.persist_state().await;
+        self.send_update(acp::SessionUpdate::Plan(acp::Plan::new(entries)), None)
+            .await;
+        let mut text = String::from("Added to the todo list:");
+        for (_, content) in &items {
+            text.push_str("\n- ");
+            text.push_str(content);
+        }
+        text
     }
 }
 

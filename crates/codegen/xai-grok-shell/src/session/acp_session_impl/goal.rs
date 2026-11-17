@@ -1223,13 +1223,22 @@ impl SessionActor {
         mode: crate::session::goal_tracker::GoalMode,
     ) -> GoalSetupOutcome {
         // A goal with no planner to write its steps starts the way `/todo <objective>` does.
-        // A goal never runs without todos: the capture fails when it adds nothing.
+        // A capture that adds nothing starts no goal.
         if mode == crate::session::goal_tracker::GoalMode::Lite || !self.goal_planner_enabled {
             let capture_id = format!("goal-{}", uuid::Uuid::new_v4());
-            if let Err(error) = self.run_todo_capture(objective, false, &capture_id).await {
-                return GoalSetupOutcome::Message(format!(
-                    "Goal not started: putting the objective on the todo list failed: {error}"
-                ));
+            match self.run_todo_capture(objective, false, &capture_id).await {
+                Ok(_) => {}
+                // An agent with no todo tool cannot finish an item, so its goal runs with no list. The evaluator is the check.
+                Err(super::todo_capture::TodoCaptureError::NoTodoTool) => {
+                    tracing::warn!(
+                        "goal: this agent has no todo tool; the goal starts with no todo list"
+                    );
+                }
+                Err(error) => {
+                    return GoalSetupOutcome::Message(format!(
+                        "Goal not started: putting the objective on the todo list failed: {error}"
+                    ));
+                }
             }
         }
         self.create_goal_orchestration(objective, token_budget)

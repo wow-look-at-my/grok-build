@@ -2270,7 +2270,24 @@ async fn a_planner_less_goal_does_not_start_when_the_capture_fails() {
     let local = tokio::task::LocalSet::new();
     local
         .run_until(async {
-            let (actor, _tmp) = make_planner_actor(None, false).await;
+            let server = xai_grok_test_support::MockInferenceServer::start()
+                .await
+                .expect("mock inference server");
+            // The capture model answers in prose on every turn, so it adds nothing.
+            for _ in 0..4 {
+                server.enqueue_response(
+                    "/v1/responses",
+                    xai_grok_test_support::ScriptedResponse::sse(
+                        xai_grok_test_support::sse::responses_api_script_exact(
+                            "I will get to it.",
+                            "test",
+                        ),
+                    ),
+                );
+            }
+            let (mut actor, _tmp) = make_planner_actor_unshared(None, false).await;
+            arm_todo_writes(&mut actor).await;
+            point_model_at(&actor, &server).await;
             let GoalSetupOutcome::Message(message) =
                 actor.setup_goal("ship it", None, GoalMode::Full).await
             else {
