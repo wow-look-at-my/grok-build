@@ -3927,6 +3927,10 @@
 					"type": "boolean",
 					"description": "Default on. Environment: `GROK_TWO_PASS_COMPACTION`."
 				},
+				"compact_on_model_switch": {
+					"type": "boolean",
+					"description": "Default off. Environment: `GROK_COMPACT_ON_MODEL_SWITCH`."
+				},
 				"backend_tools": {
 					"type": "boolean",
 					"description": "Default on. Environment: `GROK_BACKEND_SEARCH`."
