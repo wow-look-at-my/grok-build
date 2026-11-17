@@ -54,12 +54,12 @@ fn planner_step(
         InferenceEndpoint::Responses,
         InferenceEndpoint::ChatCompletions,
     ] {
-        for matcher in [
-            InferenceRequestMatcher::foreground(endpoint),
-            InferenceRequestMatcher::auxiliary(endpoint),
+        for (kind, matcher) in [
+            ("foreground", InferenceRequestMatcher::foreground(endpoint)),
+            ("auxiliary", InferenceRequestMatcher::auxiliary(endpoint)),
         ] {
             let matcher = matcher.containing(PLANNER_PROMPT);
-            let name = format!("planner {name} ({endpoint:?})");
+            let name = format!("planner {name} ({endpoint:?}, {kind})");
             steps.push(if blocked {
                 content.expect_response_blocked(name, matcher, answer(endpoint))
             } else {
