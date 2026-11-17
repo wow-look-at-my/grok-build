@@ -328,6 +328,22 @@ pub(crate) fn parse_terminal_response(text: &str) -> bool {
     text.trim() == "Done"
 }
 
+/// Added to the planner's prompt when its toolset has no tool that writes a
+/// file. A read-only session, such as explore, gives the planner such a toolset.
+const PLAN_BY_REPLY_INSTRUCTION: &str = "\n\n## Plan delivery — you have no tool that writes a file\n\n\
+This rule replaces the rules above that tell you to write the plan file and to answer `Done`. \
+Do not try to write the plan file. Put your steps on your todo list first. \
+Then give the whole plan as your terminal response: Markdown, the sections above in order, and no other text. \
+The harness saves that response as the plan.";
+
+/// Whether a planner's terminal response is a plan it replied with. A plan
+/// has Markdown headings. A refusal or a bare `Done` has none.
+fn reply_is_a_plan(response: &str) -> bool {
+    response
+        .lines()
+        .any(|line| line.trim_start().starts_with("## "))
+}
+
 // Send Now context
 
 /// Prefix on the mid-turn message a Send Now delivers to the live planner.
@@ -546,6 +562,9 @@ pub(crate) async fn run_goal_planner(
         let rendered = tool_names.apply(&with_plan_file);
         let mut full = String::with_capacity(rendered.len() + inputs.objective.len() + 256);
         full.push_str(&rendered);
+        if !tool_names.can_write {
+            full.push_str(PLAN_BY_REPLY_INSTRUCTION);
+        }
         full.push_str("\n\nOBJECTIVE:\n");
         full.push_str(inputs.objective);
         full.push_str("\n\nCONTEXT:\n");
@@ -593,10 +612,22 @@ pub(crate) async fn run_goal_planner(
         }
     };
 
-    let plan_present = match tokio::fs::metadata(inputs.plan_file).await {
+    let mut plan_present = match tokio::fs::metadata(inputs.plan_file).await {
         Ok(meta) => meta.is_file() && meta.len() > 0,
         Err(_) => false,
     };
+    // A planner with no tool that writes a file replies with the plan. The harness saves that reply.
+    let plan_by_reply = !inputs.tool_names.can_write || !inputs.inherit_tool_names.can_write;
+    if !plan_present && plan_by_reply && reply_is_a_plan(&response) {
+        match tokio::fs::write(inputs.plan_file, response.trim()).await {
+            Ok(()) => plan_present = true,
+            Err(err) => tracing::warn!(
+                plan_file = %plan_file_str,
+                error = %err,
+                "goal planner: could not save the plan the planner replied with",
+            ),
+        }
+    }
 
     if !plan_present {
         tracing::info!(
@@ -1051,6 +1082,119 @@ mod tests {
         ));
         let log = log.lock().unwrap();
         assert!(log.iter().any(|t| t == "fail_closed:missing_plan_file"));
+    }
+
+    /// The names a read-only parent, such as explore, gives the planner.
+    fn read_only_names() -> RoleToolNames {
+        RoleToolNames::from_parent(
+            Some("read_file".into()),
+            Some("list_dir".into()),
+            Some("grep".into()),
+            None,
+            None,
+            None,
+            None,
+            None,
+        )
+    }
+
+    const REPLIED_PLAN: &str =
+        "# Plan\n\n## Goal kind\nanalysis\n\n## Acceptance criteria\n1. Name the slow step.\n";
+    const REPLY_RULE: &str = "you have no tool that writes a file";
+
+    async fn run_with(
+        spawner: Arc<MockSpawner>,
+        plan_file: &Path,
+        names: &RoleToolNames,
+    ) -> GoalPlannerOutcome {
+        let (_log, emit) = collect_events();
+        run_goal_planner(
+            spawner,
+            GoalPlannerInputs {
+                objective: "find why the build is slow",
+                context: "",
+                plan_file,
+                attempt: 1,
+                model_id: "grok-test",
+                tool_names: names,
+                inherit_tool_names: names,
+            },
+            &emit,
+        )
+        .await
+    }
+
+    /// A planner in a read-only session cannot write the plan file. Its reply is the plan.
+    #[tokio::test]
+    async fn a_planner_with_no_file_writer_delivers_the_plan_as_its_reply() {
+        let plan_file = tmp_plan_file("reply");
+        let mut spawner = MockSpawner::ok_does_not_write(&plan_file);
+        spawner.response = Ok(REPLIED_PLAN.to_string());
+        let spawner = Arc::new(spawner);
+
+        let outcome = run_with(spawner.clone(), &plan_file, &read_only_names()).await;
+
+        assert!(
+            matches!(outcome, GoalPlannerOutcome::Planned { .. }),
+            "a replied plan must be published"
+        );
+        assert_eq!(
+            std::fs::read_to_string(&plan_file).unwrap(),
+            REPLIED_PLAN.trim()
+        );
+        let prompt = spawner.last_prompt.lock().unwrap().clone().unwrap();
+        assert!(prompt.contains(REPLY_RULE), "the planner must be told");
+        let _ = std::fs::remove_file(&plan_file);
+    }
+
+    /// A reply with no plan in it is never saved as one.
+    #[tokio::test]
+    async fn a_reply_that_is_not_a_plan_fails_closed() {
+        for reply in ["Done", "I could not inspect the repository."] {
+            let plan_file = tmp_plan_file("reply-no-plan");
+            let mut spawner = MockSpawner::ok_does_not_write(&plan_file);
+            spawner.response = Ok(reply.to_string());
+
+            let outcome = run_with(Arc::new(spawner), &plan_file, &read_only_names()).await;
+
+            assert!(
+                matches!(
+                    outcome,
+                    GoalPlannerOutcome::FailClosed {
+                        reason: GoalPlannerFailClosedReason::MissingPlan,
+                        ..
+                    }
+                ),
+                "`{reply}` is not a plan"
+            );
+            assert!(!plan_file.exists(), "`{reply}` must not be saved");
+        }
+    }
+
+    /// A planner that can write gets no reply rule, and its reply is never taken as the plan.
+    #[tokio::test]
+    async fn a_planner_that_can_write_must_write_the_file() {
+        let plan_file = tmp_plan_file("reply-with-writer");
+        let mut spawner = MockSpawner::ok_does_not_write(&plan_file);
+        spawner.response = Ok(REPLIED_PLAN.to_string());
+        let spawner = Arc::new(spawner);
+
+        let outcome = run_with(
+            spawner.clone(),
+            &plan_file,
+            &RoleToolNames::inherit_defaults(),
+        )
+        .await;
+
+        assert!(matches!(
+            outcome,
+            GoalPlannerOutcome::FailClosed {
+                reason: GoalPlannerFailClosedReason::MissingPlan,
+                ..
+            }
+        ));
+        let prompt = spawner.last_prompt.lock().unwrap().clone().unwrap();
+        assert!(!prompt.contains(REPLY_RULE));
     }
 
     #[tokio::test]
