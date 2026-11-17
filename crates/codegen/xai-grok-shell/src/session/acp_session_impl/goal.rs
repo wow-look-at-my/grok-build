@@ -1223,7 +1223,7 @@ impl SessionActor {
         mode: crate::session::goal_tracker::GoalMode,
     ) -> GoalSetupOutcome {
         // A goal with no planner to write its steps starts the way `/todo <objective>` does.
-        // A capture that adds nothing starts no goal.
+        // No capture failure stops the goal: the objective itself is then the todo.
         if mode == crate::session::goal_tracker::GoalMode::Lite || !self.goal_planner_enabled {
             let capture_id = format!("goal-{}", uuid::Uuid::new_v4());
             match self.run_todo_capture(objective, false, &capture_id).await {
@@ -1235,9 +1235,16 @@ impl SessionActor {
                     );
                 }
                 Err(error) => {
-                    return GoalSetupOutcome::Message(format!(
-                        "Goal not started: putting the objective on the todo list failed: {error}"
-                    ));
+                    tracing::warn!(
+                        error = %error,
+                        "goal: the todo capture failed; the objective goes on the list as one item"
+                    );
+                    if let Err(error) = self.append_objective_todo(objective).await {
+                        tracing::warn!(
+                            error = %error,
+                            "goal: the objective did not reach the todo list; the goal starts with no item"
+                        );
+                    }
                 }
             }
         }

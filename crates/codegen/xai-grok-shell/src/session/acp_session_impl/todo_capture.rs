@@ -791,6 +791,26 @@ impl SessionActor {
         Ok(result.prompt_text)
     }
 
+    /// Put `objective` on the todo list as one item, with no model call. A
+    /// goal start uses this when the capture run adds nothing, so a model
+    /// that will not call the todo tool cannot stop a goal.
+    pub(super) async fn append_objective_todo(&self, objective: &str) -> Result<(), String> {
+        let bridge = self.agent.borrow().tool_bridge().clone();
+        let todo_tool = self
+            .resolve_capture_todo_tool(&bridge)
+            .await
+            .map_err(|e| e.to_string())?;
+        let call_id = format!("goal-objective-{}", uuid::Uuid::now_v7());
+        self.append_capture_todos(
+            &todo_tool,
+            &call_id,
+            add_only_todo_args(&[objective.trim().to_owned()], false),
+        )
+        .await
+        .map(|_| ())
+        .map_err(|e| e.to_string())
+    }
+
     /// Add the items of append-only `todo_write` arguments to the todo state
     /// itself. Every todo tool reads this state, so the session's own tool
     /// sees the items on its next call. No tool call saves the state here, so

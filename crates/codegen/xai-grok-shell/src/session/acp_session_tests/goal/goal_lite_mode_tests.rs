@@ -180,9 +180,10 @@ async fn a_lite_goal_starts_with_the_objective_captured_on_the_todo_list() {
         .await;
 }
 
-/// A capture that adds nothing leaves no goal behind: the goal never starts with an empty list.
+/// A capture model that will not call the todo tool cannot stop a goal. The
+/// objective itself goes on the list, and the goal starts.
 #[tokio::test(flavor = "current_thread")]
-async fn a_lite_goal_does_not_start_when_the_capture_fails() {
+async fn a_lite_goal_starts_on_its_objective_when_the_capture_adds_nothing() {
     let local = tokio::task::LocalSet::new();
     local
         .run_until(async {
@@ -198,23 +199,18 @@ async fn a_lite_goal_does_not_start_when_the_capture_fails() {
             }
             let actor = goal_actor(&server).await;
 
-            let GoalSetupOutcome::Message(message) = actor
+            let outcome = actor
                 .setup_goal("make the tests pass", None, GoalMode::Lite)
-                .await
-            else {
-                panic!("a failed capture must not start the goal");
-            };
+                .await;
             assert!(
-                message.starts_with(
-                    "Goal not started: putting the objective on the todo list failed:"
-                ),
-                "{message}"
+                matches!(outcome, GoalSetupOutcome::Inference { .. }),
+                "a failed capture must not stop the goal"
             );
-            assert_eq!(
-                actor.goal_tracker.lock().status(),
-                None,
-                "no goal was created"
-            );
+            assert_eq!(actor.goal_tracker.lock().status(), Some(GoalStatus::Active));
+            let list = todo_list(&actor).await;
+            assert_eq!(list.len(), 1, "{list:?}");
+            assert_eq!(list[0].1, "make the tests pass");
+            assert_eq!(list[0].2, crate::tools::todo::TodoStatus::Pending);
         })
         .await;
 }
