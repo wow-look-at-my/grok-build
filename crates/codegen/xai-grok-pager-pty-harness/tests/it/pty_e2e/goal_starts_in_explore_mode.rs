@@ -59,11 +59,8 @@ fn tool_names(body: &serde_json::Value) -> Vec<String> {
         .collect()
 }
 
-#[cfg(unix)]
-#[tokio::test(flavor = "multi_thread", worker_threads = 2)]
-#[ignore = "PTY e2e; run with cargo test -p xai-grok-pager-pty-harness --test it -- --ignored"]
-async fn goal_starts_in_explore_mode() {
-    let content = ContentController::start().await.expect("start content");
+/// A pager with goals on, one turn done, and Shift+Tab pressed until the ring is on explore.
+fn pager_in_explore_mode(content: &ContentController) -> PtyHarness {
     content.set_response(format!("{MOCK_RESPONSE_SENTINEL} turn done."));
 
     let binary = pager_binary().expect("resolve pager binary");
@@ -71,7 +68,7 @@ async fn goal_starts_in_explore_mode() {
         &binary,
         DEFAULT_ROWS,
         DEFAULT_COLS,
-        &content,
+        content,
         &[],
         &[("GROK_GOAL", "1")],
     )
@@ -96,6 +93,15 @@ async fn goal_starts_in_explore_mode() {
             )
             .unwrap_or_else(|e| panic!("the ring must reach {mode}: {e}"));
     }
+    harness
+}
+
+#[cfg(unix)]
+#[tokio::test(flavor = "multi_thread", worker_threads = 2)]
+#[ignore = "PTY e2e; run with cargo test -p xai-grok-pager-pty-harness --test it -- --ignored"]
+async fn goal_starts_in_explore_mode() {
+    let content = ContentController::start().await.expect("start content");
+    let mut harness = pager_in_explore_mode(&content);
 
     expect_todo_capture(&content);
     let _first = content.expect_agent_turn("goal round", ROUND_ONE);
@@ -167,6 +173,53 @@ async fn goal_starts_in_explore_mode() {
     );
 
     second.release();
+    harness.update(Duration::from_millis(500));
+    harness.inject_keys(b"\x11").expect("ctrl-q once");
+    harness.update(Duration::from_millis(200));
+    harness.inject_keys(b"\x11").expect("ctrl-q confirm");
+    harness.quit().expect("reap pager");
+}
+
+/// The first words of the planner's prompt. Only the planner subagent's request carries them.
+const PLANNER_PROMPT: &str = "Goal Plan Writer";
+/// What a spawn that the allow-list stops reports.
+const SPAWN_REFUSAL: &str = "not allowed";
+
+/// A full goal starts with a planner subagent. Explore lets the model spawn
+/// only `explore` and `plan`, and the planner is `general-purpose`. The
+/// harness spawns it, so it must run: its request must reach the model.
+#[cfg(unix)]
+#[tokio::test(flavor = "multi_thread", worker_threads = 2)]
+#[ignore = "PTY e2e; run with cargo test -p xai-grok-pager-pty-harness --test it -- --ignored"]
+async fn full_goal_planner_runs_in_explore_mode() {
+    let content = ContentController::start().await.expect("start content");
+    let mut harness = pager_in_explore_mode(&content);
+    content.set_response("EXPLORE_PLANNER_FALLBACK");
+
+    harness
+        .inject_keys(b"/goal find why the build is slow")
+        .expect("type goal");
+    harness.update(Duration::from_millis(300));
+    harness.inject_keys(b"\r").expect("submit goal");
+
+    let planner_ran = wait_until(Duration::from_secs(90), || {
+        harness.update(Duration::from_millis(100));
+        content
+            .request_bodies()
+            .iter()
+            .any(|body| body.to_string().contains(PLANNER_PROMPT))
+    });
+    let screen = harness.screen_contents();
+    assert!(
+        planner_ran,
+        "the planner subagent must run in explore mode\nscreen:\n{screen}\n{}",
+        dump_non_system_messages(&content.request_bodies())
+    );
+    assert!(
+        !screen.contains(REFUSAL) && !screen.contains(SPAWN_REFUSAL),
+        "explore mode must not refuse the goal or its planner\nscreen:\n{screen}"
+    );
+
     harness.update(Duration::from_millis(500));
     harness.inject_keys(b"\x11").expect("ctrl-q once");
     harness.update(Duration::from_millis(200));
