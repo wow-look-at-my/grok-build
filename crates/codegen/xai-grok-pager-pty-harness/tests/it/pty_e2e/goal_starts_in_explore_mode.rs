@@ -50,7 +50,7 @@ fn expect_one_todo_capture(content: &ContentController, copy: usize) {
 }
 
 /// The function tools a request offers, in either wire shape.
-fn tool_names(body: &serde_json::Value) -> Vec<String> {
+pub(super) fn tool_names(body: &serde_json::Value) -> Vec<String> {
     body["tools"]
         .as_array()
         .into_iter()
@@ -65,7 +65,7 @@ fn tool_names(body: &serde_json::Value) -> Vec<String> {
 }
 
 /// A pager with goals on, one turn done, and Shift+Tab pressed until the ring is on explore.
-fn pager_in_explore_mode(content: &ContentController) -> PtyHarness {
+pub(super) fn pager_in_explore_mode(content: &ContentController) -> PtyHarness {
     content.set_response(format!("{MOCK_RESPONSE_SENTINEL} turn done."));
 
     let binary = pager_binary().expect("resolve pager binary");
