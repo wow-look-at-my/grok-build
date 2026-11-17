@@ -16,6 +16,9 @@ pub struct CompactionPolicy {
     /// At compaction, that note and the recent tail are summarized together (pass 2).
     /// Resolved from the `two_pass_compaction` config flag at session build; `false` keeps the legacy single-pass path.
     pub two_pass_enabled: bool,
+
+    /// Compact at the first turn after every model change, whatever the context use.
+    pub compact_on_model_switch: bool,
 }
 
 impl Default for CompactionPolicy {
@@ -25,6 +28,7 @@ impl Default for CompactionPolicy {
             memory_flush_enabled: false,
             wall_clock_budget_secs: 300,
             two_pass_enabled: false,
+            compact_on_model_switch: false,
         }
     }
 }

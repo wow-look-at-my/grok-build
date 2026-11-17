@@ -34,15 +34,19 @@ use xai_grok_sampling_types::{ApiBackend, ConversationItem};
 const COMPACTION_FAILED_GUARD_PREFIX: &str = "Compaction failed: ";
 /// The harness model slot of every compaction summary. It is a member of the `dense_summarization` group.
 pub(crate) const COMPACTION_SLOT: &str = "compaction";
-/// The summary needs none of the thinking. It stays only where it buys a prompt-cache hit: the same model.
-/// That hit is on a backend that takes a block it did not mint as text.
-fn strips_reasoning_for_summary(
-    client: &xai_grok_sampler::SamplingClient,
-    session_model: &str,
-    summary_model: &str,
-) -> bool {
-    client.api_backend() == ApiBackend::Messages
-        || !xai_grok_sampling_types::same_model(session_model, summary_model)
+/// The lossy summary input. On Messages the thinking items stay, and the request sends their words as client notes.
+/// The other backends lose them here: the text mutation invalidates a blob, and no text form is proven safe there.
+fn lossy_summary_input(
+    conversation: Vec<ConversationItem>,
+    backend: &ApiBackend,
+) -> Vec<ConversationItem> {
+    if *backend == ApiBackend::Messages {
+        xai_chat_state::compaction_utils::prepare_conversation_for_summarization_keeping_reasoning(
+            conversation,
+        )
+    } else {
+        xai_chat_state::compaction_utils::prepare_conversation_for_summarization(conversation)
+    }
 }
 /// Human-readable "next fire" for a scheduled loop in the compaction reminder.
 fn format_loop_next_fire(
@@ -286,17 +290,10 @@ impl SessionActor {
                 return PrefireOutcome::SampleFailed.into();
             }
         };
-        let session_model = self
-            .chat_state_handle
-            .get_sampling_config()
-            .await
-            .map(|c| c.model.to_string())
-            .unwrap_or_default();
-        let strips = strips_reasoning_for_summary(&client, &session_model, &sampling_config.model);
         let model_slug = sampling_config.model.to_string();
         let prefix_prepared = apply_turn_image_budget_and_prune(
             &self.chat_state_handle,
-            prepare_conversation_for_verbatim_summarization(split.prefix.to_vec(), strips),
+            prepare_conversation_for_verbatim_summarization(split.prefix.to_vec(), false),
         )
         .await;
         let prefix_est_tokens = prefix_prepared
@@ -350,7 +347,6 @@ impl SessionActor {
     async fn try_two_pass_pass2_apply(
         &self,
         user_context: Option<&str>,
-        strips_reasoning: bool,
         client: xai_grok_sampler::SamplingClient,
         sampling_config: &xai_grok_sampler::SamplerConfig,
     ) -> Option<CompactOutput> {
@@ -395,8 +391,7 @@ impl SessionActor {
             );
             return None;
         }
-        let prepared_tail =
-            prepare_conversation_for_verbatim_summarization(tail.to_vec(), strips_reasoning);
+        let prepared_tail = prepare_conversation_for_verbatim_summarization(tail.to_vec(), false);
         let prompt = build_compaction_prompt(user_context, false);
         let pass2_history =
             build_two_pass_pass2_history(prefix, &prepared_tail, &cache.note1, &prompt);
@@ -1123,8 +1118,7 @@ impl SessionActor {
             },
         )
         .await;
-        let summary_strips_reasoning =
-            strips_reasoning_for_summary(&sampling_client, &model_id, &sampling_config.model);
+        let summary_backend = sampling_client.api_backend();
         // The compaction model reads the input, so its window sizes the input budgets.
         let summary_window = sampling_config.context_window;
         let compaction = xai_grok_telemetry::events::CompactionScope::begin(
@@ -1178,12 +1172,10 @@ impl SessionActor {
         let mut simplified_messages = if verbatim_input_enabled {
             xai_chat_state::compaction_utils::prepare_conversation_for_verbatim_summarization(
                 full_conversation,
-                summary_strips_reasoning,
+                false,
             )
         } else {
-            xai_chat_state::compaction_utils::prepare_conversation_for_summarization(
-                full_conversation,
-            )
+            lossy_summary_input(full_conversation, &summary_backend)
         };
         if verbatim_input_enabled {
             simplified_messages =
@@ -1322,12 +1314,7 @@ impl SessionActor {
         // The wire builders leave another model's thinking behind on their own.
         let mut thinking_stage = xai_grok_sampling_types::ThinkingReplay::Native;
         let two_pass_output = self
-            .try_two_pass_pass2_apply(
-                user_context.as_deref(),
-                summary_strips_reasoning,
-                sampling_client,
-                &sampling_config,
-            )
+            .try_two_pass_pass2_apply(user_context.as_deref(), sampling_client, &sampling_config)
             .await;
         let two_pass_used = two_pass_output.is_some();
         let mut compact_summary: Option<String> =
@@ -1412,13 +1399,13 @@ impl SessionActor {
                                 CompactInputStage::VerbatimFitted => {
                                     let verbatim = xai_chat_state::compaction_utils::prepare_conversation_for_verbatim_summarization(
                                         conv,
-                                        summary_strips_reasoning,
+                                        false,
                                     );
                                     let pruned = apply_turn_image_budget_and_prune(
-                                            &self.chat_state_handle,
-                                            verbatim,
-                                        )
-                                        .await;
+                                        &self.chat_state_handle,
+                                        verbatim,
+                                    )
+                                    .await;
                                     xai_chat_state::compaction_utils::fit_conversation_to_budget(
                                         pruned,
                                         fitted_input_budget(summary_window, compaction_tool_tokens),
@@ -1426,9 +1413,7 @@ impl SessionActor {
                                 }
                                 CompactInputStage::Lossy => {
                                     xai_chat_state::compaction_utils::fit_conversation_to_budget(
-                                        xai_chat_state::compaction_utils::prepare_conversation_for_summarization(
-                                            conv,
-                                        ),
+                                        lossy_summary_input(conv, &summary_backend),
                                         lossy_input_budget(summary_window, compaction_tool_tokens),
                                     )
                                 }
@@ -2519,11 +2504,28 @@ impl SessionActor {
         self.compaction
             .auto_compact_suppressed
             .store(SUPPRESS_NONE, std::sync::atomic::Ordering::Relaxed);
-        if prev.context_window <= cfg.context_window.get() {
+        // The `compact_on_model_switch` setting compacts on every model change that left model output behind.
+        let every_switch = self
+            .agent
+            .borrow()
+            .compaction_policy()
+            .compact_on_model_switch;
+        let every_switch = every_switch && self.history_has_model_minted_items().await;
+        if !every_switch && prev.context_window <= cfg.context_window.get() {
             return Ok(());
         }
         let total_tokens = self.chat_state_handle.get_estimated_total_tokens().await;
-        let Some(trigger_info) = self.should_auto_compact(total_tokens, cfg.context_window) else {
+        let trigger_info = if every_switch {
+            let context_window = cfg.context_window.get();
+            AutoCompactTriggerInfo {
+                tokens_used: total_tokens,
+                context_window,
+                percentage: xai_token_estimation::usage_percentage_u8(total_tokens, context_window),
+                reason_override: Some(MODEL_FAMILY_SWITCH_COMPACT_BANNER),
+            }
+        } else if let Some(info) = self.should_auto_compact(total_tokens, cfg.context_window) {
+            info
+        } else {
             return Ok(());
         };
         tracing::info!(

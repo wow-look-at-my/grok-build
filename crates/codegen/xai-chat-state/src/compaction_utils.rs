@@ -106,9 +106,16 @@ pub(crate) fn strip_images(conversation: Vec<ConversationItem>) -> Vec<Conversat
 pub fn prepare_conversation_for_summarization(
     conversation: Vec<ConversationItem>,
 ) -> Vec<ConversationItem> {
-    strip_images(strip_reasoning_blocks(
-        strip_tool_messages_for_conversation_item(conversation),
+    strip_reasoning_blocks(prepare_conversation_for_summarization_keeping_reasoning(
+        conversation,
     ))
+}
+/// [`prepare_conversation_for_summarization`] with the reasoning items left in.
+/// The caller must send their words as text and no blob: the text mutation invalidates every blob.
+pub fn prepare_conversation_for_summarization_keeping_reasoning(
+    conversation: Vec<ConversationItem>,
+) -> Vec<ConversationItem> {
+    strip_images(strip_tool_messages_for_conversation_item(conversation))
 }
 /// Segment-store prep (`segments` mode): keep tool I/O verbatim, strip only images + reasoning.
 pub fn prepare_conversation_for_segment(

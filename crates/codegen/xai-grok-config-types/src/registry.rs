@@ -37,6 +37,8 @@ pub enum Feature {
     CompactionVerbatimInput,
     /// Summarize the earlier part of a long conversation in the background, before compaction.
     TwoPassCompaction,
+    /// Compact the conversation each time the session changes model.
+    CompactOnModelSwitch,
     /// Server-side execution of `web_search` and `x_search`.
     BackendTools,
     /// Continue the conversation as soon as a background task or subagent finishes.
@@ -243,6 +245,14 @@ pub const FEATURES: &[FeatureSpec] = &[
         env: "GROK_TWO_PASS_COMPACTION",
         default_enabled: true,
         remote: Some(|settings| settings.two_pass_compaction_enabled),
+    },
+    FeatureSpec {
+        id: Feature::CompactOnModelSwitch,
+        key: "compact_on_model_switch",
+        path: "features.compact_on_model_switch",
+        env: "GROK_COMPACT_ON_MODEL_SWITCH",
+        default_enabled: false,
+        remote: None,
     },
     FeatureSpec {
         id: Feature::BackendTools,

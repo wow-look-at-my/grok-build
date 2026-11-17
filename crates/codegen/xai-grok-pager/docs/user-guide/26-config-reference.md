@@ -140,6 +140,7 @@ User-level configuration lives in `$GROK_HOME/config.json` (default `~/.grok/con
 | `features.campaigns` | `boolean` | `yes` | `user` | Enable remote campaign patches. `GROK_CAMPAIGNS=0` still disables even when requirements set this true. |
 | `features.cancel_rewind` | `boolean` | `pin` | `user` | Enable or disable `cancel_rewind`. Default true. Also `GROK_CANCEL_REWIND`. |
 | `features.codebase_indexing` | `boolean / string[]` | `pin` | `user` | Codebase graph indexing; true indexes git repos, or pass include/exclude globs. |
+| `features.compact_on_model_switch` | `boolean` | `pin` | `user` | Compact the conversation at the first turn after every model change. Default false. Also `GROK_COMPACT_ON_MODEL_SWITCH`. |
 | `features.compaction_detail` | `none / minimal / balanced / verbose` | `yes` | `user` | Verbatim detail level for `segments` compaction. Also GROK_COMPACTION_DETAIL. |
 | `features.compaction_mode` | `summary / transcript / segments` | `yes` | `user` | Compaction strategy. Also GROK_COMPACTION_MODE. |
 | `features.compaction_tool_choice` | `string` | `yes` | `user` | Tool-choice hint used during compaction. |
