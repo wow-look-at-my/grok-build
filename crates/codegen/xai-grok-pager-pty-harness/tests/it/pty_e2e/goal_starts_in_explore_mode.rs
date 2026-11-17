@@ -4,7 +4,6 @@ use super::common::*;
 use xai_grok_pager_pty_harness::{InferenceEndpoint, InferenceRequestMatcher};
 
 const ROUND_ONE: &str = "EXPLORE_GOAL_ROUND_MARK";
-const ROUND_TWO: &str = "EXPLORE_GOAL_SECOND_MARK";
 const TODO_TEXT: &str = "profile the slow build step";
 const REFUSAL: &str = "Goal not started";
 /// The last line of the goal-start reminder. Only the goal's first turn carries it.
@@ -12,6 +11,12 @@ const GOAL_START: &str = "Start now.";
 
 /// The capture side call writes one todo.
 fn expect_todo_capture(content: &ContentController) {
+    for copy in 0..6 {
+        expect_one_todo_capture(content, copy);
+    }
+}
+
+fn expect_one_todo_capture(content: &ContentController, copy: usize) {
     let capture =
         json!({"todos": [{"id": "c1", "content": TODO_TEXT, "status": "pending"}]}).to_string();
     for (endpoint, events) in [
@@ -37,7 +42,7 @@ fn expect_todo_capture(content: &ContentController) {
         ),
     ] {
         let _ = content.expect_response(
-            format!("todo capture ({endpoint:?})"),
+            format!("todo capture {copy} ({endpoint:?})"),
             InferenceRequestMatcher::auxiliary(endpoint),
             ScriptedResponse::sse(events),
         );
@@ -104,10 +109,8 @@ async fn goal_starts_in_explore_mode() {
     let mut harness = pager_in_explore_mode(&content);
 
     expect_todo_capture(&content);
-    let _first = content.expect_agent_turn("goal round", ROUND_ONE);
-    // The second round stays open, so the first round stays on the screen.
-    let second = content.expect_agent_turn_blocked("second round", ROUND_TWO);
-    content.set_response("EXPLORE_GOAL_FALLBACK");
+    // Every other request gets the round text. No step here depends on the order of the requests.
+    content.set_response(ROUND_ONE);
 
     harness
         .inject_keys(b"/goal --lite find why the build is slow")
@@ -115,9 +118,14 @@ async fn goal_starts_in_explore_mode() {
     harness.update(Duration::from_millis(300));
     harness.inject_keys(b"\r").expect("submit goal");
 
-    let started = wait_until(Duration::from_secs(90), || {
+    // The goal's first turn reached the model, and its answer is on the screen.
+    let started = wait_until(Duration::from_secs(30), || {
         harness.update(Duration::from_millis(100));
         harness.screen_contents().contains(ROUND_ONE)
+            && content
+                .request_bodies()
+                .iter()
+                .any(|body| body.to_string().contains(GOAL_START))
     });
     let screen = harness.screen_contents();
     assert!(
@@ -154,7 +162,7 @@ async fn goal_starts_in_explore_mode() {
     }
 
     // The captured item is on the session's list: the round end sends it back to the model.
-    let listed = wait_until(Duration::from_secs(60), || {
+    let listed = wait_until(Duration::from_secs(15), || {
         harness.update(Duration::from_millis(100));
         all_user_message_blobs(&content)
             .iter()
@@ -172,7 +180,6 @@ async fn goal_starts_in_explore_mode() {
         harness.screen_contents()
     );
 
-    second.release();
     harness.update(Duration::from_millis(500));
     harness.inject_keys(b"\x11").expect("ctrl-q once");
     harness.update(Duration::from_millis(200));
