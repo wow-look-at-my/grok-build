@@ -156,6 +156,7 @@ CI is the source of truth and builds every pushed branch. A branch that is only 
 - The harness spawns each `/goal` role (planner, skeptic, summarizer, strategist) as a `general-purpose` child. `SubagentRuntimeOverrides::harness_role` exempts that spawn from the parent's `allowed_subagent_types`, which limits the model's own spawns. `[subagents.toggle]` still applies.
 - The planner is a forked child, so it offers the parent's tools. Under explore it has no tool that writes a file. `RoleToolNames::can_write` is then false: the prompt gets `PLAN_BY_REPLY_INSTRUCTION`, the planner replies with the plan, and the harness saves that reply (`reply_is_a_plan` in `goal_planner.rs`).
 - A skeptic is not forked. It keeps its own tools under an explore parent. It can run a command.
+- `pty_e2e_queue::goal_starts_in_explore_mode` and `goal_plan_is_published_in_explore_mode` run these flows in the real pager with a scripted model, and CI runs them. `live_model::live_goal_runs_in_explore_mode` runs them against a live model. It needs the `GROK_LIVE_*` variables that [docs/background-waits-and-the-goal-check.md](docs/background-waits-and-the-goal-check.md) names.
 - A todo item's verifier is different: the model writes its condition, so the allow-list applies. Under a list that leaves out `general-purpose`, it runs as the first allowed type that can run (`verifier_subagent_type` in `grok_build/todo/mod.rs`).
 
 ## A give-up claim is reviewed, not counted
