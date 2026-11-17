@@ -108,7 +108,7 @@ async fn claude_model_switch_keeps_the_thinking_summary_off_assistant_text() {
         .wait_for_text(WELCOME_SCREEN_SENTINEL, WELCOME_TIMEOUT)
         .expect("welcome");
 
-    let mut turn = |harness: &mut PtyHarness, switch_to: Option<&str>, reply: &str| {
+    let turn = |harness: &mut PtyHarness, switch_to: Option<&str>, reply: &str| {
         if let Some(model) = switch_to {
             harness
                 .inject_keys(format!("/model {model}\r").as_bytes())
