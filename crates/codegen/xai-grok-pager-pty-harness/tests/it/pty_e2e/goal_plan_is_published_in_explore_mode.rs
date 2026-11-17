@@ -89,15 +89,14 @@ async fn full_goal_plan_is_published_in_explore_mode() {
     let content = ContentController::start().await.expect("start content");
     let mut harness = pager_in_explore_mode(&content);
     content.set_response(ROUND);
-    // The planner's first answer stays open until the test knows the plan path.
-    let probe = planner_step(&content, "probe", true, |endpoint| {
-        tool_call(
-            endpoint,
-            "call_plan_probe",
-            "todo_write",
-            &json!({ "todos": [] }).to_string(),
-        )
+    // The planner's first answers stay open until the test knows the plan path.
+    let read_list = json!({ "todos": [] }).to_string();
+    let mut probe = planner_step(&content, "probe", true, |endpoint| {
+        tool_call(endpoint, "call_plan_probe", "todo_write", &read_list)
     });
+    probe.extend(planner_step(&content, "second probe", true, |endpoint| {
+        tool_call(endpoint, "call_plan_probe_2", "todo_write", &read_list)
+    }));
 
     harness
         .inject_keys(b"/goal find why the build is slow")
@@ -105,11 +104,20 @@ async fn full_goal_plan_is_published_in_explore_mode() {
     harness.update(Duration::from_millis(300));
     harness.inject_keys(b"\r").expect("submit goal");
 
+    // The planner's own request offers its tools.
     let mut path = None;
+    let mut planner_tools = Vec::new();
     let asked = wait_until(Duration::from_secs(30), || {
         harness.update(Duration::from_millis(100));
         path = plan_path(&content);
-        path.is_some()
+        planner_tools = content
+            .request_bodies()
+            .iter()
+            .filter(|body| body.to_string().contains(PLANNER_PROMPT))
+            .map(tool_names)
+            .find(|tools| tools.iter().any(|tool| tool == "todo_write"))
+            .unwrap_or_default();
+        path.is_some() && !planner_tools.is_empty()
     });
     assert!(
         asked,
@@ -120,12 +128,6 @@ async fn full_goal_plan_is_published_in_explore_mode() {
     let path = path.expect("plan path");
 
     // The planner writes the plan with a tool it has, lists one step, and ends.
-    let planner_tools = content
-        .request_bodies()
-        .iter()
-        .find(|body| body.to_string().contains(PLANNER_PROMPT))
-        .map(tool_names)
-        .unwrap_or_default();
     let has = |name: &str| planner_tools.iter().any(|tool| tool == name);
     let (write_tool, write) = if has("run_terminal_command") {
         (
