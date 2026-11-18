@@ -195,10 +195,10 @@ impl SessionActor {
             None => vec![],
         };
         drop(live);
-        // Legacy saves at compaction/session end when `save_on_end`; its forced Dream is always available.
+        // `dream_enabled` tells the browser that notes become topics with no command.
         let v2 = &self.memory.v2_config;
         let (capture_enabled, dream_enabled) = if self.memory.mode() == Some(MemoryMode::V2) {
-            (v2.capture_enabled, v2.manual_dream_enabled)
+            (v2.capture_enabled, v2.can_run_automatic_dream())
         } else {
             (self.memory.save_on_end, true)
         };
