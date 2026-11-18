@@ -4512,7 +4512,25 @@ mod tests {
             async move { backend.run(make_request("sleep 5 &\necho done")).await }
         });
 
-        tokio::time::sleep(Duration::from_millis(500)).await;
+        // The kill must land after the shell exits.
+        let deadline = tokio::time::Instant::now() + Duration::from_secs(30);
+        loop {
+            let printed = backend
+                .list_tasks()
+                .await
+                .iter()
+                .any(|task| task.output.contains("done"));
+            if printed {
+                break;
+            }
+            assert!(
+                tokio::time::Instant::now() < deadline,
+                "the command never printed `done`"
+            );
+            tokio::time::sleep(Duration::from_millis(20)).await;
+        }
+        // Ticks for the actor to see the exit and start the drain.
+        tokio::time::sleep(Duration::from_millis(200)).await;
         backend.kill_foreground_commands().await;
 
         let result = run.await.unwrap().expect("run returns a result");
