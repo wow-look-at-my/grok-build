@@ -1007,3 +1007,7 @@ fn store_vectors(
 #[cfg(test)]
 #[path = "v2_recall_tests.rs"]
 mod tests;
+
+#[cfg(test)]
+#[path = "v2_recall_live_tests.rs"]
+mod live_tests;
