@@ -1061,7 +1061,7 @@ pub enum SessionUpdate {
         /// Notes are written automatically after turns. Drives the modal's empty-state advice.
         #[serde(default = "default_true")]
         capture_enabled: bool,
-        /// A forced Dream (`memory/dream`) is available in this session.
+        /// Notes become topics automatically in this session.
         #[serde(default = "default_true")]
         dream_enabled: bool,
     },
