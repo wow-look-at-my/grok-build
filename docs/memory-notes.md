@@ -25,6 +25,8 @@ Memory-v2 needs no command. It has none for saving or consolidating. There is no
 - The engine is `xai_grok_memory::V2Recall` (`v2_recall.rs`). It reads `topics/` and `observations/_inbox/` of both scopes into memory and reads a file again only when its size or modification time changes. It never reads a path that `excluded_manifest_paths` hides.
 - Word matching needs no database. A chunk qualifies on the summed inverse document frequency of the query terms it holds, so a word that every chunk has adds nothing. Observation bookkeeping keys (session id, model name) are not searchable text.
 - Only the most distinctive query terms are matched (`max_query_terms`): frequent in the query, rare in the corpus. Without that cut, a long stretch of conversation holds enough words to match every chunk.
+- The embedding reads `recall_focus_text`, not the whole query: the last user prompt in the new text, else the last assistant text. Word matching still reads everything. One vector over assistant text, tool arguments and a prompt together sits near no note.
+- A standard score judges a semantic hit, not by a fixed cosine. Each embedding model puts cosines on its own scale: one model scores every pair high, another scores a true match low. `BASELINE_NOTES` are embedded once for each model. A chunk's cosine with the query is compared with the mean and the spread of the query's cosines with those notes. `min_standard_score` is the gate. `runner_up_fraction` drops a weaker chunk that sits beside a strong one.
 - Vectors are optional. A cached vector is deleted when its chunk leaves the corpus. With `[memory.embedding].model` set, chunk vectors are cached in the `recall_embeddings` table of the scope's `index.sqlite`, keyed by text hash and model. A provider failure or a slow call returns the word matches and logs one error for the session. It never fails the turn.
 - `[memory_v2] recall_enabled = false` turns recall off.
 
@@ -38,6 +40,20 @@ Memory-v2 needs no command. It has none for saving or consolidating. There is no
 ## Tests
 
 - `xai-grok-memory`: `v2_recall_tests.rs` drives the engine on real scope directories.
+- `xai-grok-memory`: `v2_recall_live_tests.rs` runs recall against a served embedding model. Its tests are ignored, because CI serves no model. The prompts share no distinctive word with their note, and word matching is off, so each hit comes from the model alone. Run it when the gate or the query changes:
+
+```bash
+GROK_LIVE_EMBEDDING_BASE_URL=http://127.0.0.1:8791/v1 GROK_LIVE_EMBEDDING_MODEL=bge-small-en-v1.5 \
+  cargo test -p xai-grok-memory --lib live_ -- --ignored --nocapture
+```
+
+```text
+model                  paraphrases recalled   wrong note first   unrelated prompts that recalled a note
+bge-small-en-v1.5      4 of 9                 0                  0 of 12
+all-MiniLM-L6-v2       5 of 9                 0                  0 of 12
+gte-small              4 of 9                 0                  0 of 12
+nomic-embed-text-v1.5  5 of 9                 0                  1 of 12
+```
 - `xai-grok-shell`: `tests/it/memory_recall_e2e.rs` drives a real agent against the mock model. It needs a workspace outside the system temp directory, because memory is off for a temp workspace.
 - `xai-grok-pager-pty-harness`: `pty_e2e/memory_cost_is_visible.rs` runs the pager against a mock that reports a price. It asserts the `mem` figure in the status bar and the cost line in `/memory`.
 - `MvpAgent::new` does not read `Config::memory_config`. The binary's startup calls `set_memory_config` after it. The test harness does the same only through `connect_and_auth_with_memory`, so every other harness session runs with no memory.

@@ -32,7 +32,7 @@ You do not tell Grok to remember. You do not run a command to save.
 - **Consolidation.** Observations become topics when enough of them wait, or when the oldest one waited a while. Grok checks this after each capture and when a session starts, so notes from yesterday are topics today.
 - **Recall.** As the conversation moves, Grok searches stored memory with the new text: your prompt, its own replies and the arguments of its tool calls. A note that matches is shown to the model with its file path, and the scrollback shows a `Recalled from memory` line. Each note is shown one time for each conversation. A compaction removes the reminders. A note can be shown again after it.
 
-Recall matches on words by default. Set `memory.embedding.model` to an embedding model your provider serves to add meaning-based matches. If the embedding call fails, recall keeps the word matches and logs the error.
+Recall matches on words by default. Set `memory.embedding.model` to an embedding model your provider serves to add meaning-based matches. Recall then also finds a note that shares no word with what you typed. It compares your prompt, not the whole conversation, with each note, and it adjusts to the model you chose, so no similarity threshold needs tuning. If the embedding call fails, recall keeps the word matches and logs the error.
 
 There is no command for saving or consolidating: both run by themselves. To turn recall off, set `memory.v2.recall_enabled` to `false`.
 
