@@ -33,7 +33,8 @@ fn global_scope_dir() -> PathBuf {
         .join("global")
 }
 
-/// Bodies of the model requests that carry `prompt`, without the memory extractor's own.
+/// Bodies of the main-loop requests that carry `prompt`. The memory extractor and the session
+/// title request also quote the prompt, so both are left out.
 fn turn_bodies(server: &xai_grok_test_support::MockInferenceServer, prompt: &str) -> Vec<String> {
     server
         .requests()
@@ -44,7 +45,7 @@ fn turn_bodies(server: &xai_grok_test_support::MockInferenceServer, prompt: &str
                 .is_some_and(|id| id.starts_with("xai-memory-capture-"))
         })
         .filter_map(|request| request.body.map(|body| body.to_string()))
-        .filter(|body| body.contains(prompt))
+        .filter(|body| body.contains(prompt) && !body.contains("\"name\":\"session_title\""))
         .collect()
 }
 
