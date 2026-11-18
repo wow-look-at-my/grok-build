@@ -2264,27 +2264,39 @@ async fn setup_goal_reminder_is_no_plan_when_planner_disabled() {
         .await;
 }
 
-/// A goal never runs without todos: with the planner off, a capture that adds nothing starts no goal.
+/// With the planner off, a capture that adds nothing does not stop the goal. The objective itself is the todo.
 #[tokio::test(flavor = "current_thread")]
-async fn a_planner_less_goal_does_not_start_when_the_capture_fails() {
+async fn a_planner_less_goal_starts_on_its_objective_when_the_capture_adds_nothing() {
     let local = tokio::task::LocalSet::new();
     local
         .run_until(async {
-            let (actor, _tmp) = make_planner_actor(None, false).await;
-            let GoalSetupOutcome::Message(message) =
-                actor.setup_goal("ship it", None, GoalMode::Full).await
-            else {
-                panic!("a failed capture must not start the goal");
-            };
+            let server = xai_grok_test_support::MockInferenceServer::start()
+                .await
+                .expect("mock inference server");
+            // The capture model answers in prose on every turn, so it adds nothing.
+            for _ in 0..4 {
+                server.enqueue_response(
+                    "/v1/responses",
+                    xai_grok_test_support::ScriptedResponse::sse(
+                        xai_grok_test_support::sse::responses_api_script_exact(
+                            "I will get to it.",
+                            "test",
+                        ),
+                    ),
+                );
+            }
+            let (mut actor, _tmp) = make_planner_actor_unshared(None, false).await;
+            arm_todo_writes(&mut actor).await;
+            point_model_at(&actor, &server).await;
+            let outcome = actor.setup_goal("ship it", None, GoalMode::Full).await;
             assert!(
-                message.starts_with(
-                    "Goal not started: putting the objective on the todo list failed:"
-                ),
-                "{message}"
+                matches!(outcome, GoalSetupOutcome::Inference { .. }),
+                "a failed capture must not stop the goal"
             );
-            assert!(
-                actor.goal_tracker.lock().snapshot().is_none(),
-                "no goal was created"
+            assert_eq!(
+                live_todo_contents(&actor).await,
+                vec!["ship it".to_string()],
+                "the objective itself goes on the list"
             );
         })
         .await;

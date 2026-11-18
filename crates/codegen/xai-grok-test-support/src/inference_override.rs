@@ -24,6 +24,8 @@ use crate::scripted::{BoxWait, ScriptedResponse, TerminalWait};
 pub struct InferenceRequestMatcher {
     endpoint: InferenceEndpoint,
     kind: InferenceRequestKind,
+    /// Text the serialized request body must hold.
+    containing: Option<&'static str>,
 }
 
 impl InferenceRequestMatcher {
@@ -32,6 +34,7 @@ impl InferenceRequestMatcher {
         InferenceRequestMatcher {
             endpoint,
             kind: InferenceRequestKind::Foreground,
+            containing: None,
         }
     }
 
@@ -40,11 +43,23 @@ impl InferenceRequestMatcher {
         InferenceRequestMatcher {
             endpoint,
             kind: InferenceRequestKind::Auxiliary,
+            containing: None,
         }
     }
 
+    /// Match only a request whose serialized body holds `needle`. A script
+    /// for one agent then cannot be taken by another agent's request.
+    pub fn containing(mut self, needle: &'static str) -> Self {
+        self.containing = Some(needle);
+        self
+    }
+
     fn matches(self, request: &InferenceRequest<'_>) -> bool {
-        self.endpoint == request.endpoint() && self.kind == request.kind()
+        self.endpoint == request.endpoint()
+            && self.kind == request.kind()
+            && self
+                .containing
+                .is_none_or(|needle| request.body().to_string().contains(needle))
     }
 }
 

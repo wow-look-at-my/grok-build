@@ -552,7 +552,11 @@ pub(crate) async fn run_shell_child(
         let msg = format!("Unknown subagent type: {}", request.subagent_type);
         return child_run_output(failure_result(&request, &msg), completion_data, None);
     };
-    match gate_subagent_type(&request.subagent_type, &ctx) {
+    match gate_subagent_type(
+        &request.subagent_type,
+        &ctx,
+        request.runtime_overrides.harness_role,
+    ) {
         SubagentValidateTypeOutcome::Disabled => {
             let msg = format!(
                 "Subagent '{}' is disabled via agents.subagents.toggle in config.json",

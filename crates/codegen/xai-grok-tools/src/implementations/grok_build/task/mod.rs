@@ -643,6 +643,8 @@ impl xai_tool_runtime::Tool for TaskTool {
                 loop_task_id: None,
                 // A model-issued spawn is never the goal verifier.
                 goal_verifier: false,
+                // The model issued this spawn, so the parent's allow-list applies.
+                harness_role: false,
                 resource,
             },
             run_in_background: input.run_in_background,

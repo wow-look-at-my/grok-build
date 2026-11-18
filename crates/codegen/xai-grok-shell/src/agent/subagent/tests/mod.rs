@@ -2110,6 +2110,45 @@ fn goal_harness_override_unresolvable_returns_unknown() {
         }
     }
 }
+/// An explore session may spawn only `explore` and `plan`. A `/goal` role is `general-purpose`, and the harness spawns it, so the list must not stop it.
+#[test]
+fn a_goal_role_spawn_passes_an_allow_list_that_stops_the_model() {
+    let mut ctx = ctx_with_toggle(HashMap::new());
+    ctx.allowed_subagent_types = xai_grok_agent::config::AgentDefinition::explore()
+        .allowed_subagent_types;
+    let role = crate::session::goal_planner::GOAL_ROLE_SUBAGENT_TYPE;
+    assert!(
+        matches!(
+            gate_subagent_type(role, &ctx, false),
+            SubagentValidateTypeOutcome::NotAllowed { .. }
+        ),
+        "the model's own spawn of `{role}` stays refused"
+    );
+    assert!(
+        matches!(
+            gate_subagent_type(role, &ctx, true),
+            SubagentValidateTypeOutcome::Ok
+        ),
+        "the harness's role spawn of `{role}` must pass"
+    );
+    assert!(
+        matches!(
+            describe_subagent_type(role, None, &ctx),
+            SubagentDescribeOutcome::Ok(_)
+        ),
+        "the role resolver must be able to describe `{role}`"
+    );
+}
+/// The toggle is the user's off switch for a type. A `/goal` role obeys it.
+#[test]
+fn a_goal_role_spawn_still_obeys_the_toggle() {
+    let role = crate::session::goal_planner::GOAL_ROLE_SUBAGENT_TYPE;
+    let ctx = ctx_with_toggle(HashMap::from([(role.to_string(), false)]));
+    assert!(matches!(
+        gate_subagent_type(role, &ctx, true),
+        SubagentValidateTypeOutcome::Disabled
+    ));
+}
 /// The model fallback only fires for a strict harness.
 /// A custom profile running a stock/vision model leaves subagents on the default harness, so they keep native image input.
 #[test]
