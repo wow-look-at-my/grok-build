@@ -644,8 +644,8 @@ async fn v2_session_is_pinned_to_isolated_storage_and_disables_legacy_pipeline()
                     .memory
                     .dream_count
                     .load(std::sync::atomic::Ordering::Relaxed),
-                1,
-                "the v2 Dream route should report a neutral no-work outcome"
+                2,
+                "the v2 Dream route should record one neutral pass for each scope"
             );
             assert!(!actor.memory.flush_config.enabled);
             assert_eq!(actor.idle_flush_timeout, None);
