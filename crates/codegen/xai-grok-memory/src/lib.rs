@@ -92,7 +92,7 @@ pub use v2_maintenance::{
 };
 pub use v2_recall::{
     V2Recall, V2RecallConfig, V2RecallError, V2RecallHit, V2RecallKind, V2RecallMode,
-    V2RecallOutcome,
+    V2RecallOutcome, V2RecallQuery,
 };
 
 pub(crate) const MEMORY_LOG_TARGET: &str = "xai_memory";

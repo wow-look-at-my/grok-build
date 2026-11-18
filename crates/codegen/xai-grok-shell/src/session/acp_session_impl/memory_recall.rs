@@ -58,6 +58,40 @@ pub(super) fn recall_delta_text(items: &[ConversationItem]) -> String {
     tail_chars(&parts.join("\n"), MAX_QUERY_CHARS).to_owned()
 }
 
+/// The text the embedding reads: the last user prompt in `items`, else the last assistant text.
+/// Tool-call arguments stay out. One vector over mixed text sits near no note.
+pub(super) fn recall_focus_text(items: &[ConversationItem]) -> Option<String> {
+    let mut last_assistant = None;
+    for item in items.iter().rev() {
+        match item {
+            ConversationItem::User(user)
+                if matches!(
+                    user.synthetic_reason,
+                    SyntheticReason::Human
+                        | SyntheticReason::Interjection
+                        | SyntheticReason::AgentMessage
+                        | SyntheticReason::ParentHumanMessage
+                ) =>
+            {
+                let text =
+                    xai_chat_state::compaction_utils::extract_user_query(&item.text_content());
+                if !text.trim().is_empty()
+                    && !xai_chat_state::compaction_utils::is_synthetic_extracted_query(&text)
+                {
+                    return Some(head_chars(&text, MAX_ITEM_CHARS).to_owned());
+                }
+            }
+            ConversationItem::Assistant(assistant)
+                if last_assistant.is_none() && !assistant.content.trim().is_empty() =>
+            {
+                last_assistant = Some(head_chars(&assistant.content, MAX_ITEM_CHARS).to_owned());
+            }
+            _ => {}
+        }
+    }
+    last_assistant
+}
+
 fn head_chars(text: &str, max_chars: usize) -> &str {
     match text.char_indices().nth(max_chars) {
         Some((end, _)) => text.get(..end).unwrap_or(text),
@@ -199,7 +233,9 @@ impl SessionActor {
             }
             (state.cursor, state.seen.clone())
         };
-        let delta = recall_delta_text(conversation.get(cursor..).unwrap_or_default());
+        let new_items = conversation.get(cursor..).unwrap_or_default();
+        let delta = recall_delta_text(new_items);
+        let focus = recall_focus_text(new_items);
         if delta.trim().is_empty() {
             self.memory.recall.state.borrow_mut().cursor = conversation.len();
             return;
@@ -237,7 +273,10 @@ impl SessionActor {
         let started_at = std::time::Instant::now();
         let outcome = recall
             .recall(
-                &delta,
+                xai_grok_memory::V2RecallQuery {
+                    text: &delta,
+                    focus: focus.as_deref(),
+                },
                 bounded
                     .as_ref()
                     .map(|provider| provider as &dyn EmbeddingProvider),
@@ -375,6 +414,34 @@ mod tests {
         assert!(!delta.contains("OS: linux"), "{delta}");
         assert!(!delta.contains("secret_tool_output"), "{delta}");
         assert!(!delta.contains("old reminder text"), "{delta}");
+    }
+
+    #[test]
+    fn the_focus_is_the_last_user_prompt_then_the_last_assistant_text() {
+        let earlier_reply = assistant_with_call("The parser tests pass.", r#"{"cmd":"test"}"#);
+        let later_reply = assistant_with_call(
+            "I will read the sandbox crate.",
+            r#"{"path":"crates/sandbox/src/landlock.rs"}"#,
+        );
+        let with_prompt = vec![
+            earlier_reply.clone(),
+            ConversationItem::user("fix the landlock jail"),
+            later_reply.clone(),
+        ];
+        assert_eq!(
+            recall_focus_text(&with_prompt).as_deref(),
+            Some("fix the landlock jail"),
+            "the user's words win over later assistant text"
+        );
+
+        let no_prompt = vec![earlier_reply, later_reply];
+        assert_eq!(
+            recall_focus_text(&no_prompt).as_deref(),
+            Some("I will read the sandbox crate.")
+        );
+
+        let only_a_call = vec![assistant_with_call("", r#"{"path":"a.rs"}"#)];
+        assert_eq!(recall_focus_text(&only_a_call), None);
     }
 
     #[test]

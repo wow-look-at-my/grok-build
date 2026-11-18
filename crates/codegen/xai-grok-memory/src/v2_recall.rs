@@ -119,6 +119,8 @@ pub struct V2RecallConfig {
     pub min_term_weight: f64,
     /// A semantic hit needs a cosine this many standard deviations above the query's mean cosine with `BASELINE_NOTES`.
     pub min_standard_score: f64,
+    /// A second semantic hit needs this share of the best standard score in the same recall.
+    pub runner_up_fraction: f64,
     pub snippet_chars: usize,
     pub max_chunks: usize,
     pub max_embed_per_call: usize,
@@ -132,7 +134,8 @@ impl Default for V2RecallConfig {
             max_hits: 4,
             min_matched_terms: 2,
             min_term_weight: 1.5,
-            min_standard_score: 3.0,
+            min_standard_score: 3.5,
+            runner_up_fraction: 0.6,
             snippet_chars: 320,
             max_chunks: 4096,
             max_embed_per_call: 64,
@@ -150,6 +153,24 @@ pub enum V2RecallMode {
     Hybrid,
     /// A provider was given and failed; the hits are lexical only. Carries the error text.
     EmbeddingFailed(String),
+}
+
+/// What one recall searches with.
+#[derive(Debug, Clone, Copy)]
+pub struct V2RecallQuery<'a> {
+    /// Every new piece of the conversation. Word matching reads all of it.
+    pub text: &'a str,
+    /// The last thing a person or the model said in `text`.
+    pub focus: Option<&'a str>,
+}
+
+impl<'a> From<&'a str> for V2RecallQuery<'a> {
+    fn from(text: &'a str) -> Self {
+        Self {
+            text,
+            focus: Some(text),
+        }
+    }
 }
 
 /// The result of one [`V2Recall::recall`] call.
@@ -247,14 +268,15 @@ impl V2Recall {
 
     /// Refresh the corpus from disk, then return the chunks relevant to `query`, best first.
     /// Chunks whose key is in `seen` are never returned and do not use up `max_hits`.
-    pub async fn recall(
+    pub async fn recall<'a>(
         &self,
-        query: &str,
+        query: impl Into<V2RecallQuery<'a>>,
         provider: Option<&dyn EmbeddingProvider>,
         seen: &HashSet<String>,
     ) -> Result<V2RecallOutcome, V2RecallError> {
+        let query: V2RecallQuery<'a> = query.into();
         let inner = Arc::clone(&self.inner);
-        let query_counts = term_counts(query);
+        let query_counts = term_counts(query.text);
         let (chunks, lexical) = tokio::task::spawn_blocking(move || {
             let chunks = inner.refresh()?;
             let query_terms =
@@ -265,9 +287,10 @@ impl V2Recall {
         .await
         .map_err(|error| V2RecallError::Task(error.to_string()))??;
 
-        let (mode, semantic) = match provider {
+        let focus = query.focus.filter(|focus| !focus.trim().is_empty());
+        let (mode, semantic) = match provider.zip(focus) {
             None => (V2RecallMode::Lexical, vec![None; chunks.len()]),
-            Some(provider) => match self.vector_scores(&chunks, query, provider).await {
+            Some((provider, focus)) => match self.vector_scores(&chunks, focus, provider).await {
                 Ok(scores) => (V2RecallMode::Hybrid, scores),
                 Err(error) => {
                     tracing::warn!(
@@ -474,17 +497,29 @@ impl V2Recall {
             / count;
         let spread = variance.sqrt().max(MIN_BASELINE_SPREAD);
 
-        let min_standard_score = self.inner.config.min_standard_score;
-        Ok(chunks
+        let standard_scores: Vec<Option<f64>> = chunks
             .iter()
             .map(|chunk| {
                 let vector = cached
                     .get(scope_slot(chunk.scope))
                     .and_then(|vectors| vectors.get(&chunk.hash))
                     .filter(|vector| vector.len() == query_vector.len())?;
-                let standard_score = (cosine(vector, &query_vector) - mean) / spread;
-                (standard_score >= min_standard_score).then_some(standard_score)
+                Some((cosine(vector, &query_vector) - mean) / spread)
             })
+            .collect();
+        // A weaker chunk beside a strong one is its neighbor in the model, not a second match.
+        let best = standard_scores
+            .iter()
+            .flatten()
+            .copied()
+            .fold(f64::NEG_INFINITY, f64::max);
+        let config = &self.inner.config;
+        let floor = config
+            .min_standard_score
+            .max(best * config.runner_up_fraction);
+        Ok(standard_scores
+            .into_iter()
+            .map(|score| score.filter(|score| *score >= floor))
             .collect())
     }
 }

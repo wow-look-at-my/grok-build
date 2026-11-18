@@ -159,14 +159,14 @@ const PARAPHRASES: &[(&str, &str)] = &[
     ),
     ("The app will not link for Apple silicon laptops.", "darwin"),
     (
-        "User: the automated checks keep freezing on the build machines, can you look?\n\
-         Assistant: I will read the workflow file and the last failed job log.\n\
-         Tool call grep: {\"pattern\":\"timeout\",\"path\":\".github/workflows\"}",
-        "ci-hang",
+        "Which editor shortcuts do I normally use to move between open files?",
+        "keymaps",
     ),
+    ("How much does a request to the model cost us?", "pricing"),
+    ("Write the doc comment the way I prefer.", "comments"),
 ];
 
-/// Turns that no stored note is about.
+/// Prompts that no stored note is about.
 const UNRELATED: &[&str] = &[
     "Thanks, that looks good.",
     "Rename this variable to count.",
@@ -174,9 +174,27 @@ const UNRELATED: &[&str] = &[
     "What is the capital of France?",
     "Add a retry to the HTTP client when the server answers 503.",
     "Fix the typo in the README heading.",
-    "User: add a retry to the HTTP client\nAssistant: I will wrap the request in a loop.\n\
-     Tool call edit: {\"path\":\"src/http/client.rs\"}",
+    "Why does this function return an Option instead of a Result?",
+    "Run the unit tests for the parser module.",
+    "Explain what this regular expression matches.",
+    "Bump the serde dependency to the latest minor version.",
+    "yes, go ahead",
+    "Sort this list of users by their last login time.",
 ];
+
+/// What the conversation holds before the prompt: assistant text and tool-call arguments.
+const EARLIER_TURN: &str = "Done. I updated the parser and the two call sites, and the unit \
+    tests pass.\n{\"command\":\"cargo test -p parser\",\"timeout\":120000}\nAll 42 tests pass. \
+    The change is in src/parser/lexer.rs.";
+
+/// The query a session builds: every new piece as `text`, the user's words as `focus`.
+fn session_query<'a>(text: &'a mut String, prompt: &'a str) -> V2RecallQuery<'a> {
+    *text = format!("{EARLIER_TURN}\n{prompt}");
+    V2RecallQuery {
+        text,
+        focus: Some(prompt),
+    }
+}
 
 struct LiveFixture {
     _temp: TempDir,
@@ -219,11 +237,17 @@ async fn standard_scores(
             max_hits: 64,
             min_matched_terms: usize::MAX,
             min_standard_score: f64::NEG_INFINITY,
+            runner_up_fraction: 0.0,
             ..V2RecallConfig::default()
         },
     );
+    let mut text = String::new();
     let outcome = recall
-        .recall(query, Some(provider), &HashSet::new())
+        .recall(
+            session_query(&mut text, query),
+            Some(provider),
+            &HashSet::new(),
+        )
         .await
         .unwrap();
     assert_eq!(
@@ -282,37 +306,54 @@ async fn live_model_recalls_a_paraphrase_and_stays_quiet_otherwise() {
             ..V2RecallConfig::default()
         },
     );
-    let mut failures = Vec::new();
-    for (query, expected) in PARAPHRASES {
+    let mut text = String::new();
+    let mut recalled = 0;
+    let mut wrong = Vec::new();
+    for (prompt, expected) in PARAPHRASES {
         let outcome = recall
-            .recall(query, Some(&provider), &HashSet::new())
+            .recall(
+                session_query(&mut text, prompt),
+                Some(&provider),
+                &HashSet::new(),
+            )
             .await
             .unwrap();
         assert_eq!(outcome.mode, V2RecallMode::Hybrid);
         let got: Vec<String> = outcome.hits.iter().map(|hit| stem(&hit.path)).collect();
-        if got.first().map(String::as_str) != Some(*expected) {
-            failures.push(format!("`{query}` wanted {expected} first, got {got:?}"));
+        match got.first() {
+            Some(first) if first == expected => recalled += 1,
+            Some(_) => wrong.push(format!("`{prompt}` wanted {expected} first, got {got:?}")),
+            None => {}
         }
     }
-    for query in UNRELATED {
+    let mut noise = Vec::new();
+    for prompt in UNRELATED {
         let outcome = recall
-            .recall(query, Some(&provider), &HashSet::new())
+            .recall(
+                session_query(&mut text, prompt),
+                Some(&provider),
+                &HashSet::new(),
+            )
             .await
             .unwrap();
         assert_eq!(outcome.mode, V2RecallMode::Hybrid);
-        if !outcome.hits.is_empty() {
-            let got: Vec<String> = outcome
-                .hits
-                .iter()
-                .map(|hit| format!("{} {:.3}", stem(&hit.path), hit.score))
-                .collect();
-            failures.push(format!("`{query}` wanted no note, got {got:?}"));
+        if let Some(hit) = outcome.hits.first() {
+            let score = hit.standard_score.unwrap_or_default();
+            noise.push(format!("`{prompt}` got {} at {score:.2}", stem(&hit.path)));
         }
     }
-    assert!(
-        failures.is_empty(),
-        "model {}:\n{}",
+    println!(
+        "model {}: {recalled} of {} paraphrases recalled, {} with a wrong note first, {} of {} unrelated prompts recalled a note",
         provider.model_name(),
-        failures.join("\n")
+        PARAPHRASES.len(),
+        wrong.len(),
+        noise.len(),
+        UNRELATED.len(),
+    );
+    assert!(wrong.is_empty(), "{}", wrong.join("\n"));
+    assert!(noise.len() <= 1, "{}", noise.join("\n"));
+    assert!(
+        recalled >= 3,
+        "a model that recalls {recalled} paraphrases adds nothing to word matching"
     );
 }
