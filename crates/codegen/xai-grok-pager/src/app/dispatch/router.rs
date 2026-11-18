@@ -76,8 +76,8 @@ use super::session::load::{
 };
 use super::session::modal::{dispatch_rename_session, dispatch_reset_session_title};
 use super::settings::setters::{
-    clear_default_model, clear_subagent_model_inheritance, clear_two_pass_compaction,
-    preview_auto_dark_theme, preview_auto_light_theme, preview_theme,
+    clear_default_model, clear_session_recap, clear_subagent_model_inheritance,
+    clear_two_pass_compaction, preview_auto_dark_theme, preview_auto_light_theme, preview_theme,
     set_ask_user_question_timeout_enabled, set_auto_dark_theme, set_auto_light_theme,
     set_collapsed_edit_blocks, set_combine_queued_prompts, set_compact_mode,
     set_confirm_before_rewind, set_contextual_hint_export_copy, set_contextual_hint_image_input,
@@ -90,7 +90,8 @@ use super::settings::setters::{
     set_output_rate_max_retries, set_output_rate_sustained_secs, set_output_rate_window_secs,
     set_page_flip_on_send, set_prompt_suggestions, set_remember_tool_approvals, set_render_mermaid,
     set_respect_manual_folds, set_scroll_lines, set_scroll_mode, set_scroll_speed,
-    set_show_thinking_blocks, set_show_tips, set_split_and_tee_commands, set_stop_gate_ci_failing,
+    set_session_recap, set_show_thinking_blocks, set_show_tips, set_split_and_tee_commands,
+    set_stop_gate_ci_failing,
     set_stop_gate_unfinished_todos, set_subagent_model, set_subagent_model_inheritance, set_theme,
     set_thinking_summaries, set_thinking_summary_history_min_count,
     set_thinking_summary_history_window_secs, set_timeline, set_timestamps, set_ttft_timeout_secs,
@@ -1124,6 +1125,8 @@ fn dispatch_inner(action: Action, app: &mut AppView) -> Vec<Effect> {
         Action::ClearSubagentModelInheritance => clear_subagent_model_inheritance(app),
         Action::SetTwoPassCompaction(v) => set_two_pass_compaction(app, v),
         Action::ClearTwoPassCompaction => clear_two_pass_compaction(app),
+        Action::SetSessionRecap(v) => set_session_recap(app, v),
+        Action::ClearSessionRecap => clear_session_recap(app),
         Action::SetKeepTextSelection(v) => set_keep_text_selection(app, v),
         Action::SetScrollSpeed(v) => set_scroll_speed(app, v),
         Action::SetScrollMode(v) => set_scroll_mode(app, v),

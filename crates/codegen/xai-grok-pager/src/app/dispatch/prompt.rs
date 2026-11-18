@@ -691,6 +691,7 @@ pub(super) fn dispatch_send_prompt_submission(
     let voice_stt_language_from_app = app.voice_config.language.clone();
     let subagent_model_inheritance_from_app = app.subagent_model_inheritance;
     let two_pass_compaction_from_app = app.two_pass_compaction;
+    let session_recap_from_app = app.session_recap;
     let keep_awake_from_app = app.notification_service.sleep_inhibitor.mode();
     let context_limits_from_app = app.model_context_limits.clone();
     let login_method_id_from_app = app.login_method_id.as_ref().map(|id| id.0.to_string());
@@ -826,6 +827,7 @@ pub(super) fn dispatch_send_prompt_submission(
                     voice_stt_language: voice_stt_language_from_app,
                     subagent_model_inheritance: subagent_model_inheritance_from_app,
                     two_pass_compaction: two_pass_compaction_from_app,
+                    session_recap: session_recap_from_app,
                     model_windows: crate::settings::context_limits::catalog_windows(
                         &agent.session.models.available,
                     ),
