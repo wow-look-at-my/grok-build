@@ -122,24 +122,7 @@ When a session ends, Grok saves a structured metadata summary to that session's 
 
 Grok builds the summary from conversation metadata without an LLM call, without added latency. Grok skips the save for trivial sessions -- those with fewer than three substantive prompts, or fewer than 50 bytes of user text.
 
-The summary does not record tool usage, file paths, or shell commands. The session ID forms part of the log filename. To turn automatic saves off, set `session.save_on_end = false`. For richer capture of decisions, patterns, and reasoning, use `/flush`.
-
----
-
-## Saving Rich Knowledge with /flush
-
-For richer capture -- decisions, patterns, debugging workflows, API discoveries -- use `/flush` in the TUI:
-
-```
-/flush
-```
-
-This triggers an LLM-generated summary of the current session's most important content and writes it to a dated session log. The summary is indexed and searchable in future sessions.
-
-Use `/flush` when you want to preserve important context:
-- Before compaction (which discards old conversation turns)
-- At the end of a productive debugging session
-- After discovering important patterns or conventions
+The summary does not record tool usage, file paths, or shell commands. The session ID forms part of the log filename. To turn automatic saves off, set `session.save_on_end = false`. Decisions, patterns, and reasoning are captured after every turn, with no command.
 
 ---
 
