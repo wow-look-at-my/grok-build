@@ -91,7 +91,17 @@ pub(crate) async fn test_grok_build_agent_with_todo() -> xai_grok_agent::Agent {
 /// Give `actor` the real `todo_write` tool, bound to its live todo list.
 #[cfg(test)]
 pub(crate) async fn arm_todo_writes(actor: &mut SessionActor) {
-    *actor.agent.borrow_mut() = test_grok_build_agent_with_todo().await;
+    use xai_grok_tools::implementations::grok_build::todo::TodoWriteTool;
+    use xai_grok_tools::registry::types::ToolConfig;
+    arm_tools(actor, vec![ToolConfig::for_tool::<TodoWriteTool>()]).await;
+}
+/// Give `actor` an agent that has exactly `tools`, bound to its live session.
+#[cfg(test)]
+pub(crate) async fn arm_tools(
+    actor: &mut SessionActor,
+    tools: Vec<xai_grok_tools::registry::types::ToolConfig>,
+) {
+    *actor.agent.borrow_mut() = test_agent_with_tools(tools).await;
     actor
         .workspace_ops
         .bind_local_session(

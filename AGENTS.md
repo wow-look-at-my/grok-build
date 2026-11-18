@@ -154,9 +154,19 @@ CI is the source of truth and builds every pushed branch. A branch that is only 
 ## Lite `/goal` mode
 
 - `/goal <objective>` is lite: no planner and no skeptic panel. `/goal --full <objective>` runs the planner and the full panel. A flag may also be the last token. `parse_goal_args` resolves the mode, and `GoalOrchestration::mode` holds it. A snapshot with no `mode` field reads as `Full`.
-- A lite goal starts the way `/todo <objective>` does. So does a full goal when the planner is off. `setup_goal` runs the capture (`run_todo_capture`) before it creates the goal. A capture that adds nothing returns an error, and no goal starts. A goal never runs without todos.
+- A lite goal starts the way `/todo <objective>` does. So does a full goal when the planner is off. `setup_goal` runs the capture (`run_todo_capture`) before it creates the goal. No capture failure stops the goal. When the capture adds nothing, the objective itself goes on the list as one item (`append_objective_todo`). An agent with no todo tool has no list. Its goal starts with no capture (`TodoCaptureError::NoTodoTool`). The evaluator is the check.
 - The per-round evaluator (`goal_evaluator.rs`) is the whole check. Its `candidate_complete` ends the goal (`complete_lite_goal`). Any other verdict sends the model back. And the directive carries the evaluator's evidence as the reason. The evaluator prompt changes with the mode, because a lite verdict is last.
 - Every planner entry and plan-path read goes through `goal_planner_on()`, which is false for a lite goal. That includes the load-time reconcile, which otherwise pauses an active goal that has no plan.
+
+## `/goal` in explore mode
+
+- Explore keeps a todo list (`TodoWriteTool` in `explore_toolset`). The list is session state. The workspace stays read-only. `every_shift_tab_agent_keeps_a_todo_list` is the guard.
+- The harness spawns each `/goal` role (planner, skeptic, summarizer, strategist) as a `general-purpose` child. `SubagentRuntimeOverrides::harness_role` exempts that spawn from the parent's `allowed_subagent_types`, which limits the model's own spawns. `[subagents.toggle]` still applies.
+- The planner is a forked child, so it offers the parent's tools. Under explore it has no tool that writes a file. `RoleToolNames::can_write` is then false: the prompt gets `PLAN_BY_REPLY_INSTRUCTION`, the planner replies with the plan, and the harness saves that reply (`reply_is_a_plan` in `goal_planner.rs`).
+- A skeptic is not forked. It keeps its own tools under an explore parent. It can run a command.
+- `pty_e2e_queue::goal_starts_in_explore_mode` and `goal_plan_is_published_in_explore_mode` run these flows in the real pager with a scripted model, and CI runs them. `live_model::live_goal_runs_in_explore_mode` runs them against a live model. It needs the `GROK_LIVE_*` variables that [docs/background-waits-and-the-goal-check.md](docs/background-waits-and-the-goal-check.md) names.
+- A todo item's verifier is different: the model writes its condition, so the allow-list applies. Under a list that leaves out `general-purpose`, it runs as the first allowed type that can run (`verifier_subagent_type` in `grok_build/todo/mod.rs`).
+
 ## A give-up claim is reviewed, not counted
 
 - The agent claims it cannot finish with a `## Cannot complete` section in its reply. The round end calls `review_blocked_claim` (`acp_session_impl/goal.rs`) before the todo bounce. Lite and full share this path.

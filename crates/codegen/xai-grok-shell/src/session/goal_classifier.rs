@@ -511,6 +511,7 @@ impl ChannelSpawner {
                 harness_agent_type,
                 // The skeptic audits the work.
                 goal_verifier: true,
+                harness_role: true,
                 ..Default::default()
             },
             run_in_background: false,

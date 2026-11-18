@@ -223,6 +223,7 @@ mod tests {
             output_schema: None,
             loop_task_id: None,
             goal_verifier: false,
+            harness_role: false,
             resource: None,
         }
     }

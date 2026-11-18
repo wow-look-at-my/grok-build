@@ -301,3 +301,198 @@ fn live_goal_turn_idles_on_background_work_and_is_checked_after_the_wake() {
     harness.inject_keys(b"\x11").expect("ctrl-q confirm");
     let _ = harness.quit();
 }
+
+/// Text the pager shows when explore mode stops a goal or one of its subagents.
+const EXPLORE_REFUSALS: [&str; 3] = ["Goal not started", "No plan was produced", "not allowed"];
+/// A function only `src/marker.rs` of the sandbox workspace defines.
+const MARKER_FN: &str = "live_marker_fn_7421";
+const MARKER_FILE: &str = "marker.rs";
+/// The last line of the goal-start reminder.
+const GOAL_START: &str = "Start now.";
+
+/// The main session's chat history, or nothing while no session has a history file.
+fn chat_history_if_any(grok_home: &Path) -> Vec<Value> {
+    let has_history = std::fs::read_dir(grok_home.join("sessions"))
+        .into_iter()
+        .flatten()
+        .flatten()
+        .flat_map(|cwd_dir| {
+            std::fs::read_dir(cwd_dir.path())
+                .into_iter()
+                .flatten()
+                .flatten()
+        })
+        .any(|session| session.path().join("chat_history.jsonl").is_file());
+    if has_history {
+        chat_history(grok_home)
+    } else {
+        Vec::new()
+    }
+}
+
+/// A live model runs a goal in a session that Shift+Tab put in explore mode.
+/// The goal must start, and the model must find a file with explore's tools.
+/// `GROK_LIVE_GOAL_MODE=full` adds the planner, which has no tool that writes a file there.
+#[cfg(unix)]
+#[test]
+#[ignore = "live model; needs GROK_LIVE_BASE_URL, GROK_LIVE_MODEL and GROK_LIVE_KEY_ENV"]
+fn live_goal_runs_in_explore_mode() {
+    let base_url = required_env("GROK_LIVE_BASE_URL");
+    let model = required_env("GROK_LIVE_MODEL");
+    let key_env = required_env("GROK_LIVE_KEY_ENV");
+    let key = required_env(&key_env);
+
+    let sandbox = TestSandbox::new();
+    let grok_home = sandbox.grok_home().to_path_buf();
+    let workspace = sandbox.workspace().to_path_buf();
+    let config = json!({
+        "models": {
+            "default": "live",
+            "providers": {
+                "live": { "base_url": base_url, "env_key": key_env, "models_autodetect": false }
+            },
+            "definitions": {
+                "live": { "model_provider": "live", "model": model, "context_window": 200_000 }
+            }
+        }
+    });
+    std::fs::write(grok_home.join("config.json"), config.to_string()).expect("write config");
+    std::fs::create_dir_all(workspace.join("src")).expect("make src");
+    std::fs::write(
+        workspace.join("src").join(MARKER_FILE),
+        format!("pub fn {MARKER_FN}() {{}}\n"),
+    )
+    .expect("write the marker file");
+
+    let mut env: Vec<(String, String)> = vec![
+        (key_env.clone(), key),
+        ("GROK_GOAL".into(), "1".into()),
+        ("TERM".into(), "xterm-256color".into()),
+        ("COLORTERM".into(), "truecolor".into()),
+    ];
+    for name in NETWORK_ENV {
+        if let Ok(value) = std::env::var(name) {
+            env.push((name.to_owned(), value));
+        }
+    }
+    let env_refs: Vec<(&str, &str)> = env.iter().map(|(k, v)| (k.as_str(), v.as_str())).collect();
+
+    // No `--yolo`: the ring then starts at its first stop.
+    let binary = pager_binary().expect("resolve pager binary");
+    let mut harness = PtyHarness::new_in_sandbox(
+        &binary,
+        160,
+        140,
+        &["--trust"],
+        &sandbox,
+        &env_refs,
+        Some(&workspace),
+    )
+    .expect("spawn pager");
+    harness
+        .wait_for_text(WELCOME, Duration::from_secs(30))
+        .unwrap_or_else(|e| panic!("welcome: {e:#}\nscreen:\n{}", harness.screen_contents()));
+
+    // One turn first: the ring is cycled inside a session.
+    harness
+        .inject_keys(b"Reply with one short sentence. Use no tool.\r")
+        .expect("submit the first prompt");
+    let answered = wait_until(Duration::from_secs(300), || {
+        harness.update(Duration::from_millis(200));
+        assistant_items(&chat_history_if_any(&grok_home))
+            .iter()
+            .any(|item| {
+                !item["content"]
+                    .as_str()
+                    .unwrap_or_default()
+                    .trim()
+                    .is_empty()
+            })
+    });
+    assert!(
+        answered,
+        "the live model must answer the first prompt\nscreen:\n{}",
+        harness.screen_contents()
+    );
+    harness.update(Duration::from_secs(3));
+    for mode in ["Plan", "Auto", "Always-Approve", "Orchestrator", "Explore"] {
+        harness.inject_keys(b"\x1b[Z").expect("inject BackTab");
+        harness
+            .wait_for_text(
+                &format!("Switched to mode: {mode}"),
+                Duration::from_secs(30),
+            )
+            .unwrap_or_else(|e| {
+                panic!(
+                    "the ring must reach {mode}: {e:#}\nscreen:\n{}",
+                    harness.screen_contents()
+                )
+            });
+    }
+
+    let goal = format!(
+        "{} Find the file in this workspace that defines the function {MARKER_FN}. Tell me its path.",
+        goal_command()
+    );
+    harness.inject_keys(goal.as_bytes()).expect("type goal");
+    harness.update(Duration::from_millis(500));
+    harness.inject_keys(b"\r").expect("submit goal");
+
+    // The goal starts, and the model names the file.
+    let mut refused = None;
+    let found = wait_until(Duration::from_secs(900), || {
+        harness.update(Duration::from_millis(200));
+        let screen = harness.screen_contents();
+        refused = EXPLORE_REFUSALS
+            .into_iter()
+            .find(|refusal| screen.contains(refusal));
+        refused.is_some()
+            || assistant_items(&chat_history_if_any(&grok_home))
+                .iter()
+                .any(|item| {
+                    item["content"]
+                        .as_str()
+                        .unwrap_or_default()
+                        .contains(MARKER_FILE)
+                })
+    });
+    let screen = harness.screen_contents();
+    assert!(
+        refused.is_none(),
+        "explore mode must not show `{}`\n{}\nscreen:\n{screen}",
+        refused.unwrap_or_default(),
+        run_summary(&grok_home)
+    );
+    assert!(
+        found,
+        "the live model must name the file under a goal in explore mode\n{}\nscreen:\n{screen}",
+        run_summary(&grok_home)
+    );
+    let history = chat_history(&grok_home);
+    assert!(
+        history
+            .iter()
+            .any(|item| item["type"] == "user" && item.to_string().contains(GOAL_START)),
+        "the goal must have started: no goal-start reminder is in the history\nscreen:\n{screen}"
+    );
+
+    // The main session ran as explore: it called no shell and no edit tool.
+    let calls: Vec<String> = assistant_items(&history)
+        .iter()
+        .flat_map(|item| tool_call_names(item))
+        .collect();
+    println!("LIVE explore goal tool calls: {calls:?}");
+    for absent in ["run_terminal_command", "search_replace", "write"] {
+        assert!(
+            !calls.iter().any(|call| call == absent),
+            "an explore session must not call `{absent}`: {calls:?}"
+        );
+    }
+
+    harness.update(Duration::from_secs(2));
+    println!("LIVE final screen:\n{}", harness.screen_contents());
+    harness.inject_keys(b"\x11").expect("ctrl-q once");
+    harness.update(Duration::from_millis(300));
+    harness.inject_keys(b"\x11").expect("ctrl-q confirm");
+    let _ = harness.quit();
+}
