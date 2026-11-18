@@ -965,6 +965,7 @@ fn home_session_create_failure_clears_placeholder_keeps_draft_and_warns() {
     maybe_create_home_session(&mut app);
     app.welcome_prompt_focused = true;
     app.welcome_prompt.set_text("keep me");
+    app.welcome_prompt.set_cursor("keep me".len());
     let home = app.home_session_agent.expect("home session");
 
     let effects = dispatch(
