@@ -75,7 +75,7 @@ fn observation(statement: &str, keywords: &[&str], aliases: &[&str], body: Optio
 }
 
 fn top(outcome: &V2RecallOutcome) -> &V2RecallHit {
-    outcome.hits.first().expect("recall returned no hit")
+    outcome.hits.first().unwrap()
 }
 
 async fn lexical(recall: &V2Recall, query: &str) -> V2RecallOutcome {

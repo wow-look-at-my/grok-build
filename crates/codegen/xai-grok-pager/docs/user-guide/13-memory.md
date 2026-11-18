@@ -21,13 +21,7 @@ Memory has two scopes. Global memory holds facts that apply across all your
 projects; workspace memory holds facts about one repository. Clones and
 worktrees of the same repository share one workspace scope.
 
-Each scope keeps its knowledge as ordinary Markdown files. `topics/` holds
-curated notes, one file per subject, and is what Grok reads at the start of a
-session. New facts captured after each turn, including a turn you stop before it
-finishes, land as small observations that a later consolidation pass
-folds into topics. A bounded generated
-index of both scopes is injected into the model's context once per session so
-it can decide which topics to open.
+Each scope keeps its knowledge as ordinary Markdown files. `topics/` holds curated notes, one file per subject, and is what Grok reads at the start of a session. New facts captured after each turn, including a turn you stop before it finishes, land as small observations. Those observations are ones that a later consolidation pass folds into topics. A bounded generated index of both scopes is injected into the model's context once per session so it can decide which topics to open.
 
 ### Memory runs by itself
 
