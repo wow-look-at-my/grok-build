@@ -168,7 +168,7 @@ Grok searches across all memory files and summarizes what it knows, grouped by s
 
 ### Direct Editing
 
-You can edit memory files directly under `~/.grok/memory/`. The file watcher reindexes your changes on the next memory search. Use `/flush` to save the current session now, and `/dream` to consolidate session logs into organized topics.
+You can edit memory files directly under `~/.grok/memory/`. The file watcher reindexes your changes on the next memory search.
 
 ---
 
@@ -219,23 +219,17 @@ When you save a note with `/remember`, Grok confirms in the scrollback:
 Memory saved to ~/.grok/memory/MEMORY.md
 ```
 
-Background saves — automatic flush, automatic Dream, and session-end — run silently and do not post a scrollback message. `/flush` and `/dream` report their outcome in scrollback when you run them yourself. Use `/memory` at any time to browse what Grok has stored.
+Background saves (capture, consolidation, and session-end) run silently. A failed consolidation posts one scrollback line. The captured notes stay pending, and consolidation runs again after the next capture or at the next session start. Use `/memory` at any time to browse what Grok stored.
 
 ---
 
-## Dream Consolidation with /dream
+## Consolidation
 
-The `/dream` command consolidates scattered memory fragments into organized topics:
-
-```
-/dream
-```
-
-Dream reorganizes individual session logs and memory entries into a coherent, deduplicated knowledge base, which reduces noise and improves search quality over time. `/dream` requires memory to be enabled.
+Consolidation (Dream) folds captured notes into a deduplicated set of topics, which reduces noise and improves search quality over time. It runs by itself. There is no command for it.
 
 ### Auto-Dream
 
-Dream also runs automatically. By default, Grok checks the consolidation gates at launch and periodically during a session, and runs Dream once enough time has passed and enough sessions have accumulated:
+By default, Grok checks the consolidation gates at launch and periodically during a session. It runs Dream once enough time passes and enough sessions collect:
 
 ```json
 {
