@@ -5,11 +5,12 @@ use crate::session::memory::capture_transcript::{
     CondensationStats, CondensedTranscript, TranscriptBudget, condense_turn_transcript,
 };
 use crate::session::memory::v2_capture::{
-    CaptureActivity, FLUSH_TIMEOUT, FlushResult, extraction_schema, missing_range,
-    parse_model_outcome,
+    CaptureActivity, FLUSH_TIMEOUT, FlushResult, ScopedCaptureOutcome, extraction_schema,
+    missing_range, parse_scoped_model_outcome,
 };
 use xai_grok_memory::{
-    CaptureLease, CaptureOutcomeDraft, ClaimRequest, SharedV2Clock, V2CaptureStore, V2MemoryScope,
+    CaptureLease, CaptureOutcomeDraft, ClaimRequest, SharedV2Clock, V2CaptureError, V2CaptureStore,
+    V2MemoryScope,
 };
 use xai_grok_sampling_types::ReasoningEffort;
 use xai_grok_telemetry::memory_telemetry::MemoryV2FailureClass;
@@ -195,7 +196,7 @@ fn classify_extraction_output(
     stop_reason: &str,
     model: &str,
     created_at: i64,
-) -> Result<xai_grok_memory::CaptureOutcomeDraft, CaptureExtractionFailure> {
+) -> Result<ScopedCaptureOutcome, CaptureExtractionFailure> {
     use xai_grok_telemetry::memory_telemetry::MemoryV2FailureClass;
     if stop_reason == CONTENT_FILTER_STOP_REASON {
         // Deterministic on the input; resampling is a retry storm, and any
@@ -216,9 +217,69 @@ fn classify_extraction_output(
             format!("empty extraction output (stop reason: {stop_reason})"),
         ));
     }
-    parse_model_outcome(text, model, created_at).map_err(|detail| {
+    parse_scoped_model_outcome(text, model, created_at).map_err(|detail| {
         CaptureExtractionFailure::retryable(MemoryV2FailureClass::MalformedOutput, detail)
     })
+}
+
+/// Commit the observations that hold in every workspace to the global scope, under the job
+/// range the workspace job has. It runs before the workspace commit: a crash between both
+/// leaves the workspace job to run again. The finished global job then takes nothing more.
+fn commit_global_observations(
+    global_dir: &std::path::Path,
+    job: &xai_grok_memory::CaptureJob,
+    owner: &str,
+    observations: Vec<xai_grok_memory::ObservationDraft>,
+    is_exposed: bool,
+    clock: &SharedV2Clock,
+) -> Result<Vec<crate::extensions::notification::MemoryCaptureDebugEntry>, V2CaptureError> {
+    let store = V2CaptureStore::open_with_clock(global_dir, V2MemoryScope::Global, clock.clone())?;
+    store.ensure_session(&job.session_id)?;
+    store.enqueue_for_prompt_with_visibility(
+        &job.session_id,
+        job.range,
+        job.source_prompt_index,
+        is_exposed,
+    )?;
+    let now = clock.now_unix_seconds();
+    let Some(lease) = store.claim_for_session(
+        &job.session_id,
+        &ClaimRequest {
+            owner: owner.to_owned(),
+            now,
+            duration: CAPTURE_LEASE,
+        },
+    )?
+    else {
+        return Ok(Vec::new());
+    };
+    if lease.job.range != job.range {
+        let detail = format!(
+            "global capture queue holds turns {}-{} while the workspace job covers {}-{}",
+            lease.job.range.from_turn(),
+            lease.job.range.through_turn(),
+            job.range.from_turn(),
+            job.range.through_turn(),
+        );
+        store.release_retryable(&lease, &detail)?;
+        return Err(V2CaptureError::Conflict(detail));
+    }
+    let outcome = CaptureOutcomeDraft::Observations(observations);
+    match store.commit(&lease, &outcome, now) {
+        Ok(result) => Ok(capture_debug_entries(outcome, result.files, global_dir)),
+        Err(error) => {
+            if let Err(release) = store.fail_retryable(&lease, now, &error.to_string())
+                && !matches!(release, V2CaptureError::StaleLease)
+            {
+                tracing::warn!(
+                    error = %release,
+                    job_id = %lease.job.job_id,
+                    "memory-v2 global capture lease release failed"
+                );
+            }
+            Err(error)
+        }
+    }
 }
 
 const CONTENT_FILTER_STOP_REASON: &str = "content_filter";
@@ -327,6 +388,9 @@ const EXTRACTION_SYSTEM_PROMPT: &str = "You maintain the long-term memory of a c
     `keywords` are the words a later conversation about this subject would use. `aliases` are \
     other names for the same thing. `topic_hint` names the broad subject area the observation \
     belongs to (a system, repository area, tool, person, or workflow), not the specific fact. \
+    `scope` is `global` when the fact holds in every repository: who the user is, how the user \
+    likes to work, the tools and accounts of this machine. It is `workspace` when the fact is \
+    about this repository. \
     Do not record secrets or credentials, a log of what this turn did, the progress of the \
     current task, or guesses. Do not repeat a fact that `recorded_memory_index` already lists. \
     When the turn changes or contradicts a listed fact, record the new fact and name what it \
@@ -734,6 +798,8 @@ impl SessionActor {
             return false;
         };
         let workspace_dir = storage.workspace_dir().to_path_buf();
+        let global_dir = storage.global_dir().to_path_buf();
+        let is_exposed = session_snapshot.memory.can_expose_v2();
         let open_workspace_dir = workspace_dir.clone();
         let session_id = session_snapshot.session_info.id.to_string();
         let session_dir = crate::session::persistence::session_dir(&session_snapshot.session_info);
@@ -829,29 +895,50 @@ impl SessionActor {
             .await;
             let latency_ms = started_at.elapsed().as_millis() as u64;
             match outcome {
-                Ok((outcome, usage)) => {
-                    let activity = if matches!(outcome, CaptureOutcomeDraft::Noop) {
-                        CaptureActivity::Noop
-                    } else {
+                Ok((scoped, usage)) => {
+                    let observation_count = scoped.observation_count();
+                    let has_observations = observation_count > 0;
+                    let activity = if has_observations {
                         CaptureActivity::Completed
+                    } else {
+                        CaptureActivity::Noop
                     };
-                    let observation_count = match &outcome {
-                        CaptureOutcomeDraft::Noop => 0,
-                        CaptureOutcomeDraft::Observations(observations) => observations.len(),
-                    };
-                    let has_observations = matches!(&outcome, CaptureOutcomeDraft::Observations(_));
+                    let ScopedCaptureOutcome {
+                        workspace: outcome,
+                        global: global_observations,
+                    } = scoped;
                     let persist_store = store.clone();
                     let persist_lease = lease.clone();
                     let persist_workspace_dir = workspace_dir.clone();
+                    let persist_global_dir = global_dir.clone();
+                    let persist_owner = owner.clone();
+                    let persist_clock = clock.clone();
                     let now = clock.now_unix_seconds();
                     let persisted = xai_spawn::spawn_blocking(move || {
-                        match persist_store.commit(&persist_lease, &outcome, now) {
-                            Ok(result) => {
-                                let memories = capture_debug_entries(
+                        let global_memories = if global_observations.is_empty() {
+                            Ok(Vec::new())
+                        } else {
+                            commit_global_observations(
+                                &persist_global_dir,
+                                &persist_lease.job,
+                                &persist_owner,
+                                global_observations,
+                                is_exposed,
+                                &persist_clock,
+                            )
+                        };
+                        let committed = global_memories.and_then(|global_memories| {
+                            let result = persist_store.commit(&persist_lease, &outcome, now)?;
+                            Ok((result, global_memories))
+                        });
+                        match committed {
+                            Ok((result, global_memories)) => {
+                                let mut memories = capture_debug_entries(
                                     outcome,
                                     result.files,
                                     &persist_workspace_dir,
                                 );
+                                memories.extend(global_memories);
                                 lease_guard.disarm();
                                 CapturePersistResult::Committed(memories)
                             }

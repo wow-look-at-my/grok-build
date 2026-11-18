@@ -86,6 +86,9 @@ enum ModelOutcomeKind {
 struct ModelObservation {
     #[serde(rename = "type")]
     observation_type: String,
+    /// `global` or `workspace`. An absent scope is the workspace.
+    #[serde(default)]
+    scope: Option<String>,
     topic_hint: Option<String>,
     statement: String,
     #[serde(default)]
@@ -95,6 +98,69 @@ struct ModelObservation {
     body: Option<String>,
 }
 
+/// One extraction, split by the scope each observation belongs to.
+#[derive(Debug, Clone, PartialEq, Eq)]
+pub(crate) struct ScopedCaptureOutcome {
+    /// What the workspace job commits. `Noop` when every observation is global.
+    pub(crate) workspace: CaptureOutcomeDraft,
+    /// Observations that hold in every workspace.
+    pub(crate) global: Vec<ObservationDraft>,
+}
+
+impl ScopedCaptureOutcome {
+    pub(crate) fn observation_count(&self) -> usize {
+        let workspace = match &self.workspace {
+            CaptureOutcomeDraft::Noop => 0,
+            CaptureOutcomeDraft::Observations(observations) => observations.len(),
+        };
+        workspace + self.global.len()
+    }
+}
+
+pub(crate) fn parse_scoped_model_outcome(
+    text: &str,
+    model: &str,
+    created_at: i64,
+) -> Result<ScopedCaptureOutcome, String> {
+    let parsed: ModelOutcome = serde_json::from_str(text)
+        .map_err(|error| format!("malformed extraction output: {error}"))?;
+    let scopes: Vec<bool> = parsed
+        .observations
+        .iter()
+        .flatten()
+        .take(MAX_OBSERVATIONS)
+        .map(|observation| match observation.scope.as_deref() {
+            None | Some("workspace") => Ok(false),
+            Some("global") => Ok(true),
+            Some(other) => Err(format!(
+                "malformed extraction output: unknown observation scope {other:?}"
+            )),
+        })
+        .collect::<Result<_, String>>()?;
+    let drafts = match parse_outcome_drafts(parsed, model, created_at)? {
+        CaptureOutcomeDraft::Noop => Vec::new(),
+        CaptureOutcomeDraft::Observations(observations) => observations,
+    };
+    let (mut workspace, mut global) = (Vec::new(), Vec::new());
+    for (draft, is_global) in drafts.into_iter().zip(scopes) {
+        if is_global {
+            global.push(draft);
+        } else {
+            workspace.push(draft);
+        }
+    }
+    Ok(ScopedCaptureOutcome {
+        workspace: if workspace.is_empty() {
+            CaptureOutcomeDraft::Noop
+        } else {
+            CaptureOutcomeDraft::Observations(workspace)
+        },
+        global,
+    })
+}
+
+/// Every observation in one draft, whatever its scope.
+#[cfg(test)]
 pub(crate) fn parse_model_outcome(
     text: &str,
     model: &str,
@@ -102,6 +168,14 @@ pub(crate) fn parse_model_outcome(
 ) -> Result<CaptureOutcomeDraft, String> {
     let parsed: ModelOutcome = serde_json::from_str(text)
         .map_err(|error| format!("malformed extraction output: {error}"))?;
+    parse_outcome_drafts(parsed, model, created_at)
+}
+
+fn parse_outcome_drafts(
+    parsed: ModelOutcome,
+    model: &str,
+    created_at: i64,
+) -> Result<CaptureOutcomeDraft, String> {
     match (parsed.outcome, parsed.observations) {
         (ModelOutcomeKind::Noop, None) => Ok(CaptureOutcomeDraft::Noop),
         (ModelOutcomeKind::Noop, Some(observations)) if observations.is_empty() => {
@@ -208,9 +282,10 @@ pub(crate) fn extraction_schema() -> serde_json::Value {
                 "items": {
                     "type": "object",
                     "additionalProperties": false,
-                    "required": ["type", "topic_hint", "statement", "keywords", "aliases", "body"],
+                    "required": ["type", "scope", "topic_hint", "statement", "keywords", "aliases", "body"],
                     "properties": {
                         "type": { "type": "string", "enum": ["user", "feedback", "project", "reference"] },
+                        "scope": { "type": "string", "enum": ["workspace", "global"] },
                         "topic_hint": { "type": ["string", "null"] },
                         "statement": { "type": "string", "maxLength": MAX_STATEMENT_BYTES },
                         "keywords": { "type": "array", "items": { "type": "string" } },
@@ -242,9 +317,10 @@ mod tests {
                     "items": {
                         "type": "object",
                         "additionalProperties": false,
-                        "required": ["type", "topic_hint", "statement", "keywords", "aliases", "body"],
+                        "required": ["type", "scope", "topic_hint", "statement", "keywords", "aliases", "body"],
                         "properties": {
                             "type": { "type": "string", "enum": ["user", "feedback", "project", "reference"] },
+                            "scope": { "type": "string", "enum": ["workspace", "global"] },
                             "topic_hint": { "type": ["string", "null"] },
                             "statement": { "type": "string" },
                             "keywords": { "type": "array", "items": { "type": "string" } },
@@ -456,6 +532,59 @@ mod tests {
         );
         assert_eq!(scrubbed.aliases.len(), MAX_ALIASES);
         assert_eq!(scrubbed.aliases.first().map(String::as_str), Some("alias0"));
+    }
+
+    #[test]
+    fn observations_split_by_scope_and_an_absent_scope_is_the_workspace() {
+        let observation = |scope: Option<&str>, statement: &str| {
+            let mut value = serde_json::json!({
+                "type": "user",
+                "topic_hint": null,
+                "statement": statement,
+                "keywords": [],
+                "aliases": [],
+                "body": null
+            });
+            if let Some(scope) = scope {
+                value["scope"] = serde_json::json!(scope);
+            }
+            value
+        };
+        let json = serde_json::json!({
+            "outcome": "observations",
+            "observations": [
+                observation(Some("global"), "Prefers tabs"),
+                observation(Some("workspace"), "Tests run with nextest"),
+                observation(None, "Build needs mold"),
+            ]
+        });
+        let scoped = parse_scoped_model_outcome(&json.to_string(), "fixture", 1).unwrap();
+        let statements = |drafts: &[ObservationDraft]| -> Vec<String> {
+            drafts.iter().map(|draft| draft.statement.clone()).collect()
+        };
+        assert_eq!(statements(&scoped.global), ["Prefers tabs"]);
+        let CaptureOutcomeDraft::Observations(workspace) = &scoped.workspace else {
+            panic!("expected workspace observations");
+        };
+        assert_eq!(
+            statements(workspace),
+            ["Tests run with nextest", "Build needs mold"]
+        );
+        assert_eq!(scoped.observation_count(), 3);
+
+        let only_global = serde_json::json!({
+            "outcome": "observations",
+            "observations": [observation(Some("global"), "Prefers tabs")]
+        });
+        let scoped = parse_scoped_model_outcome(&only_global.to_string(), "fixture", 1).unwrap();
+        assert_eq!(scoped.workspace, CaptureOutcomeDraft::Noop);
+        assert_eq!(scoped.global.len(), 1);
+
+        let unknown = serde_json::json!({
+            "outcome": "observations",
+            "observations": [observation(Some("planet"), "Prefers tabs")]
+        });
+        assert!(parse_scoped_model_outcome(&unknown.to_string(), "fixture", 1).is_err());
     }
 
     #[test]

@@ -303,6 +303,7 @@ pub(super) fn handle_session_notification_with_origin(
         | XaiSessionUpdate::MemoryFlushCompleted { .. }
         | XaiSessionUpdate::MemoryCaptureActivity { .. }
         | XaiSessionUpdate::MemoryDreamCompleted { .. }
+        | XaiSessionUpdate::MemoryRecalled { .. }
         | XaiSessionUpdate::MemorySessionSaved { .. }) => {
             apply_compaction_or_retry_update(agent, update, is_api_key_auth)
         }
@@ -1664,6 +1665,7 @@ pub(super) fn handle_child_session_notification(
         | XaiSessionUpdate::RetryState(_)
         | XaiSessionUpdate::MemoryFlushCompleted { .. }
         | XaiSessionUpdate::MemoryDreamCompleted { .. }
+        | XaiSessionUpdate::MemoryRecalled { .. }
         | XaiSessionUpdate::MemorySessionSaved { .. } => {
             let mut changed = false;
             if let Some(child_view) = agent.child_view_for_live_update_mut(child_sid) {
@@ -2137,8 +2139,35 @@ pub(super) fn apply_session_event(
             }
             None => false,
         },
+        XaiSessionUpdate::MemoryRecalled { notes } => match memory_recalled_message(notes) {
+            Some(message) => {
+                scrollback.push_block(RenderBlock::system(message));
+                true
+            }
+            None => false,
+        },
         _ => false,
     }
+}
+/// One line that names the stored notes recall showed the model.
+fn memory_recalled_message(
+    notes: &[xai_grok_shell::extensions::notification::MemoryRecalledNote],
+) -> Option<String> {
+    const MAX_TITLE_CHARS: usize = 72;
+    if notes.is_empty() {
+        return None;
+    }
+    let titles: Vec<String> = notes
+        .iter()
+        .map(|note| {
+            let mut title: String = note.title.chars().take(MAX_TITLE_CHARS).collect();
+            if note.title.chars().count() > MAX_TITLE_CHARS {
+                title.push('…');
+            }
+            title
+        })
+        .collect();
+    Some(format!("Recalled from memory: {}", titles.join(" · ")))
 }
 /// True if the trailing run of session/system blocks contains a [`SessionEvent::CompactionFailed`].
 /// Used so we don't stack a [`SessionEvent::ContextTooLarge`] prompt on top of the compaction handler's "too large to compact" message.

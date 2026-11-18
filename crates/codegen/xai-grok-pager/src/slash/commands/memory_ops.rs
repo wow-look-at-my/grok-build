@@ -11,7 +11,7 @@ pub struct FlushCommand;
 impl SlashCommand for FlushCommand {
     slash_meta! {
         name: "flush",
-        description: "Save this session's memory to disk now",
+        description: "Wait for this session's memory capture (it runs after every turn)",
         usage: "/flush",
         session_scoped: true,
     }
@@ -26,7 +26,7 @@ pub struct DreamCommand;
 impl SlashCommand for DreamCommand {
     slash_meta! {
         name: "dream",
-        description: "Consolidate memory now (merge observations into topics)",
+        description: "Merge new observations into topics now (this also runs by itself)",
         usage: "/dream",
         session_scoped: true,
     }
