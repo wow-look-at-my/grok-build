@@ -1030,6 +1030,17 @@ impl PromptWidget {
         self.textarea.selection_range()
     }
 
+    #[cfg(test)]
+    pub(crate) fn set_selection_for_test(&mut self, anchor: usize, head: usize) {
+        self.textarea.set_selection(anchor, head);
+    }
+
+    /// Whether new text goes in at the start of the draft.
+    pub(crate) fn insertion_at_start(&self) -> bool {
+        self.selection_range()
+            .map_or(self.cursor() == 0, |range| range.start == 0)
+    }
+
     /// Clear the undo/redo history (see [`TextArea::clear_history`]).
     /// Pair with `set_text("")` when reusing the widget for a new logical context so an undo can't resurrect the previous draft.
     pub fn clear_history(&mut self) {
