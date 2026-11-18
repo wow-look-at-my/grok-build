@@ -1,3 +1,5 @@
+// v2_recall_tests.rs holds CrowdedProvider.
+
 use std::collections::HashSet;
 use std::path::{Path, PathBuf};
 use std::sync::atomic::{AtomicUsize, Ordering};
@@ -392,15 +394,18 @@ async fn semantic_hit_without_lexical_overlap_and_cached_vectors() {
     assert_eq!(hit.scope, V2MemoryScope::Global);
     assert!(hit.is_semantic);
     assert!(hit.matched_terms.is_empty());
-    assert!(hit.score >= 0.45 && hit.score <= 1.0);
-    assert_eq!(provider.texts.load(Ordering::SeqCst), 4 + 1);
+    assert!(hit.standard_score.is_some_and(|score| score >= 3.0));
+    assert_eq!(hit.score, 1.0);
+    // The first call embeds the baseline notes, the chunks and the query.
+    let first_call = BASELINE_NOTES.len() + 4 + 1;
+    assert_eq!(provider.texts.load(Ordering::SeqCst), first_call);
 
     let again = recall
         .recall(query, Some(&provider), &HashSet::new())
         .await
         .unwrap();
     assert_eq!(again.hits, outcome.hits);
-    assert_eq!(provider.texts.load(Ordering::SeqCst), 4 + 1 + 1);
+    assert_eq!(provider.texts.load(Ordering::SeqCst), first_call + 1);
 
     let fresh = fixture.recall(V2RecallConfig::default());
     fresh
@@ -409,9 +414,77 @@ async fn semantic_hit_without_lexical_overlap_and_cached_vectors() {
         .unwrap();
     assert_eq!(
         provider.texts.load(Ordering::SeqCst),
-        4 + 1 + 1 + 1,
+        first_call + 1 + 1,
         "a new recall must read the vectors from index.sqlite"
     );
+}
+
+/// Puts every text at a high cosine with every other text, as some real models do.
+struct CrowdedProvider;
+
+#[async_trait]
+impl crate::embedding::EmbeddingProvider for CrowdedProvider {
+    async fn embed_batch(
+        &self,
+        texts: &[&str],
+    ) -> Result<Vec<Vec<f32>>, Box<dyn std::error::Error>> {
+        Ok(texts
+            .iter()
+            .map(|text| {
+                let text = text.to_lowercase();
+                if text.contains("lighthouse") || text.contains("beacon") {
+                    vec![1.0, 0.0]
+                } else {
+                    vec![1.0, 0.3]
+                }
+            })
+            .collect())
+    }
+
+    fn model_name(&self) -> &str {
+        "crowded-embed"
+    }
+
+    fn dimensions(&self) -> usize {
+        2
+    }
+}
+
+#[tokio::test]
+async fn a_high_cosine_alone_is_not_a_semantic_hit() {
+    let fixture = fixture();
+    seed_topics(&fixture.workspace);
+    let path = write(
+        &fixture.workspace,
+        "topics/coast.md",
+        "# Lighthouse\nThe keeper trims the lamp wick nightly.\n",
+    );
+    let recall = fixture.recall(V2RecallConfig::default());
+
+    // Only one stands out from the baseline.
+    let outcome = recall
+        .recall(
+            "a beacon guiding ships",
+            Some(&CrowdedProvider),
+            &HashSet::new(),
+        )
+        .await
+        .unwrap();
+    assert_eq!(outcome.mode, V2RecallMode::Hybrid);
+    assert_eq!(outcome.hits.len(), 1, "{:?}", outcome.hits);
+    assert_eq!(top(&outcome).path, path);
+
+    // This query sits with the baseline, so no chunk stands out.
+    let outcome = recall
+        .recall(
+            "thanks, that looks good",
+            Some(&CrowdedProvider),
+            &HashSet::new(),
+        )
+        .await
+        .unwrap();
+    assert_eq!(outcome.mode, V2RecallMode::Hybrid);
+    assert!(outcome.hits.is_empty(), "{:?}", outcome.hits);
 }
 
 #[tokio::test]
@@ -588,7 +661,9 @@ async fn a_cached_vector_leaves_with_its_chunk() {
         .recall("a beacon guiding ships", Some(&provider), &HashSet::new())
         .await
         .unwrap();
-    assert_eq!(cached_rows(), 3);
+    // The baseline vectors share the cache of the scope that holds the chunks.
+    let baseline_rows = i64::try_from(BASELINE_NOTES.len()).unwrap();
+    assert_eq!(cached_rows(), baseline_rows + 3);
 
     std::fs::remove_file(fixture.workspace.join("topics/cooking.md")).unwrap();
     recall
@@ -597,7 +672,7 @@ async fn a_cached_vector_leaves_with_its_chunk() {
         .unwrap();
     assert_eq!(
         cached_rows(),
-        2,
+        baseline_rows + 2,
         "the removed chunk's vector must be pruned"
     );
 }

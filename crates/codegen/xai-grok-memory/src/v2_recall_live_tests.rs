@@ -206,8 +206,8 @@ fn stem(path: &Path) -> String {
         .to_owned()
 }
 
-/// Every chunk's cosine for `query`, best first, with the lexical path off.
-async fn raw_similarities(
+/// Every chunk's standard score for `query`, best first, with the lexical path off.
+async fn standard_scores(
     fixture: &LiveFixture,
     provider: &dyn EmbeddingProvider,
     query: &str,
@@ -218,7 +218,7 @@ async fn raw_similarities(
         V2RecallConfig {
             max_hits: 64,
             min_matched_terms: usize::MAX,
-            min_similarity: -1.0,
+            min_standard_score: f64::NEG_INFINITY,
             ..V2RecallConfig::default()
         },
     );
@@ -231,22 +231,24 @@ async fn raw_similarities(
         V2RecallMode::Hybrid,
         "the embedding call failed"
     );
-    outcome
+    let mut scores: Vec<(f64, String)> = outcome
         .hits
         .iter()
-        .map(|hit| (hit.score, stem(&hit.path)))
-        .collect()
+        .filter_map(|hit| Some((hit.standard_score?, stem(&hit.path))))
+        .collect();
+    scores.sort_by(|left, right| right.0.total_cmp(&left.0));
+    scores
 }
 
-/// Prints the cosine of each query against the corpus. Run it to choose a threshold for a model.
+/// Prints the standard score of each query against the corpus, to see how a model separates.
 #[tokio::test]
 #[ignore = "needs a served embedding model"]
-async fn live_similarity_table() {
+async fn live_standard_score_table() {
     let fixture = live_fixture();
     let provider = live_provider();
     println!("model {}", provider.model_name());
     for (query, expected) in PARAPHRASES {
-        let scores = raw_similarities(&fixture, &provider, query).await;
+        let scores = standard_scores(&fixture, &provider, query).await;
         let line: Vec<String> = scores
             .iter()
             .take(3)
@@ -255,7 +257,7 @@ async fn live_similarity_table() {
         println!("match    want {expected:<10} got {}", line.join(" | "));
     }
     for query in UNRELATED {
-        let scores = raw_similarities(&fixture, &provider, query).await;
+        let scores = standard_scores(&fixture, &provider, query).await;
         let line: Vec<String> = scores
             .iter()
             .take(3)

@@ -330,6 +330,7 @@ mod tests {
             score: 0.8,
             matched_terms: vec!["landlock".to_owned()],
             is_semantic: false,
+            standard_score: None,
         }
     }
 

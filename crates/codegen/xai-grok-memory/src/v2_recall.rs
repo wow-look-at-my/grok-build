@@ -25,6 +25,41 @@ const MAX_FILE_BYTES: u64 = MAX_MANUAL_OBSERVATION_BYTES as u64;
 const QUERY_EMBED_CHARS: usize = 4000;
 const BOTH_PATHS_BONUS: f64 = 0.1;
 const KEY_HEX_CHARS: usize = 16;
+/// A standard score at or above this ranks as a full semantic match.
+const FULL_MATCH_STANDARD_SCORE: f64 = 8.0;
+/// Fewer baseline vectors than this give no usable spread.
+const MIN_BASELINE_VECTORS: usize = 8;
+/// Keeps a near-constant baseline from turning a small difference into a large standard score.
+const MIN_BASELINE_SPREAD: f64 = 0.01;
+/// Notes on varied software subjects. A query's similarity to them is what "unrelated" scores
+/// with the model in use. A chunk is judged against them and not against a fixed cosine. Each
+/// embedding model puts cosines on its own scale.
+const BASELINE_NOTES: [&str; 24] = [
+    "The parser keeps a lookahead of one token and reports the first error only.",
+    "Dates are stored as UTC timestamps and rendered in the viewer local zone.",
+    "The image resizer keeps the aspect ratio and writes WebP by default.",
+    "Search results are paged with an opaque cursor, not with an offset.",
+    "The mobile app caches the last feed response for offline reading.",
+    "Log lines are JSON objects with a level, a message and a request id.",
+    "The scheduler retries a failed job on a fixed interval.",
+    "User avatars are served from the content delivery network with a one day lifetime.",
+    "The spreadsheet export escapes a leading equals sign in each cell.",
+    "The audio player crossfades two tracks over a few seconds.",
+    "Feature flags are read once at process start.",
+    "The map view clusters markers that overlap at the current zoom.",
+    "Passwords are hashed with a memory-hard function before storage.",
+    "The email template uses a single column layout for narrow screens.",
+    "The cache evicts the least recently used entry when it is full.",
+    "The game loop runs physics at a fixed step and renders as fast as it can.",
+    "The invoice total is rounded to the nearest cent after tax.",
+    "The chat widget reconnects its socket when the tab becomes visible.",
+    "The compiler inlines a function that is called from one place.",
+    "The recipe page converts between metric and imperial units.",
+    "The backup job writes one archive per day and keeps thirty.",
+    "The form validates a field when it loses focus.",
+    "The translation files are keyed by the English source string.",
+    "The thermostat firmware samples the sensor once a minute.",
+];
 const CREATE_CACHE_SQL: &str = "CREATE TABLE IF NOT EXISTS recall_embeddings (
     hash TEXT NOT NULL,
     model TEXT NOT NULL,
@@ -71,6 +106,8 @@ pub struct V2RecallHit {
     pub matched_terms: Vec<String>,
     /// True when the vector path qualified this hit.
     pub is_semantic: bool,
+    /// The standard score that qualified a semantic hit.
+    pub standard_score: Option<f64>,
 }
 
 /// Thresholds and limits for [`V2Recall`].
@@ -80,8 +117,8 @@ pub struct V2RecallConfig {
     pub min_matched_terms: usize,
     /// Minimum summed idf of the matched terms, as a multiple of the idf of a term in one chunk.
     pub min_term_weight: f64,
-    /// Minimum cosine similarity for a semantic hit.
-    pub min_similarity: f64,
+    /// A semantic hit needs a cosine this many standard deviations above the query's mean cosine with `BASELINE_NOTES`.
+    pub min_standard_score: f64,
     pub snippet_chars: usize,
     pub max_chunks: usize,
     pub max_embed_per_call: usize,
@@ -95,7 +132,7 @@ impl Default for V2RecallConfig {
             max_hits: 4,
             min_matched_terms: 2,
             min_term_weight: 1.5,
-            min_similarity: 0.45,
+            min_standard_score: 3.0,
             snippet_chars: 320,
             max_chunks: 4096,
             max_embed_per_call: 64,
@@ -249,10 +286,14 @@ impl V2Recall {
         let config = &self.inner.config;
         let mut hits = Vec::new();
         for ((chunk, lexical), semantic) in chunks.iter().zip(lexical).zip(semantic) {
-            let score = match (lexical.score, semantic) {
-                (Some(lexical), Some(cosine)) => (lexical.max(cosine) + BOTH_PATHS_BONUS).min(1.0),
+            let semantic_score =
+                semantic.map(|standard| (standard / FULL_MATCH_STANDARD_SCORE).clamp(0.0, 1.0));
+            let score = match (lexical.score, semantic_score) {
+                (Some(lexical), Some(semantic)) => {
+                    (lexical.max(semantic) + BOTH_PATHS_BONUS).min(1.0)
+                }
                 (Some(lexical), None) => lexical,
-                (None, Some(cosine)) => cosine,
+                (None, Some(semantic)) => semantic,
                 (None, None) => continue,
             };
             if seen.contains(&chunk.key) {
@@ -270,6 +311,7 @@ impl V2Recall {
                 score: score.clamp(0.0, 1.0),
                 matched_terms: lexical.matched,
                 is_semantic: semantic.is_some(),
+                standard_score: semantic,
             });
         }
         hits.sort_by(|left, right| {
@@ -288,7 +330,7 @@ impl V2Recall {
         })
     }
 
-    /// Cosine similarity per chunk, `Some` only when it reaches `min_similarity`.
+    /// The standard score of each chunk, `Some` only when it reaches `min_standard_score`.
     async fn vector_scores(
         &self,
         chunks: &[Arc<CorpusChunk>],
@@ -303,11 +345,24 @@ impl V2Recall {
             self.inner.global_dir.clone(),
             self.inner.workspace_dir.clone(),
         ];
+        // The baseline vectors live in the cache of a scope that holds a chunk.
+        let baseline_slot = chunks
+            .iter()
+            .map(|chunk| scope_slot(chunk.scope))
+            .min()
+            .unwrap_or_default();
+        let baseline: Vec<(String, &str)> = BASELINE_NOTES
+            .iter()
+            .map(|text| (chunk_hash(text), *text))
+            .collect();
         let mut wanted: [HashSet<String>; 2] = Default::default();
         for chunk in chunks {
             if let Some(set) = wanted.get_mut(scope_slot(chunk.scope)) {
                 set.insert(chunk.hash.clone());
             }
+        }
+        if let Some(set) = wanted.get_mut(baseline_slot) {
+            set.extend(baseline.iter().map(|(hash, _)| hash.clone()));
         }
 
         let load_dirs = scope_dirs.clone();
@@ -324,11 +379,20 @@ impl V2Recall {
         .map_err(|error| error.to_string())?
         .map_err(|error| error.to_string())?;
 
-        // Snapshot order puts topics first, so they are embedded first.
-        let mut missing: Vec<(usize, &CorpusChunk)> = Vec::new();
+        // The baseline goes first: no chunk can be judged without it.
+        let mut missing: Vec<(usize, &str, &str)> = Vec::new();
         let mut queued: HashSet<(usize, &str)> = HashSet::new();
+        for (hash, text) in &baseline {
+            let has_vector = cached
+                .get(baseline_slot)
+                .is_some_and(|vectors| vectors.contains_key(hash));
+            if !has_vector && queued.insert((baseline_slot, hash.as_str())) {
+                missing.push((baseline_slot, hash.as_str(), text));
+            }
+        }
+        let chunk_budget = missing.len() + self.inner.config.max_embed_per_call;
         for chunk in chunks {
-            if missing.len() >= self.inner.config.max_embed_per_call {
+            if missing.len() >= chunk_budget {
                 break;
             }
             let slot = scope_slot(chunk.scope);
@@ -336,15 +400,12 @@ impl V2Recall {
                 .get(slot)
                 .is_some_and(|vectors| vectors.contains_key(&chunk.hash));
             if !has_vector && queued.insert((slot, chunk.hash.as_str())) {
-                missing.push((slot, chunk));
+                missing.push((slot, chunk.hash.as_str(), chunk.searchable.as_str()));
             }
         }
 
         if !missing.is_empty() {
-            let texts: Vec<&str> = missing
-                .iter()
-                .map(|(_, chunk)| chunk.searchable.as_str())
-                .collect();
+            let texts: Vec<&str> = missing.iter().map(|(_, _, text)| *text).collect();
             let vectors = provider
                 .embed_batch(&texts)
                 .await
@@ -357,15 +418,15 @@ impl V2Recall {
                 ));
             }
             let mut fresh: [Vec<(String, Vec<f32>)>; 2] = Default::default();
-            for ((slot, chunk), vector) in missing.iter().zip(vectors) {
+            for ((slot, hash, _), vector) in missing.iter().zip(vectors) {
                 if vector.is_empty() {
                     continue;
                 }
                 if let Some(rows) = fresh.get_mut(*slot) {
-                    rows.push((chunk.hash.clone(), vector.clone()));
+                    rows.push(((*hash).to_owned(), vector.clone()));
                 }
                 if let Some(vectors) = cached.get_mut(*slot) {
-                    vectors.insert(chunk.hash.clone(), vector);
+                    vectors.insert((*hash).to_owned(), vector);
                 }
             }
             let store_dirs = scope_dirs.clone();
@@ -391,7 +452,29 @@ impl V2Recall {
             .filter(|vector| !vector.is_empty())
             .ok_or_else(|| "embedding provider returned no vector for the query".to_owned())?;
 
-        let min_similarity = self.inner.config.min_similarity;
+        let baseline_cosines: Vec<f64> = baseline
+            .iter()
+            .filter_map(|(hash, _)| cached.get(baseline_slot)?.get(hash))
+            .filter(|vector| vector.len() == query_vector.len())
+            .map(|vector| cosine(vector, &query_vector))
+            .collect();
+        if baseline_cosines.len() < MIN_BASELINE_VECTORS {
+            return Err(format!(
+                "the embedding model returned {} usable baseline vectors, and {} are needed",
+                baseline_cosines.len(),
+                MIN_BASELINE_VECTORS
+            ));
+        }
+        let count = baseline_cosines.len() as f64;
+        let mean = baseline_cosines.iter().sum::<f64>() / count;
+        let variance = baseline_cosines
+            .iter()
+            .map(|cosine| (cosine - mean).powi(2))
+            .sum::<f64>()
+            / count;
+        let spread = variance.sqrt().max(MIN_BASELINE_SPREAD);
+
+        let min_standard_score = self.inner.config.min_standard_score;
         Ok(chunks
             .iter()
             .map(|chunk| {
@@ -399,8 +482,8 @@ impl V2Recall {
                     .get(scope_slot(chunk.scope))
                     .and_then(|vectors| vectors.get(&chunk.hash))
                     .filter(|vector| vector.len() == query_vector.len())?;
-                let similarity = cosine(vector, &query_vector);
-                (similarity >= min_similarity).then_some(similarity)
+                let standard_score = (cosine(vector, &query_vector) - mean) / spread;
+                (standard_score >= min_standard_score).then_some(standard_score)
             })
             .collect())
     }
