@@ -289,7 +289,7 @@ Change, unroll or add groups under `models.groups.<id>`. Each key is optional. O
 }
 ```
 
-A slot that your own group lists leaves the default group it was in. So `planning` above can take `recap` without an edit to `summarization`. Two of your groups that list the same slot, an unknown slot, or a group id with characters other than `a-z`, `0-9`. `_` and `-` stop the start with an error that names the problem.
+A slot that your own group lists leaves the default group it was in. So `planning` above can take `recap` without an edit to `dense_summarization`. Two of your groups that list the same slot, an unknown slot, or a group id with characters other than `a-z`, `0-9`. `_` and `-` stop the start with an error that names the problem.
 
 A slot reads its model in this order: the slot's environment variable, then its group's `model`, then its own `models` entry, then its default. A group with no `model` changes nothing, so each slot keeps its own entry and default. A pick on a group's settings row writes `models.groups.<id>.model` and removes the `models` entry of each slot in the group.
 

@@ -458,6 +458,10 @@ pub enum Action {
     SetTwoPassCompaction(bool),
     /// Delete the saved `[features].two_pass_compaction` key so the remote setting or the default applies again.
     ClearTwoPassCompaction,
+    /// Save `[features].session_recap` as an explicit override. SHELL-owned; the shell re-reads it per request, so it applies live.
+    SetSessionRecap(bool),
+    /// Delete the saved `[features].session_recap` key so the remote setting or the default applies again.
+    ClearSessionRecap,
     /// SHELL-owned `keep_text_selection` (`flash` | `hold`); cache and persist.
     SetKeepTextSelection(crate::appearance::TextSelection),
     /// Set the mouse-wheel scroll speed multiplier (1-100).
