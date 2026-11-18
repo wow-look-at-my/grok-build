@@ -231,6 +231,8 @@ mod memory_carryover;
 mod memory_control;
 #[path = "acp_session_impl/memory_forget.rs"]
 mod memory_forget;
+#[path = "acp_session_impl/memory_recall.rs"]
+mod memory_recall;
 #[path = "acp_session_impl/v2_memory_dream.rs"]
 mod v2_memory_dream;
 pub(crate) use goal_support::*;

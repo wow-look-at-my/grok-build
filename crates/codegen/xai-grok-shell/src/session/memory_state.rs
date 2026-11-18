@@ -122,6 +122,39 @@ impl Drop for V2DreamWorkers {
     }
 }
 
+/// Where recall stands in the live conversation.
+#[derive(Default)]
+pub(crate) struct RecallState {
+    /// Conversation items a recall has read.
+    pub cursor: usize,
+    /// Keys of the notes this conversation was shown.
+    pub seen: std::collections::HashSet<String>,
+    /// `seen` holds the keys of the reminders the conversation carries.
+    pub seeded: bool,
+    pub embedding_failure_reported: bool,
+}
+
+impl RecallState {
+    /// A replaced conversation lost its reminders, so every note can be shown again.
+    pub(crate) fn reset(&mut self) {
+        self.cursor = 0;
+        self.seen.clear();
+        self.seeded = false;
+    }
+}
+
+/// Recall over the v2 scopes for one session.
+#[derive(Default)]
+pub(crate) struct SessionRecall {
+    /// Built on first use.
+    pub engine: RefCell<Option<xai_grok_memory::V2Recall>>,
+    pub state: RefCell<RecallState>,
+    /// Builds the provider that adds vectors to recall. `None` leaves recall on word matching.
+    pub embedding: Option<xai_grok_memory::backend::EmbeddingProviderParams>,
+    /// Notes shown to the model.
+    pub shown: AtomicU64,
+}
+
 pub(crate) struct SessionMemory {
     /// Mode resolved when the session was spawned. Kept even while memory is
     /// disabled so toggles, telemetry, and trace uploads cannot switch roots.
@@ -197,6 +230,7 @@ pub(crate) struct SessionMemory {
     pub dream_success_count: AtomicU64,
     pub dream_error_count: AtomicU64,
     pub token_totals: MemoryV2TokenTotals,
+    pub recall: SessionRecall,
 }
 
 #[derive(Default)]
@@ -237,6 +271,10 @@ impl SessionMemory {
         self.is_enabled()
             && self.mode().is_some_and(crate::config::MemoryMode::is_v2)
             && self.v2_config.can_expose_memory()
+    }
+
+    pub(crate) fn can_recall_v2(&self) -> bool {
+        self.can_expose_v2() && self.v2_config.can_recall()
     }
 
     /// Why memory is off, or `None` while it is on. `/memory on` refuses unless this is

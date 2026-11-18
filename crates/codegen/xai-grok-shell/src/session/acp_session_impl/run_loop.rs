@@ -663,6 +663,7 @@ pub(super) async fn run_session(
                             // Reset the first-turn injection check after compaction; it re-searches only if no block persisted
                             session.memory.context_injected
                                 .store(false, std::sync::atomic::Ordering::Relaxed);
+                            session.memory.recall.state.borrow_mut().reset();
                         }
                         Some(xai_chat_state::ChatStateEvent::ImageBudget {
                             body_bytes,

@@ -49,6 +49,14 @@ pub struct MemoryCaptureDebugEntry {
     pub path: String,
 }
 
+/// One stored memory recall showed the model.
+#[derive(Debug, Clone, PartialEq, Eq, serde::Serialize, serde::Deserialize)]
+pub struct MemoryRecalledNote {
+    pub title: String,
+    /// Absolute path of the note's file.
+    pub path: String,
+}
+
 /// `_meta` key on rename fan-out (`SessionSummaryGenerated` and ACP `SessionInfoUpdate`). Old clients ignore unknown meta.
 pub const TITLE_IS_MANUAL_META_KEY: &str = "example.invalid/titleIsManual";
 
@@ -606,6 +614,8 @@ pub enum SessionUpdate {
         #[serde(default, skip_serializing_if = "std::ops::Not::not")]
         automatic: bool,
     },
+    /// Recall found stored memory notes that match the conversation and showed them to the model.
+    MemoryRecalled { notes: Vec<MemoryRecalledNote> },
     /// Session-end memory save completed
     MemorySessionSaved {
         /// Path to the written session log
