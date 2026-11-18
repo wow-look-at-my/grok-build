@@ -253,6 +253,8 @@ pub struct SubagentRuntimeOverrides {
     pub loop_task_id: Option<String>,
     /// `/goal`-only: this child is the adversarial verifier.
     pub goal_verifier: bool,
+    /// The harness spawns this child for a `/goal` role. The parent's spawn allow-list limits the model, so it does not apply.
+    pub harness_role: bool,
     /// The resource this child will touch, used to derive its inter-agent lock key.
     pub resource: Option<xai_tool_types::SubagentResource>,
 }

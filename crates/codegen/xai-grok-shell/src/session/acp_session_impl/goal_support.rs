@@ -1195,8 +1195,10 @@ impl SessionActor {
                     };
                     // The plan is published.
                     self.apply_planner_todos(&goal_id, &planner_todos).await;
-                    // A goal never runs without todos.
-                    if !self.goal_has_open_todo().await {
+                    // A goal never runs with an empty list. An agent with no todo tool has no list, so its goal runs.
+                    let bridge = self.tool_bridge_handle();
+                    let has_todo_tool = self.resolve_capture_todo_tool(&bridge).await.is_ok();
+                    if has_todo_tool && !self.goal_has_open_todo().await {
                         let _ = self
                             .auto_pause_goal_if_matches_with_message(
                                 &goal_id,

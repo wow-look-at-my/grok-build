@@ -263,6 +263,36 @@ impl VerificationOutcome {
     }
 }
 
+/// The subagent type the verifier runs as, or `None` when no type can run.
+/// The model wrote the condition, so the parent's spawn allow-list applies.
+/// A parent whose list leaves out [`VERIFIER_SUBAGENT_TYPE`] (explore) gets
+/// the first type on its list that can run.
+async fn verifier_subagent_type(
+    backend: &SubagentBackendResource,
+    parent_session_id: &str,
+) -> Option<String> {
+    let validate = |subagent_type: String| async move {
+        let outcome = backend
+            .backend()
+            .validate_type(&subagent_type, parent_session_id)
+            .await;
+        (subagent_type, outcome)
+    };
+    match validate(VERIFIER_SUBAGENT_TYPE.to_string()).await {
+        (subagent_type, SubagentValidateTypeOutcome::Ok) => Some(subagent_type),
+        (_, SubagentValidateTypeOutcome::NotAllowed { allowed }) => {
+            for candidate in allowed {
+                if let (subagent_type, SubagentValidateTypeOutcome::Ok) = validate(candidate).await
+                {
+                    return Some(subagent_type);
+                }
+            }
+            None
+        }
+        _ => None,
+    }
+}
+
 /// Run one verifier prompt in its own fresh subagent and translate the result
 /// into a verdict. Every failure mode is a block, so an item can never be
 /// completed on a verifier that did not run.
@@ -287,19 +317,12 @@ async fn run_verifier(
             format!("subagent depth limit reached ({depth}/{max_depth})"),
         );
     }
-    match backend
-        .backend()
-        .validate_type(VERIFIER_SUBAGENT_TYPE, parent_session_id)
-        .await
-    {
-        SubagentValidateTypeOutcome::Ok => {}
-        _ => {
-            return VerificationOutcome::blocked(
-                &pending.id,
-                format!("subagent type '{VERIFIER_SUBAGENT_TYPE}' is unavailable"),
-            );
-        }
-    }
+    let Some(verifier_type) = verifier_subagent_type(backend, parent_session_id).await else {
+        return VerificationOutcome::blocked(
+            &pending.id,
+            format!("subagent type '{VERIFIER_SUBAGENT_TYPE}' is unavailable"),
+        );
+    };
 
     let child_id = uuid::Uuid::now_v7().to_string();
     let span = tracing::info_span!(parent: None, "todo.verify", todo_id = %pending.id);
@@ -315,7 +338,7 @@ async fn run_verifier(
             "verify todo: {}",
             pending.content.lines().next().unwrap_or("").trim()
         ),
-        subagent_type: VERIFIER_SUBAGENT_TYPE.to_string(),
+        subagent_type: verifier_type,
         parent_session_id: parent_session_id.to_string(),
         parent_prompt_id,
         // Fresh subagent: no resumed transcript and no forked conversation.
@@ -1911,9 +1934,17 @@ mod tests {
     }
 
     /// A coordinator backend that answers `ValidateType` with `Ok` and every
-    /// spawn with `reply`. Each spawn request is recorded so a test can
-    /// inspect the subagent the tool asked for.
+    /// spawn with `reply`.
     fn verifier_backend(
+        reply: impl Fn(&SubagentRequest) -> SubagentResult + Send + Sync + 'static,
+    ) -> VerifierHarness {
+        verifier_backend_with_allow_list(None, reply)
+    }
+
+    /// [`verifier_backend`] for a parent with a spawn allow-list. A type that
+    /// is not on `allowed` gets `NotAllowed`, as an explore parent answers.
+    fn verifier_backend_with_allow_list(
+        allowed: Option<Vec<String>>,
         reply: impl Fn(&SubagentRequest) -> SubagentResult + Send + Sync + 'static,
     ) -> VerifierHarness {
         let (raw_tx, mut raw_rx) = mpsc::unbounded_channel::<SubagentEvent>();
@@ -1927,7 +1958,15 @@ mod tests {
             while let Some(event) = raw_rx.recv().await {
                 match event {
                     SubagentEvent::ValidateType(req) => {
-                        let _ = req.respond_to.send(SubagentValidateTypeOutcome::Ok);
+                        let outcome = match &allowed {
+                            Some(allowed) if !allowed.contains(&req.subagent_type) => {
+                                SubagentValidateTypeOutcome::NotAllowed {
+                                    allowed: allowed.clone(),
+                                }
+                            }
+                            _ => SubagentValidateTypeOutcome::Ok,
+                        };
+                        let _ = req.respond_to.send(outcome);
                     }
                     SubagentEvent::Spawn(req) => {
                         let result = reply(&req.request);
@@ -2198,6 +2237,31 @@ mod tests {
         assert!(
             !request.surface_completion,
             "the verdict returns through the tool call, not an idle reminder"
+        );
+    }
+
+    /// An explore parent may spawn only `explore` and `plan`. Its verifier
+    /// runs as a type on that list, so the item can still be completed.
+    #[tokio::test]
+    async fn the_verifier_runs_as_an_allowed_type_under_a_spawn_allow_list() {
+        let harness = verifier_backend_with_allow_list(
+            Some(vec!["explore".to_string(), "plan".to_string()]),
+            |_| passed_result(),
+        );
+        let shared = verifier_resources(&harness);
+        seed_verifying_item(&shared, "1", "the report names the root cause").await;
+
+        let success = complete_item(&shared, "1", None).await;
+
+        assert_eq!(
+            item_named(&success, "Ship the parser").status,
+            TodoStatus::Completed
+        );
+        let requests = harness.requests.lock().unwrap();
+        assert_eq!(requests.len(), 1);
+        assert_eq!(
+            requests[0].subagent_type, "explore",
+            "the verifier must not run as a type the parent may not spawn"
         );
     }
 

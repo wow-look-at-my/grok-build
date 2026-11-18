@@ -1611,18 +1611,25 @@ pub(crate) fn validate_subagent_type(
 fn gate_subagent_type(
     subagent_type: &str,
     ctx: &SubagentSpawnContext,
+    harness_role: bool,
 ) -> SubagentValidateTypeOutcome {
     let cli_agents = ctx
         .agent_config
         .as_ref()
         .map(|config| config.cli_agents.as_slice())
         .unwrap_or_default();
+    // The allow-list limits what the model may spawn. A `/goal` role is the harness's own spawn, so only the toggle gates it.
+    let allowed_types = if harness_role {
+        None
+    } else {
+        ctx.allowed_subagent_types.as_deref()
+    };
     let resolution_context = xai_grok_subagent_resolution::DefinitionResolutionContext {
         cwd: &ctx.parent_cwd,
         plugins: ctx.plugin_registry.as_deref(),
         cli_agents,
         toggles: &ctx.subagent_toggle,
-        allowed_types: ctx.allowed_subagent_types.as_deref(),
+        allowed_types,
     };
     match xai_grok_subagent_resolution::gate_agent_definition(subagent_type, &resolution_context) {
         Ok(()) => SubagentValidateTypeOutcome::Ok,
@@ -1703,7 +1710,8 @@ pub(crate) fn describe_subagent_type(
             available: available_agent_names(ctx),
         };
     };
-    match gate_subagent_type(subagent_type, ctx) {
+    // Only the `/goal` role resolver describes a type, so the allow-list does not apply here.
+    match gate_subagent_type(subagent_type, ctx, true) {
         SubagentValidateTypeOutcome::Disabled => return SubagentDescribeOutcome::Disabled,
         SubagentValidateTypeOutcome::NotAllowed { allowed } => {
             return SubagentDescribeOutcome::NotAllowed { allowed };

@@ -180,9 +180,45 @@ async fn a_lite_goal_starts_with_the_objective_captured_on_the_todo_list() {
         .await;
 }
 
-/// A capture that adds nothing leaves no goal behind: the goal never starts with an empty list.
+/// A capture model that will not call the todo tool cannot stop a goal. The
+/// objective itself goes on the list, and the goal starts.
 #[tokio::test(flavor = "current_thread")]
-async fn a_lite_goal_does_not_start_when_the_capture_fails() {
+async fn a_lite_goal_starts_on_its_objective_when_the_capture_adds_nothing() {
+    let local = tokio::task::LocalSet::new();
+    local
+        .run_until(async {
+            let server = MockInferenceServer::start()
+                .await
+                .expect("mock inference server");
+            // The capture model answers in prose on every turn, so it adds nothing.
+            for _ in 0..4 {
+                server.enqueue_response(
+                    "/v1/responses",
+                    ScriptedResponse::sse(responses_api_script_exact("I will get to it.", "test")),
+                );
+            }
+            let actor = goal_actor(&server).await;
+
+            let outcome = actor
+                .setup_goal("make the tests pass", None, GoalMode::Lite)
+                .await;
+            assert!(
+                matches!(outcome, GoalSetupOutcome::Inference { .. }),
+                "a failed capture must not stop the goal"
+            );
+            assert_eq!(actor.goal_tracker.lock().status(), Some(GoalStatus::Active));
+            let list = todo_list(&actor).await;
+            assert_eq!(list.len(), 1, "{list:?}");
+            assert_eq!(list[0].1, "make the tests pass");
+            assert_eq!(list[0].2, crate::tools::todo::TodoStatus::Pending);
+        })
+        .await;
+}
+
+/// An agent with no todo tool cannot hold the objective on a list. Its goal
+/// starts all the same, with no capture call.
+#[tokio::test(flavor = "current_thread")]
+async fn a_lite_goal_starts_when_the_agent_has_no_todo_tool() {
     let local = tokio::task::LocalSet::new();
     local
         .run_until(async {
@@ -191,24 +227,59 @@ async fn a_lite_goal_does_not_start_when_the_capture_fails() {
                 .expect("mock inference server");
             let actor = goal_actor_without_todo_tool(&server).await;
 
-            let GoalSetupOutcome::Message(message) = actor
+            let outcome = actor
                 .setup_goal("make the tests pass", None, GoalMode::Lite)
-                .await
-            else {
-                panic!("a failed capture must not start the goal");
-            };
+                .await;
             assert!(
-                message.starts_with(
-                    "Goal not started: putting the objective on the todo list failed:"
-                ),
-                "{message}"
+                matches!(outcome, GoalSetupOutcome::Inference { .. }),
+                "a missing todo tool must not stop the goal"
             );
             assert_eq!(
                 actor.goal_tracker.lock().status(),
-                None,
-                "no goal was created"
+                Some(crate::session::goal_tracker::GoalStatus::Active)
             );
-            assert_eq!(server.request_count(), 0);
+            assert_eq!(
+                server.request_count(),
+                0,
+                "there is no list to capture onto"
+            );
+        })
+        .await;
+}
+
+/// Explore mode is read-only over the workspace, and it keeps a todo list.
+/// A lite goal there starts with its objective captured on that list.
+#[tokio::test(flavor = "current_thread")]
+async fn a_lite_goal_starts_under_the_explore_toolset() {
+    let local = tokio::task::LocalSet::new();
+    local
+        .run_until(async {
+            let server = MockInferenceServer::start()
+                .await
+                .expect("mock inference server");
+            server.enqueue_response("/v1/responses", lite_capture());
+            let mut actor = goal_actor_without_todo_tool(&server).await;
+            arm_tools(
+                &mut actor,
+                xai_grok_agent::config::AgentDefinition::explore()
+                    .tool_config
+                    .tools,
+            )
+            .await;
+
+            let outcome = actor
+                .setup_goal("make the tests pass", None, GoalMode::Lite)
+                .await;
+            assert!(
+                matches!(outcome, GoalSetupOutcome::Inference { .. }),
+                "a goal must start in explore mode"
+            );
+            let contents: Vec<String> = todo_list(&actor)
+                .await
+                .into_iter()
+                .map(|(_, content, _)| content)
+                .collect();
+            assert_eq!(contents, vec![CAPTURED_STEP.to_string()]);
         })
         .await;
 }

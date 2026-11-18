@@ -29,6 +29,8 @@ pub(crate) struct RoleToolNames {
     pub todo: String,
     /// `{TOOLSET_TOOLS}` block (verifier-only placeholder; the planner and strategist templates do not reference it).
     pub toolset_tools: String,
+    /// `false` when the role's toolset has no tool that writes a file. `{WRITE_TOOL}` is then only the fallback name.
+    pub can_write: bool,
 }
 
 impl RoleToolNames {
@@ -53,11 +55,13 @@ impl RoleToolNames {
         todo: Option<String>,
         toolset_tools: String,
     ) -> Self {
+        let write = sanitized_tool_name(write);
         Self {
             read: sanitized_or_default(read, Self::READ_FALLBACK),
             list: sanitized_or_default(list, Self::LIST_FALLBACK),
             search: sanitized_or_default(search, Self::SEARCH_FALLBACK),
-            write: sanitized_or_default(write, Self::WRITE_FALLBACK),
+            can_write: write.is_some(),
+            write: write.unwrap_or_else(|| Self::WRITE_FALLBACK.to_string()),
             execute: sanitized_or_default(execute, Self::EXECUTE_FALLBACK),
             web_search: sanitized_or_default(web_search, Self::WEB_SEARCH_FALLBACK),
             web_fetch: sanitized_or_default(web_fetch, Self::WEB_FETCH_FALLBACK),
@@ -69,17 +73,21 @@ impl RoleToolNames {
     /// All-fallback names with an empty `{TOOLSET_TOOLS}` block.
     /// Used as the per-index default when no assignment exists, and by tests.
     pub(crate) fn inherit_defaults() -> Self {
-        Self::from_parts(
-            None,
-            None,
-            None,
-            None,
-            None,
-            None,
-            None,
-            None,
-            String::new(),
-        )
+        Self {
+            // The default toolset writes with the fallback name.
+            can_write: true,
+            ..Self::from_parts(
+                None,
+                None,
+                None,
+                None,
+                None,
+                None,
+                None,
+                None,
+                String::new(),
+            )
+        }
     }
 
     /// Inherit / fail-open path: the role runs on the parent toolset, so the names come from the parent tool bridge (already resolved by the caller).
@@ -269,6 +277,40 @@ pub(crate) mod tests {
                 m.as_str(),
             );
         }
+    }
+
+    /// A read-only parent, such as explore, has neither a write tool nor an
+    /// edit tool. The role must know, because `{WRITE_TOOL}` still renders.
+    #[test]
+    fn a_toolset_with_no_file_writer_says_so() {
+        let read_only = RoleToolNames::from_parent(
+            Some("read_file".into()),
+            Some("list_dir".into()),
+            Some("grep".into()),
+            None,
+            None,
+            None,
+            None,
+            None,
+        );
+        assert!(!read_only.can_write);
+        assert_eq!(read_only.write, "write", "the name still renders");
+
+        let edits = RoleToolNames::from_parent(
+            None,
+            None,
+            None,
+            None,
+            Some("search_replace".into()),
+            None,
+            None,
+            None,
+        );
+        assert!(edits.can_write);
+        assert!(RoleToolNames::inherit_defaults().can_write);
+        assert!(
+            !RoleToolNames::from_summary(&summary_with(&[(ToolKind::Read, "read_file")])).can_write
+        );
     }
 
     #[test]
