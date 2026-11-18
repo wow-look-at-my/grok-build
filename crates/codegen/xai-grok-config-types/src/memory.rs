@@ -121,6 +121,8 @@ pub struct MemoryV2Settings {
     pub capture_enabled: Option<bool>,
     pub automatic_dream_enabled: Option<bool>,
     pub manual_dream_enabled: Option<bool>,
+    /// Search stored memory with each new stretch of conversation and show the model the notes that match.
+    pub recall_enabled: Option<bool>,
     pub file_writes_enabled: Option<bool>,
     pub archived_retention_days: Option<u64>,
     pub job_retention_days: Option<u64>,
@@ -135,6 +137,7 @@ pub struct MemoryV2Config {
     pub capture_enabled: bool,
     pub automatic_dream_enabled: bool,
     pub manual_dream_enabled: bool,
+    pub recall_enabled: bool,
     pub file_writes_enabled: bool,
     pub archived_retention_days: u64,
     pub job_retention_days: u64,
@@ -148,6 +151,7 @@ impl Default for MemoryV2Config {
             capture_enabled: true,
             automatic_dream_enabled: true,
             manual_dream_enabled: true,
+            recall_enabled: true,
             file_writes_enabled: true,
             archived_retention_days: 30,
             job_retention_days: 14,
@@ -182,6 +186,10 @@ impl MemoryV2Config {
 
     pub fn can_expose_memory(self) -> bool {
         self.rollout.exposes_memory()
+    }
+
+    pub fn can_recall(self) -> bool {
+        self.rollout.exposes_memory() && self.recall_enabled
     }
 }
 
@@ -947,6 +955,11 @@ impl MemoryConfig {
                         memory_v2.manual_dream_enabled,
                         remote_v2.and_then(|settings| settings.manual_dream_enabled),
                         defaults.v2.manual_dream_enabled,
+                    ),
+                    recall_enabled: restrict_flag(
+                        memory_v2.recall_enabled,
+                        remote_v2.and_then(|settings| settings.recall_enabled),
+                        defaults.v2.recall_enabled,
                     ),
                     file_writes_enabled: restrict_flag(
                         memory_v2.file_writes_enabled,
