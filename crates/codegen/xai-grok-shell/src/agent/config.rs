@@ -2596,15 +2596,7 @@ impl Config {
     /// pin keep their usual rank. A failed load answers the value this config holds.
     pub(crate) fn feature_from_disk(&self, feature: Feature) -> Resolved<bool> {
         match crate::config::load_effective_config_with_layers() {
-            Ok((layers, _)) => {
-                let split = feature.config_layers(&layers.layers, &layers.active_campaigns);
-                feature.resolve(FeatureSources {
-                    pin: split.pin,
-                    config: split.merged(),
-                    remote: feature.remote_value(self.remote_settings.as_ref()),
-                    ..FeatureSources::from_process_env(feature)
-                })
-            }
+            Ok((layers, _)) => self.feature_from_layers(feature, &layers),
             Err(e) => {
                 tracing::warn!(
                     error = %e,
@@ -2614,6 +2606,20 @@ impl Config {
                 self.feature(feature)
             }
         }
+    }
+    /// `feature` with its pin and config tier read from `layers`.
+    pub(crate) fn feature_from_layers(
+        &self,
+        feature: Feature,
+        layers: &crate::config::EffectiveConfigLayers,
+    ) -> Resolved<bool> {
+        let split = feature.config_layers(&layers.layers, &layers.active_campaigns);
+        feature.resolve(FeatureSources {
+            pin: split.pin,
+            config: split.merged(),
+            remote: feature.remote_value(self.remote_settings.as_ref()),
+            ..FeatureSources::from_process_env(feature)
+        })
     }
     pub(crate) fn is_turn_summary_enabled(&self) -> bool {
         self.is_feature_enabled(Feature::TurnSummary)

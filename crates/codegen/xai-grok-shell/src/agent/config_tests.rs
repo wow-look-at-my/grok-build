@@ -6132,6 +6132,38 @@ fn an_unset_harness_model_slot_falls_back_as_its_table_says() {
     }
 }
 
+/// The recap gate reads the config layers it is given, not the value the agent
+/// latched at start. A `/settings` toggle then reaches a running agent.
+#[test]
+#[serial]
+fn session_recap_follows_the_config_layers_not_the_latched_value() {
+    let _env = EnvGuard::unset("GROK_SESSION_RECAP");
+    let layers = |value: bool| crate::config::EffectiveConfigLayers {
+        layers: crate::config::ConfigLayers {
+            user: toml::from_str(&format!("[features]\nsession_recap = {value}")).unwrap(),
+            ..Default::default()
+        },
+        active_campaigns: Vec::new(),
+    };
+    let latched_on = Config::new_from_toml_cfg(&toml::Value::Table(Default::default())).unwrap();
+    assert!(latched_on.is_feature_enabled(Feature::SessionRecap));
+    assert!(
+        !latched_on
+            .feature_from_layers(Feature::SessionRecap, &layers(false))
+            .value
+    );
+
+    let latched_off =
+        Config::new_from_toml_cfg(&toml::from_str("[features]\nsession_recap = false").unwrap())
+            .unwrap();
+    assert!(!latched_off.is_feature_enabled(Feature::SessionRecap));
+    assert!(
+        latched_off
+            .feature_from_layers(Feature::SessionRecap, &layers(true))
+            .value
+    );
+}
+
 /// A group model reaches every member and wins over a member's own
 /// `[models]` entry. A slot outside the group keeps its own entry.
 #[test]
