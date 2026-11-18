@@ -452,6 +452,9 @@ impl AgentView {
                     self.prompt.insert_replacing_selection("");
                     self.prompt.refresh_slash(&self.session.models);
                 }
+                if self.prompt.slash_open() {
+                    self.prompt.slash_dismiss();
+                }
                 self.prompt_input_mode = mode;
                 return InputOutcome::Changed;
             }
@@ -2054,6 +2057,20 @@ mod input_mode_prefix_tests {
             "git status",
             "the draft stays, the `!` becomes the mode"
         );
+    }
+
+    #[test]
+    fn bang_before_a_slash_draft_enters_bash_mode_and_closes_the_slash_menu() {
+        let mut agent = agent_with_draft("", 0);
+        for c in "/help".chars() {
+            press(&mut agent, KeyCode::Char(c));
+        }
+        assert!(agent.prompt.slash_open(), "precondition: slash menu open");
+        agent.prompt.set_cursor(0);
+        press(&mut agent, KeyCode::Char('!'));
+        assert_eq!(agent.prompt_input_mode, PromptInputMode::Bash);
+        assert_eq!(agent.prompt.text(), "/help");
+        assert!(!agent.prompt.slash_open());
     }
 
     #[test]
