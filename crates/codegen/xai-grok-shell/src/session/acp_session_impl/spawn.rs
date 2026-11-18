@@ -2014,7 +2014,7 @@ pub(crate) async fn spawn_session_actor(
         goal_harness_enabled: std::sync::atomic::AtomicBool::new(goal_enabled),
         goal_tracker,
         goal_turn_task_ids: parking_lot::Mutex::new(std::collections::HashSet::new()),
-        goal_background: Default::default(),
+        goal_background: super::goal_hold::GoalBackground::new(cmd_tx.clone()),
         goal_continuation_streak: std::sync::atomic::AtomicU32::new(0),
         workflow_manager: workflow_manager.clone(),
         workflow_launch_tx: workflow_launch_tx.clone(),

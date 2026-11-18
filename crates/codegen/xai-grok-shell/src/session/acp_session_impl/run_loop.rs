@@ -1189,6 +1189,14 @@ pub(super) async fn run_session(
                             )
                             .await;
                         }
+                        SessionCommand::GoalVerificationSettled { note } => {
+                            SessionActor::resume_goal_after_verification(
+                                session.clone(),
+                                completion_tx.clone(),
+                                note,
+                            )
+                            .await;
+                        }
                         SessionCommand::RecordGoalTurnTaskIds { task_ids } => {
                             session.record_reparented_goal_turn_task_ids(task_ids);
                         }
