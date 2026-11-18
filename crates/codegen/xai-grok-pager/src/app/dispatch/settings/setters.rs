@@ -315,6 +315,7 @@ pub(in crate::app::dispatch) fn set_ask_user_question_timeout_enabled(
 
 const SUBAGENT_MODEL_INHERITANCE_LABEL: &str = "Subagent model inheritance";
 const TWO_PASS_COMPACTION_LABEL: &str = "Two-pass compaction";
+const COMPACT_ON_MODEL_SWITCH_LABEL: &str = "Compact on model switch";
 const SESSION_RECAP_LABEL: &str = "Session recaps";
 
 /// The settings-row state of a `[features]` flag that has a row.
@@ -322,6 +323,7 @@ fn feature_state_mut(app: &mut AppView, feature: Feature) -> Option<&mut Feature
     [
         &mut app.subagent_model_inheritance,
         &mut app.two_pass_compaction,
+        &mut app.compact_on_model_switch,
         &mut app.session_recap,
     ]
     .into_iter()
@@ -516,6 +518,30 @@ pub(in crate::app::dispatch) fn clear_two_pass_compaction(app: &mut AppView) -> 
         Feature::TwoPassCompaction,
         "two_pass_compaction",
         TWO_PASS_COMPACTION_LABEL,
+    )
+}
+
+/// SHELL-owned setter for `[features].compact_on_model_switch`.
+pub(in crate::app::dispatch) fn set_compact_on_model_switch(
+    app: &mut AppView,
+    new: bool,
+) -> Vec<Effect> {
+    set_feature_override(
+        app,
+        Feature::CompactOnModelSwitch,
+        "compact_on_model_switch",
+        COMPACT_ON_MODEL_SWITCH_LABEL,
+        new,
+    )
+}
+
+/// Outer dispatcher for `Action::ClearCompactOnModelSwitch`.
+pub(in crate::app::dispatch) fn clear_compact_on_model_switch(app: &mut AppView) -> Vec<Effect> {
+    clear_feature_override(
+        app,
+        Feature::CompactOnModelSwitch,
+        "compact_on_model_switch",
+        COMPACT_ON_MODEL_SWITCH_LABEL,
     )
 }
 

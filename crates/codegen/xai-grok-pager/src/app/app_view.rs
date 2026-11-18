@@ -1038,6 +1038,8 @@ pub struct AppView {
     pub subagent_model_inheritance: crate::settings::FeatureOverrideState,
     /// `[features].two_pass_compaction` as the settings modal shows it.
     pub two_pass_compaction: crate::settings::FeatureOverrideState,
+    /// `[features].compact_on_model_switch` as the settings modal shows it.
+    pub compact_on_model_switch: crate::settings::FeatureOverrideState,
     /// `[features].session_recap` as the settings modal shows it.
     pub session_recap: crate::settings::FeatureOverrideState,
     /// Mirrors the `models.definitions."<id>".context_window` limits of the user `config.json`, by model key.
@@ -1562,6 +1564,9 @@ impl AppView {
             ),
             two_pass_compaction: crate::settings::FeatureOverrideState::new(
                 xai_grok_shell::agent::config::Feature::TwoPassCompaction,
+            ),
+            compact_on_model_switch: crate::settings::FeatureOverrideState::new(
+                xai_grok_shell::agent::config::Feature::CompactOnModelSwitch,
             ),
             session_recap: crate::settings::FeatureOverrideState::new(
                 xai_grok_shell::agent::config::Feature::SessionRecap,

@@ -1602,6 +1602,26 @@ pub(crate) fn default_settings_with_subagent_rows(
             },
             restart_required: true,
         },
+        // SHELL-owned `[features].compact_on_model_switch`. Each agent latches the flag when it is built.
+        SettingMeta {
+            key: "compact_on_model_switch",
+            category: SettingCategory::Agent,
+            owner: SettingOwner::Shell,
+            label: "Compact on model switch",
+            description: "Compacts the conversation at the first turn after every model change, so the new model starts from a summary. Off keeps the full history across a switch.",
+            keywords: &[
+                "compaction",
+                "compact",
+                "model",
+                "switch",
+                "summary",
+                "context",
+            ],
+            kind: SettingKind::Bool {
+                default: Feature::CompactOnModelSwitch.default_enabled(),
+            },
+            restart_required: true,
+        },
         // SHELL-owned `[features].session_recap`. The shell re-reads it on each recap request, so it applies live.
         SettingMeta {
             key: "session_recap",

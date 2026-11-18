@@ -1619,6 +1619,7 @@ pub(crate) async fn run_shell_child(
         ctx.resolve_long_reasoning_reminder(),
         ctx.resolve_compaction_tool_choice(),
         pins.two_pass,
+        ctx.resolve_feature(crate::agent::config::Feature::CompactOnModelSwitch),
         None,
         None,
         std::sync::Arc::new(parking_lot::Mutex::new(

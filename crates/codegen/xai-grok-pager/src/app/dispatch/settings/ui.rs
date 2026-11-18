@@ -60,6 +60,7 @@ pub(crate) fn refresh_open_settings_modals(app: &mut AppView) {
     let voice_stt_language_from_app = app.voice_config.language.clone();
     let subagent_model_inheritance_from_app = app.subagent_model_inheritance;
     let two_pass_compaction_from_app = app.two_pass_compaction;
+    let compact_on_model_switch_from_app = app.compact_on_model_switch;
     let session_recap_from_app = app.session_recap;
     let keep_awake_from_app = app.notification_service.sleep_inhibitor.mode();
     let context_limits_from_app = app.model_context_limits.clone();
@@ -100,6 +101,7 @@ pub(crate) fn refresh_open_settings_modals(app: &mut AppView) {
                 voice_stt_language: voice_stt_language_from_app.clone(),
                 subagent_model_inheritance: subagent_model_inheritance_from_app,
                 two_pass_compaction: two_pass_compaction_from_app,
+                compact_on_model_switch: compact_on_model_switch_from_app,
                 session_recap: session_recap_from_app,
                 model_windows: crate::settings::context_limits::catalog_windows(
                     &agent.session.models.available,
@@ -220,6 +222,7 @@ pub(in crate::app::dispatch) fn dispatch_open_settings(
     let voice_stt_language_from_app = app.voice_config.language.clone();
     let subagent_model_inheritance_from_app = app.subagent_model_inheritance;
     let two_pass_compaction_from_app = app.two_pass_compaction;
+    let compact_on_model_switch_from_app = app.compact_on_model_switch;
     let session_recap_from_app = app.session_recap;
     let keep_awake_from_app = app.notification_service.sleep_inhibitor.mode();
 
@@ -267,6 +270,7 @@ pub(in crate::app::dispatch) fn dispatch_open_settings(
         voice_stt_language: voice_stt_language_from_app,
         subagent_model_inheritance: subagent_model_inheritance_from_app,
         two_pass_compaction: two_pass_compaction_from_app,
+        compact_on_model_switch: compact_on_model_switch_from_app,
         session_recap: session_recap_from_app,
         model_windows: crate::settings::context_limits::catalog_windows(
             &agent.session.models.available,
@@ -419,6 +423,7 @@ pub(in crate::app::dispatch) fn dispatch_confirm_reset_setting(
                     Action::SetCodingDataSharing { .. }
                         | Action::ClearSubagentModelInheritance
                         | Action::ClearTwoPassCompaction
+                        | Action::ClearCompactOnModelSwitch
                         | Action::ClearSessionRecap
                 )
             {
@@ -631,6 +636,7 @@ pub(crate) fn build_pager_snapshot(app: &AppView) -> crate::settings::PagerLocal
         voice_stt_language: app.voice_config.language.clone(),
         subagent_model_inheritance: app.subagent_model_inheritance,
         two_pass_compaction: app.two_pass_compaction,
+        compact_on_model_switch: app.compact_on_model_switch,
         session_recap: app.session_recap,
         model_windows: agent_model_windows(app),
         model_routes: agent_model_routes(app),
@@ -740,6 +746,9 @@ pub(in crate::app::dispatch) fn action_for_reset(
             Some(Action::ClearSubagentModelInheritance)
         }
         ("two_pass_compaction", SettingValue::Bool(_)) => Some(Action::ClearTwoPassCompaction),
+        ("compact_on_model_switch", SettingValue::Bool(_)) => {
+            Some(Action::ClearCompactOnModelSwitch)
+        }
         ("session_recap", SettingValue::Bool(_)) => Some(Action::ClearSessionRecap),
         ("keep_text_selection", SettingValue::Enum(s)) => {
             crate::appearance::TextSelection::from_canonical(s).map(Action::SetKeepTextSelection)

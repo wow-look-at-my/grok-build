@@ -436,6 +436,8 @@ pub struct PagerLocalSnapshot {
     pub subagent_model_inheritance: FeatureOverrideState,
     /// Mirrors `AppView::two_pass_compaction` at snapshot time.
     pub two_pass_compaction: FeatureOverrideState,
+    /// Mirrors `AppView::compact_on_model_switch` at snapshot time.
+    pub compact_on_model_switch: FeatureOverrideState,
     /// Mirrors `AppView::session_recap` at snapshot time.
     pub session_recap: FeatureOverrideState,
     /// The catalog window of each model, by model id.
@@ -473,6 +475,7 @@ impl Default for PagerLocalSnapshot {
                 Feature::SubagentModelInheritance,
             ),
             two_pass_compaction: FeatureOverrideState::new(Feature::TwoPassCompaction),
+            compact_on_model_switch: FeatureOverrideState::new(Feature::CompactOnModelSwitch),
             session_recap: FeatureOverrideState::new(Feature::SessionRecap),
             model_windows: std::collections::BTreeMap::new(),
             model_routes: std::collections::BTreeMap::new(),
@@ -820,6 +823,9 @@ pub fn current_value_for(
         )),
         "two_pass_compaction" => Some(SettingValue::Bool(
             pager.two_pass_compaction.resolve().value,
+        )),
+        "compact_on_model_switch" => Some(SettingValue::Bool(
+            pager.compact_on_model_switch.resolve().value,
         )),
         "session_recap" => Some(SettingValue::Bool(pager.session_recap.resolve().value)),
         // default_selected_permission: maps `[ui].default_selected_permission` onto one of the four registry canonicals
@@ -1243,6 +1249,14 @@ mod tests {
                         *default,
                         Feature::TwoPassCompaction.default_enabled(),
                         "two_pass_compaction default drifts from the FEATURES row"
+                    );
+                }
+                // compact_on_model_switch: no UiConfig mirror (a `[features]` row); anchored on the FEATURES row
+                ("compact_on_model_switch", SettingKind::Bool { default }) => {
+                    assert_eq!(
+                        *default,
+                        Feature::CompactOnModelSwitch.default_enabled(),
+                        "compact_on_model_switch default drifts from the FEATURES row"
                     );
                 }
                 // session_recap: no UiConfig mirror (a `[features]` row); anchored on the FEATURES row

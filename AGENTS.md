@@ -232,7 +232,7 @@ CI is the source of truth and builds every pushed branch. A branch that is only 
 
 ## Thinking-replay notes
 
-[docs/thinking-replay-notes.md](docs/thinking-replay-notes.md) holds this section.
+[docs/thinking-replay-notes.md](docs/thinking-replay-notes.md) holds this section: what a model switch and a compaction do with thinking. The client-note form on Messages, and `features.compact_on_model_switch`.
 
 ## Tool-schema fallback notes
 
