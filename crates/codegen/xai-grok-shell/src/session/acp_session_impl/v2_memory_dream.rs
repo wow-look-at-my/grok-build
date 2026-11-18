@@ -319,6 +319,23 @@ const V2_DREAM_SCOPES: [xai_grok_memory::V2MemoryScope; 2] = [
     xai_grok_memory::V2MemoryScope::Global,
 ];
 
+/// One answer for a `/dream` over both scopes. A scope with nothing to do never hides what
+/// the other scope did, and the first failure is the one reported.
+fn combine_scope_outcomes(
+    first: MemoryDreamResponse,
+    second: MemoryDreamResponse,
+) -> MemoryDreamResponse {
+    if second.disposition == MemoryDreamDisposition::NoWork {
+        first
+    } else if first.disposition == MemoryDreamDisposition::NoWork {
+        second
+    } else if !first.succeeded() {
+        first
+    } else {
+        first.then(second)
+    }
+}
+
 fn v2_scope_dir(
     storage: &crate::session::memory::MemoryStorage,
     scope: xai_grok_memory::V2MemoryScope,
@@ -741,7 +758,7 @@ impl SessionActor {
                 )
                 .await;
             outcome = Some(match outcome {
-                Some(earlier) => earlier.then(pass),
+                Some(earlier) => combine_scope_outcomes(earlier, pass),
                 None => pass,
             });
         }
@@ -850,6 +867,7 @@ impl SessionActor {
     /// the pass requires another iteration in the same tracked caller task.
     async fn execute_v2_dream(
         &self,
+        scope: xai_grok_memory::V2MemoryScope,
         cancel: &tokio_util::sync::CancellationToken,
         clock: xai_grok_memory::SharedV2Clock,
     ) -> V2DreamPass {
@@ -880,13 +898,14 @@ impl SessionActor {
         let workspace = storage.workspace_dir().to_path_buf();
         let is_shadow = self.memory.v2_config.rollout == crate::config::MemoryV2Rollout::Shadow;
         let claimed = xai_spawn::spawn_blocking({
+            let scope_dir = v2_scope_dir(&storage, scope);
             let global = global.clone();
             let workspace = workspace.clone();
             let store_clock = clock.clone();
             move || {
                 let store = xai_grok_memory::V2ConsolidationStore::open_with_clock(
-                    &workspace,
-                    xai_grok_memory::V2MemoryScope::Workspace,
+                    &scope_dir,
+                    scope,
                     &global,
                     &workspace,
                     store_clock.clone(),
