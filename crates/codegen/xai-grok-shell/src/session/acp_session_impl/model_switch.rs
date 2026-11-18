@@ -613,8 +613,8 @@ impl SessionActor {
             );
         }
     }
-    /// Whether the conversation has anything a family switch must compact away.
-    async fn history_has_model_minted_items(&self) -> bool {
+    /// Whether the conversation has anything a model switch must compact away.
+    pub(crate) async fn history_has_model_minted_items(&self) -> bool {
         self.chat_state_handle
             .get_conversation()
             .await
