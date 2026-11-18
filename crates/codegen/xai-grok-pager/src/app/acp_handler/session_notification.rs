@@ -2445,4 +2445,22 @@ mod memory_capture_privacy_tests {
         assert!(super::automatic_dream_failure_message("completed").is_none());
         assert!(super::automatic_dream_failure_message("no work").is_none());
     }
+
+    #[test]
+    fn a_recall_names_its_notes_on_one_line() {
+        use xai_grok_shell::extensions::notification::MemoryRecalledNote;
+        let note = |title: &str| MemoryRecalledNote {
+            title: title.to_owned(),
+            path: "/memory/topics/note.md".to_owned(),
+        };
+        assert_eq!(super::memory_recalled_message(&[]), None);
+        assert_eq!(
+            super::memory_recalled_message(&[note("Sandbox jail"), note("Prefers tabs")])
+                .as_deref(),
+            Some("Recalled from memory: Sandbox jail · Prefers tabs")
+        );
+        let long = super::memory_recalled_message(&[note(&"x".repeat(200))]).unwrap();
+        assert!(long.ends_with('…'), "{long}");
+        assert!(long.chars().count() < 120, "{long}");
+    }
 }

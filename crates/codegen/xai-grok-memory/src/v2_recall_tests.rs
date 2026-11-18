@@ -74,6 +74,10 @@ fn observation(statement: &str, keywords: &[&str], aliases: &[&str], body: Optio
     rendered
 }
 
+fn top(outcome: &V2RecallOutcome) -> &V2RecallHit {
+    outcome.hits.first().expect("recall returned no hit")
+}
+
 async fn lexical(recall: &V2Recall, query: &str) -> V2RecallOutcome {
     recall.recall(query, None, &HashSet::new()).await.unwrap()
 }
@@ -89,7 +93,7 @@ async fn topic_matching_two_distinctive_terms_is_returned() {
     assert_eq!(outcome.mode, V2RecallMode::Lexical);
     assert_eq!(outcome.corpus_chunks, 3);
     assert_eq!(outcome.hits.len(), 1, "{:?}", outcome.hits);
-    let hit = &outcome.hits[0];
+    let hit = top(&outcome);
     assert_eq!(hit.kind, V2RecallKind::Topic);
     assert_eq!(hit.title, "Build cache");
     assert_eq!(hit.path, fixture.workspace.join("topics/build.md"));
@@ -140,10 +144,10 @@ async fn observation_frontmatter_terms_are_searchable_but_bookkeeping_is_not() {
 
     let outcome = lexical(&recall, "what is the cadence of the weekly train shipday").await;
     assert_eq!(outcome.hits.len(), 1, "{:?}", outcome.hits);
-    assert_eq!(outcome.hits[0].path, path);
-    assert_eq!(outcome.hits[0].kind, V2RecallKind::Observation);
+    assert_eq!(top(&outcome).path, path);
+    assert_eq!(top(&outcome).kind, V2RecallKind::Observation);
     assert_eq!(
-        outcome.hits[0].matched_terms,
+        top(&outcome).matched_terms,
         vec!["cadence", "shipday", "train", "weekly"]
     );
 
@@ -171,7 +175,7 @@ async fn observation_hit_has_statement_title_and_real_line_range() {
     let outcome = lexical(&recall, "releases thursdays").await;
 
     assert_eq!(outcome.hits.len(), 1, "{:?}", outcome.hits);
-    let hit = &outcome.hits[0];
+    let hit = top(&outcome);
     assert_eq!(hit.title, "Releases ship on Thursdays");
     assert_eq!(
         hit.snippet,
@@ -185,8 +189,11 @@ async fn observation_hit_has_statement_title_and_real_line_range() {
         .unwrap()
         + 2;
     assert!(hit.start_line > frontmatter_lines);
-    assert_eq!(lines[hit.start_line - 1], "# Releases ship on Thursdays");
-    assert_eq!(lines[hit.end_line - 1], "train leaves at noon.");
+    assert_eq!(
+        lines.get(hit.start_line - 1),
+        Some(&"# Releases ship on Thursdays")
+    );
+    assert_eq!(lines.get(hit.end_line - 1), Some(&"train leaves at noon."));
     assert_eq!(hit.end_line, lines.len());
 }
 
@@ -207,8 +214,8 @@ async fn snippet_is_cut_on_a_char_boundary() {
     let outcome = lexical(&recall, "harfbuzz shaper").await;
 
     assert_eq!(outcome.hits.len(), 1);
-    assert_eq!(outcome.hits[0].snippet, "# Glyphs\nÆt…");
-    assert_eq!(outcome.hits[0].snippet.chars().count(), 12);
+    assert_eq!(top(&outcome).snippet, "# Glyphs\nÆt…");
+    assert_eq!(top(&outcome).snippet.chars().count(), 12);
 }
 
 #[tokio::test]
@@ -234,8 +241,8 @@ async fn seen_keys_are_skipped_without_using_up_max_hits() {
         .await
         .unwrap();
     assert_eq!(second.hits.len(), 1);
-    assert_ne!(second.hits[0].key, first.hits[0].key);
-    assert_ne!(second.hits[0].path, first.hits[0].path);
+    assert_ne!(top(&second).key, top(&first).key);
+    assert_ne!(top(&second).path, top(&first).path);
 }
 
 #[tokio::test]
@@ -260,7 +267,7 @@ async fn edited_file_gets_a_new_key_and_deleted_file_leaves_the_corpus() {
     .unwrap();
     let after = lexical(&recall, "kustomize argocd").await;
     assert_eq!(after.hits.len(), 1);
-    assert_ne!(after.hits[0].key, before.hits[0].key);
+    assert_ne!(top(&after).key, top(&before).key);
     assert!(lexical(&recall, "canary helm").await.hits.is_empty());
 
     std::fs::remove_file(&path).unwrap();
@@ -302,7 +309,7 @@ async fn hidden_observation_is_never_returned() {
 
     assert_eq!(outcome.corpus_chunks, 4);
     assert_eq!(outcome.hits.len(), 1, "{:?}", outcome.hits);
-    assert_eq!(outcome.hits[0].path, visible);
+    assert_eq!(top(&outcome).path, visible);
 }
 
 struct TestProvider {
@@ -380,7 +387,7 @@ async fn semantic_hit_without_lexical_overlap_and_cached_vectors() {
 
     assert_eq!(outcome.mode, V2RecallMode::Hybrid);
     assert_eq!(outcome.hits.len(), 1, "{:?}", outcome.hits);
-    let hit = &outcome.hits[0];
+    let hit = top(&outcome);
     assert_eq!(hit.path, path);
     assert_eq!(hit.scope, V2MemoryScope::Global);
     assert!(hit.is_semantic);
@@ -427,9 +434,9 @@ async fn hit_on_both_paths_gets_the_bonus() {
         .unwrap();
 
     assert_eq!(outcome.hits.len(), 1);
-    assert!(outcome.hits[0].is_semantic);
-    assert_eq!(outcome.hits[0].matched_terms, vec!["keeper", "lighthouse"]);
-    assert_eq!(outcome.hits[0].score, 1.0);
+    assert!(top(&outcome).is_semantic);
+    assert_eq!(top(&outcome).matched_terms, vec!["keeper", "lighthouse"]);
+    assert_eq!(top(&outcome).score, 1.0);
 }
 
 #[tokio::test]
@@ -450,8 +457,8 @@ async fn failing_provider_falls_back_to_lexical_hits() {
         other => panic!("expected EmbeddingFailed, got {other:?}"),
     }
     assert_eq!(outcome.hits.len(), 1);
-    assert_eq!(outcome.hits[0].title, "Build cache");
-    assert!(!outcome.hits[0].is_semantic);
+    assert_eq!(top(&outcome).title, "Build cache");
+    assert!(!top(&outcome).is_semantic);
 }
 
 #[tokio::test]
@@ -468,12 +475,12 @@ async fn both_scopes_are_searched() {
     let global = lexical(&recall, "tabs makefiles").await;
     assert_eq!(global.corpus_chunks, 4);
     assert_eq!(global.hits.len(), 1);
-    assert_eq!(global.hits[0].scope, V2MemoryScope::Global);
-    assert_eq!(global.hits[0].path, global_path);
+    assert_eq!(top(&global).scope, V2MemoryScope::Global);
+    assert_eq!(top(&global).path, global_path);
 
     let workspace = lexical(&recall, "sourdough flour").await;
     assert_eq!(workspace.hits.len(), 1);
-    assert_eq!(workspace.hits[0].scope, V2MemoryScope::Workspace);
+    assert_eq!(top(&workspace).scope, V2MemoryScope::Workspace);
 }
 
 #[tokio::test]
@@ -515,7 +522,7 @@ async fn chunk_cap_keeps_topics_then_newest_observations() {
     let outcome = lexical(&recall, "walrus glacier").await;
     assert_eq!(outcome.corpus_chunks, 4);
     assert_eq!(outcome.hits.len(), 1);
-    assert_eq!(outcome.hits[0].path, new);
+    assert_eq!(top(&outcome).path, new);
     assert!(lexical(&recall, "pelican harbor").await.hits.is_empty());
     assert_eq!(lexical(&recall, "sccache rustc").await.hits.len(), 1);
 

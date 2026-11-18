@@ -2270,6 +2270,20 @@ mod tests {
     }
 
     #[test]
+    fn memory_recalled_roundtrips() {
+        let update = SessionUpdate::MemoryRecalled {
+            notes: vec![MemoryRecalledNote {
+                title: "Sandbox jail".into(),
+                path: "/home/user/.grok/memory-v2/global/topics/sandbox.md".into(),
+            }],
+        };
+        let json = serde_json::to_value(&update).unwrap();
+        assert_eq!(json["sessionUpdate"], "memory_recalled");
+        let parsed: SessionUpdate = serde_json::from_value(json).unwrap();
+        assert_eq!(update, parsed);
+    }
+
+    #[test]
     fn memory_session_saved_roundtrips() {
         let update = SessionUpdate::MemorySessionSaved {
             path: "/home/user/.grok/memory/ws/sessions/2026-01-15-fix-auth-abc12345.md".into(),
