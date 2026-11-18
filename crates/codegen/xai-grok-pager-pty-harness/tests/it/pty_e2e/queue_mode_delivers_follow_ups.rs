@@ -190,7 +190,7 @@ async fn goal_round_sends_follow_up_typed_during_a_foreground_subagent() {
         .expect("welcome");
     harness
         // The open todo bounces every round. The budget ends the goal at the first round end.
-        .inject_keys(b"/goal build the project --budget 1")
+        .inject_keys(b"/goal --full build the project --budget 1")
         .expect("type goal");
     harness.update(Duration::from_millis(300));
     harness.inject_keys(b"\r").expect("submit goal");

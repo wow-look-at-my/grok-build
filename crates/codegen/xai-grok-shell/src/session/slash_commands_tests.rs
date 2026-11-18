@@ -2137,28 +2137,36 @@ fn goal_set_malformed_budget_stays_in_objective() {
 fn goal_set_mode_flag_parses_at_either_end() {
     use crate::session::goal_tracker::GoalMode;
     for (text, objective, budget, mode) in [
-        ("--lite fix it", "fix it", None, Some(GoalMode::Lite)),
-        ("fix it --lite", "fix it", None, Some(GoalMode::Lite)),
-        ("--full fix it", "fix it", None, Some(GoalMode::Full)),
+        ("--lite fix it", "fix it", None, GoalMode::Lite),
+        ("fix it --lite", "fix it", None, GoalMode::Lite),
+        ("--full fix it", "fix it", None, GoalMode::Full),
+        ("fix it --full", "fix it", None, GoalMode::Full),
         (
             "--lite fix it --budget 9",
             "fix it",
             Some(9),
-            Some(GoalMode::Lite),
+            GoalMode::Lite,
         ),
         (
             "fix it --lite --budget 9",
             "fix it",
             Some(9),
-            Some(GoalMode::Lite),
+            GoalMode::Lite,
         ),
         (
             "fix it --budget 9 --lite",
             "fix it",
             Some(9),
-            Some(GoalMode::Lite),
+            GoalMode::Lite,
         ),
-        ("fix it", "fix it", None, None),
+        (
+            "fix it --full --budget 9",
+            "fix it",
+            Some(9),
+            GoalMode::Full,
+        ),
+        ("fix it", "fix it", None, GoalMode::Lite),
+        ("fix it --budget 9", "fix it", Some(9), GoalMode::Lite),
     ] {
         match resolve_goal(text) {
             BuiltinAction::GoalSet {
@@ -2177,10 +2185,13 @@ fn goal_set_mode_flag_parses_at_either_end() {
 
 #[test]
 fn goal_set_mode_flag_needs_its_own_token_and_an_objective() {
+    use crate::session::goal_tracker::GoalMode;
     for text in [
         "--lite",
+        "--full",
         "fix the --lite flag",
-        "fix it--lite",
+        "fix the --full flag",
+        "fix it--full",
         "--lighter fix it",
     ] {
         match resolve_goal(text) {
@@ -2188,7 +2199,11 @@ fn goal_set_mode_flag_needs_its_own_token_and_an_objective() {
                 objective, mode, ..
             } => {
                 assert_eq!(objective, text, "objective must be preserved verbatim");
-                assert_eq!(mode, None, "no mode must be parsed from {text:?}");
+                assert_eq!(
+                    mode,
+                    GoalMode::Lite,
+                    "no flag in {text:?}, so the goal is lite"
+                );
             }
             other => panic!("expected GoalSet, got {}", other.command_name()),
         }
@@ -2205,7 +2220,7 @@ fn goal_command_name_is_goal() {
         BuiltinAction::GoalSet {
             objective: "x".into(),
             token_budget: None,
-            mode: None,
+            mode: crate::session::goal_tracker::GoalMode::Lite,
         }
         .command_name(),
         "goal"
@@ -2218,7 +2233,7 @@ fn goal_args_provided() {
         BuiltinAction::GoalSet {
             objective: "x".into(),
             token_budget: None,
-            mode: None,
+            mode: crate::session::goal_tracker::GoalMode::Lite,
         }
         .args_provided()
     );
