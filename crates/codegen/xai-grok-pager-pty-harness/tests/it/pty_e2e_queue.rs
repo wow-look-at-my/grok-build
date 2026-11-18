@@ -8,6 +8,8 @@ mod auto_wake_cancel_preserves_queued_user_prompt;
 mod auto_wake_cancel_via_esc_preserves_queued_user_prompt;
 #[path = "pty_e2e/auto_wake_cancel_via_stop_click_preserves_queued_user_prompt.rs"]
 mod auto_wake_cancel_via_stop_click_preserves_queued_user_prompt;
+#[path = "pty_e2e/bang_at_start_of_draft_runs_bash.rs"]
+mod bang_at_start_of_draft_runs_bash;
 #[path = "pty_e2e/bash_queued_mid_turn_drains_as_bash.rs"]
 mod bash_queued_mid_turn_drains_as_bash;
 #[path = "pty_e2e/cancel_discards_buffered_interjection.rs"]
