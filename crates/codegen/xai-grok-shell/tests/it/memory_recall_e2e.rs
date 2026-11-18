@@ -83,6 +83,8 @@ fn a_stored_topic_is_recalled_once_when_the_conversation_reaches_it() {
         )
         .expect("write topic");
 
+        // The mock echoes the last message by default. An echo would repeat the reminder.
+        server.set_response("Noted.");
         let first_prompt = "How do I run the zebrafish deploy pipeline?";
         prompt_turn(&conn, &session_id, first_prompt).await;
         let bodies = turn_bodies(&server, first_prompt);
