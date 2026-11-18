@@ -1039,16 +1039,16 @@ fn every_harness_model_slot_round_trips_from_the_settings_write_to_the_resolver(
 #[test]
 fn a_model_group_write_round_trips_to_the_resolver() {
     let mut root: TomlMap<String, TomlValue> =
-        toml::from_str("[models]\nrecap = \"old\"\ngoal_planner = \"keep\"\n").unwrap();
+        toml::from_str("[models]\nturn_summary = \"old\"\ngoal_planner = \"keep\"\n").unwrap();
     super::super::settings_writes::apply_model_group_model(&mut root, "summarization", "new")
         .unwrap();
     let models = root["models"].as_table().unwrap();
-    assert!(!models.contains_key("recap"), "a member pin must go");
+    assert!(!models.contains_key("turn_summary"), "a member pin must go");
     assert_eq!(models["goal_planner"].as_str(), Some("keep"));
 
     let reread = TomlValue::Table(root.clone());
     let cfg = crate::agent::config::Config::new_from_toml_cfg(&reread).unwrap();
-    for slot in ["recap", "turn_summary", "session_summary"] {
+    for slot in ["turn_summary", "session_summary"] {
         assert_eq!(
             cfg.resolve_harness_model(slot).map(|r| r.value),
             Some("new".to_owned()),
