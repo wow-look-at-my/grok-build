@@ -125,7 +125,7 @@ pub(crate) async fn point_model_at(
 /// The item [`lite_goal_capture`] puts on the list.
 #[cfg(test)]
 pub(crate) const LITE_GOAL_CAPTURED_STEP: &str = "Run the test suite and fix each failure";
-/// The capture run `/goal --lite` starts with: one `todo_write` call. Queue it before any other response.
+/// The capture run a lite `/goal` starts with: one `todo_write` call. Queue it before any other response.
 #[cfg(test)]
 pub(crate) fn lite_goal_capture() -> xai_grok_test_support::ScriptedResponse {
     let args = serde_json::json!({

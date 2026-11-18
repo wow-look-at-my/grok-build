@@ -753,7 +753,7 @@ async fn shared_command_availability_syncs_goal_harness_from_goal_enabled() {
         .await;
 }
 
-/// A `/goal <objective>` whose planner pauses the goal ends the turn without ever calling the model.
+/// A `/goal --full <objective>` whose planner pauses the goal ends the turn without ever calling the model.
 #[tokio::test(flavor = "current_thread")]
 async fn goal_set_with_failed_planner_makes_no_inference_request() {
     use xai_grok_tools::implementations::grok_build::task::types::{SubagentEvent, SubagentResult};
@@ -802,7 +802,7 @@ async fn goal_set_with_failed_planner_makes_no_inference_request() {
                 .await;
 
             // Human authority: a model-authored `/goal` is denied and would reach the model as text.
-            run_parent_turn(&actor, human_request("/goal ship it"))
+            run_parent_turn(&actor, human_request("/goal --full ship it"))
                 .await
                 .expect("a paused goal ends the turn cleanly");
 
