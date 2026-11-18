@@ -5,7 +5,9 @@ use crate::acp_harness;
 use std::path::{Path, PathBuf};
 use std::time::Duration;
 
-use acp_harness::{AutoApproveClient, connect_and_auth, new_session, prompt_turn, run_agent_test};
+use acp_harness::{
+    AutoApproveClient, connect_and_auth_with_memory, new_session, prompt_turn, run_agent_test,
+};
 
 const RECALL_OPEN_TAG: &str = "<memory-recall>";
 
@@ -67,7 +69,8 @@ async fn wait_for<T>(what: &str, mut probe: impl FnMut() -> Option<T>) -> T {
 fn a_stored_topic_is_recalled_once_when_the_conversation_reaches_it() {
     run_agent_test(|_cwd, server| async move {
         let workspace = Workspace::new("topic");
-        let (conn, _init) = connect_and_auth(AutoApproveClient, "memory-recall-test").await;
+        let (conn, _init) =
+            connect_and_auth_with_memory(AutoApproveClient, "memory-recall-test").await;
         let session_id = new_session(&conn, &workspace.0).await;
 
         // The scope directories appear with the first prompt, so the test makes this.
@@ -117,7 +120,8 @@ fn a_preference_from_one_workspace_is_recalled_in_another_without_a_command() {
     run_agent_test(|_cwd, server| async move {
         let first_workspace = Workspace::new("capture");
         let second_workspace = Workspace::new("recall");
-        let (conn, _init) = connect_and_auth(AutoApproveClient, "memory-capture-test").await;
+        let (conn, _init) =
+            connect_and_auth_with_memory(AutoApproveClient, "memory-capture-test").await;
 
         // The mock gives every request this reply, so the extractor reads it as its output.
         server.set_response(
