@@ -108,6 +108,42 @@ pub(crate) async fn initialize_v2_memory(
 }
 
 impl SessionActor {
+    /// `client`, with every call it sends also added to one memory cost total.
+    /// The session ledger still gets each call one time.
+    pub(super) fn memory_billed_client(
+        &self,
+        client: xai_grok_sampler::SamplingClient,
+        spent_usd_ticks: &Arc<std::sync::atomic::AtomicU64>,
+    ) -> xai_grok_sampler::SamplingClient {
+        client.with_usage_sink(crate::session::billed_client::memory_usage_sink(
+            self.usage_sink(),
+            Arc::clone(spent_usd_ticks),
+        ))
+    }
+
+    /// Tell the client what memory spent so far and the session total that holds it.
+    /// A total that did not move sends nothing.
+    pub(super) async fn report_memory_cost(&self) {
+        use std::sync::atomic::Ordering::Relaxed;
+        let totals = self.memory.token_totals.cost_totals();
+        let total = u64::try_from(totals.total_usd_ticks()).unwrap_or(0);
+        if self
+            .memory
+            .token_totals
+            .reported_cost_usd_ticks
+            .swap(total, Relaxed)
+            == total
+        {
+            return;
+        }
+        let session_cost_usd_ticks = self.reported_session_cost_ticks().await;
+        self.send_xai_notification(crate::extensions::notification::SessionUpdate::MemoryCost {
+            totals,
+            session_cost_usd_ticks,
+        })
+        .await;
+    }
+
     /// Files the `/memory` modal shows plus the enabled/capability flags that drive its notices.
     /// Errors when the store cannot be listed; callers must not render that as an empty store.
     pub(crate) fn memory_listing(&self) -> Result<MemoryListing, String> {
@@ -159,7 +195,7 @@ impl SessionActor {
             None => vec![],
         };
         drop(live);
-        // Legacy saves at compaction/session end when `save_on_end`; its `/dream` is always available.
+        // Legacy saves at compaction/session end when `save_on_end`; its forced Dream is always available.
         let v2 = &self.memory.v2_config;
         let (capture_enabled, dream_enabled) = if self.memory.mode() == Some(MemoryMode::V2) {
             (v2.capture_enabled, v2.manual_dream_enabled)

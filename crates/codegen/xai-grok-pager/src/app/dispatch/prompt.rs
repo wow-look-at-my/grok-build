@@ -22,7 +22,7 @@ use crate::app::app_view::{ActiveView, AppView};
 use crate::app::cancel_latency::TurnEnd;
 use crate::notifications::{NotificationEvent, NotificationEventKind};
 use crate::scrollback::block::RenderBlock;
-use crate::scrollback::blocks::{MemoryCommandKind, SessionEvent};
+use crate::scrollback::blocks::SessionEvent;
 use crate::slash::command::DoctorRequest;
 use agent_client_protocol as acp;
 use xai_grok_telemetry::session_ctx::log_event;
@@ -1923,57 +1923,6 @@ pub(super) fn handle_prompt_response(
         return effects;
     }
     vec![]
-}
-
-/// `/flush` or `/dream` finished: close the command state and post its outcome line.
-pub(super) fn handle_memory_command_complete(
-    app: &mut AppView,
-    agent_id: AgentId,
-    kind: MemoryCommandKind,
-    result: Result<(String, bool), String>,
-) -> Vec<Effect> {
-    let Some(agent) = app.agents.get_mut(&agent_id) else {
-        return vec![];
-    };
-    let command = match kind {
-        MemoryCommandKind::Flush => AgentCommand::MemoryFlush,
-        MemoryCommandKind::Dream => AgentCommand::MemoryDream,
-    };
-    if agent.session.state.command_in_flight() != Some(&command) {
-        tracing::debug!(
-            ?command,
-            "Ignoring memory command result (not in its command state)"
-        );
-        return vec![];
-    }
-    let elapsed = agent.turn_elapsed().unwrap_or_default();
-    agent.session.finish_command();
-
-    let (summary, succeeded) = match result {
-        Ok(outcome) => outcome,
-        Err(error) => {
-            tracing::error!(agent = ?agent_id, ?command, %error, "Memory command failed");
-            (error, false)
-        }
-    };
-    agent.scrollback.push_block(RenderBlock::session_event(
-        SessionEvent::MemoryCommandCompleted {
-            summary,
-            succeeded,
-            elapsed,
-        },
-    ));
-
-    agent.mark_turn_finished(TurnEnd::Completed);
-    agent.activity_started_at = None;
-    agent.last_activity = None;
-
-    if app.reconnect_pending {
-        return vec![];
-    }
-    let drain = maybe_drain_queue(agent, &mut app.pending_image_notices);
-    note_peek_page_flip(app, agent_id, drain.page_flip_entry);
-    drain.effects
 }
 
 pub(super) fn handle_compact_complete(

@@ -210,6 +210,40 @@ fn a_reported_cost_wins_over_the_price_table() {
     assert_eq!(price_model_call("", None, None), None);
 }
 
+#[derive(Debug, Default)]
+struct RecordingSink(std::sync::Mutex<Vec<Option<i64>>>);
+
+impl UsageSink for RecordingSink {
+    fn record_call(&self, call: BilledCall) {
+        self.0.lock().unwrap().push(call.cost_usd_ticks);
+    }
+}
+
+#[test]
+fn a_memory_call_is_billed_to_the_session_and_added_to_its_memory_total() {
+    let session = Arc::new(RecordingSink::default());
+    let spent = Arc::new(std::sync::atomic::AtomicU64::new(0));
+    let sink = memory_usage_sink(session.clone(), Arc::clone(&spent));
+    let call = |cost_usd_ticks| BilledCall {
+        model: "no-such-model".into(),
+        usage: None,
+        cost_usd_ticks,
+        duration: std::time::Duration::from_millis(1),
+    };
+
+    sink.record_call(call(Some(40)));
+    sink.record_call(call(Some(2)));
+    // No reported price and no price table entry: billed, with nothing to add.
+    sink.record_call(call(None));
+
+    assert_eq!(spent.load(std::sync::atomic::Ordering::Relaxed), 42);
+    assert_eq!(
+        *session.0.lock().unwrap(),
+        [Some(40), Some(2), None],
+        "the session sink must get every call one time"
+    );
+}
+
 /// The crates that hold model-calling code. Only `xai-grok-sampler` sends to a model provider.
 const MODEL_CALLING_CRATES: [&str; 5] = [
     "xai-grok-tools",

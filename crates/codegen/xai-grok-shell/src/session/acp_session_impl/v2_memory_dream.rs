@@ -319,7 +319,7 @@ const V2_DREAM_SCOPES: [xai_grok_memory::V2MemoryScope; 2] = [
     xai_grok_memory::V2MemoryScope::Global,
 ];
 
-/// One answer for a `/dream` over both scopes. A scope with nothing to do never hides what
+/// One answer for a forced Dream over both scopes. A scope with nothing to do never hides what
 /// the other scope did, and the first failure is the one reported.
 fn combine_scope_outcomes(
     first: MemoryDreamResponse,
@@ -646,7 +646,7 @@ impl SessionActor {
     }
 
     /// Run Dream when the pending observations meet the count or age gate. Nothing polls it:
-    /// a finished capture and a session start call it, so no backlog waits for `/dream`.
+    /// a finished capture and a session start call it, so no backlog waits for a command.
     pub(super) async fn evaluate_automatic_v2_dream(
         self: &Arc<Self>,
         cancel: tokio_util::sync::CancellationToken,
@@ -799,6 +799,7 @@ impl SessionActor {
                 let pass = session
                     .execute_v2_dream(scope, &cancel, clock.clone())
                     .await;
+                session.report_memory_cost().await;
                 if pass.notify {
                     session
                         .send_xai_notification(XaiSessionUpdate::MemoryDreamCompleted {
@@ -1262,6 +1263,10 @@ impl SessionActor {
                     detail: error.to_string(),
                     usage: xai_grok_telemetry::memory_telemetry::MemoryV2ModelUsage::default(),
                 })?;
+        let sampling_client = self.memory_billed_client(
+            sampling_client,
+            &self.memory.token_totals.dream_cost_usd_ticks,
+        );
         let model = self
             .chat_state_handle
             .get_sampling_config()

@@ -1206,6 +1206,12 @@ impl SamplingClient {
         self.defaults.api_backend.clone()
     }
 
+    /// The same client with `sink` as the receiver of every call's usage.
+    pub fn with_usage_sink(mut self, sink: crate::usage_sink::SharedUsageSink) -> Self {
+        self.usage_sink = Some(sink);
+        self
+    }
+
     /// Whether this client reports its usage to a sink.
     pub fn has_usage_sink(&self) -> bool {
         self.usage_sink.is_some()

@@ -43,7 +43,7 @@ use crate::views::modal_window::{
 use xai_grok_shell::extensions::memory::{
     MEMORY_FORGET_MAX_FILE_BYTES, MemoryForgetResponse, MemoryListing, MemoryToggleResponse,
 };
-use xai_grok_shell::extensions::notification::MemoryDisabledReason;
+use xai_grok_shell::extensions::notification::{MemoryCostTotals, MemoryDisabledReason};
 
 const SPLIT_MIN_WIDTH: u16 = 64;
 const LIST_WIDTH_RATIO: f64 = 0.40;
@@ -64,7 +64,7 @@ fn empty_state_markdown(capture_enabled: bool, dream_enabled: bool) -> String {
     }
     text.push_str("- `/remember <note>` saves something specific right now.\n");
     if dream_enabled {
-        text.push_str("- Saved notes become topics by themselves. `/dream` does it right now.\n");
+        text.push_str("- Saved notes become topics by themselves.\n");
     }
     text.push_str(
         "\nGrok Build remembers conventions, decisions, and project facts across sessions so you \
@@ -263,6 +263,8 @@ pub struct MemoryModalState {
     /// Flags to restore if an in-flight `t` toggle fails; `Some` also blocks a second `t`.
     pending_toggle: Option<(bool, Option<MemoryDisabledReason>)>,
     pub status: Option<MemoryStatusLine>,
+    /// What memory spent in this run, from the session's tracker when the modal opened.
+    memory_cost: Option<MemoryCostTotals>,
     /// Whether the modal is rendered in fullscreen mode (persisted to config).
     pub fullscreen: bool,
     /// Cached filtered indices.
@@ -312,6 +314,7 @@ impl MemoryModalState {
             pending_delete: None,
             pending_toggle: None,
             status: None,
+            memory_cost: None,
             fullscreen: load_fullscreen_pref(),
             filtered_cache,
             content_cache: HashMap::new(),
@@ -337,6 +340,11 @@ impl MemoryModalState {
         let mut state = Self::new(Vec::new());
         state.apply_listing(listing);
         state
+    }
+
+    pub fn with_memory_cost(mut self, totals: Option<MemoryCostTotals>) -> Self {
+        self.memory_cost = totals;
+        self
     }
 
     #[cfg(test)]
@@ -1036,35 +1044,59 @@ fn render_notice(buf: &mut Buffer, area: Rect, markdown: &str, theme: &Theme) {
     });
 }
 
-/// Returns the number of rows used (0 or 1).
+/// One line with what memory spent in this run, by kind. `None` when it spent nothing.
+fn memory_cost_line(totals: MemoryCostTotals) -> Option<String> {
+    use crate::scrollback::wrappers::cost_ticks_to_display;
+    let total = cost_ticks_to_display(Some(totals.total_usd_ticks()))?;
+    let parts: Vec<String> = [
+        ("capture", totals.capture_usd_ticks),
+        ("consolidation", totals.consolidation_usd_ticks),
+        ("recall", totals.recall_usd_ticks),
+    ]
+    .into_iter()
+    .filter_map(|(name, ticks)| {
+        cost_ticks_to_display(Some(ticks)).map(|cost| format!("{name} {cost}"))
+    })
+    .collect();
+    Some(format!(
+        "Memory cost this session: {total} ({})",
+        parts.join(" · ")
+    ))
+}
+
+/// A status message takes the row before the memory cost.
 fn render_status_line(
     buf: &mut Buffer,
     area: Rect,
     state: &MemoryModalState,
     theme: &Theme,
 ) -> u16 {
-    let Some(status) = state.status.as_ref() else {
-        return 0;
-    };
     if area.height < 3 {
         return 0;
     }
-    let fg = if status.is_error {
-        theme.accent_error
-    } else {
-        theme.accent_user
-    };
-    let text = crate::render::line_utils::truncate_str(&status.text, area.width as usize);
-    buf.set_span(
-        area.x,
-        area.y + area.height - 1,
-        &Span::styled(
-            text.as_str(),
+    let (text, style) = if let Some(status) = state.status.as_ref() {
+        let fg = if status.is_error {
+            theme.accent_error
+        } else {
+            theme.accent_user
+        };
+        (
+            status.text.clone(),
             Style::default()
                 .fg(fg)
                 .bg(theme.bg_base)
                 .add_modifier(Modifier::BOLD),
-        ),
+        )
+    } else if let Some(line) = state.memory_cost.and_then(memory_cost_line) {
+        (line, Style::default().fg(theme.gray_dim).bg(theme.bg_base))
+    } else {
+        return 0;
+    };
+    let text = crate::render::line_utils::truncate_str(&text, area.width as usize);
+    buf.set_span(
+        area.x,
+        area.y + area.height - 1,
+        &Span::styled(text.as_str(), style),
         area.width,
     );
     1
@@ -2733,6 +2765,55 @@ mod tests {
     }
 
     #[test]
+    fn memory_cost_line_is_none_for_a_zero_total() {
+        assert_eq!(memory_cost_line(MemoryCostTotals::default()), None);
+    }
+
+    #[test]
+    fn memory_cost_line_leaves_out_zero_parts() {
+        let totals = MemoryCostTotals {
+            capture_usd_ticks: 310_000_000,
+            ..MemoryCostTotals::default()
+        };
+        assert_eq!(
+            memory_cost_line(totals).as_deref(),
+            Some("Memory cost this session: $0.031 (capture $0.031)")
+        );
+    }
+
+    #[test]
+    fn memory_cost_line_lists_every_part() {
+        let totals = MemoryCostTotals {
+            capture_usd_ticks: 310_000_000,
+            consolidation_usd_ticks: 100_000_000,
+            recall_usd_ticks: 11_000_000,
+        };
+        assert_eq!(
+            memory_cost_line(totals).as_deref(),
+            Some(
+                "Memory cost this session: $0.0421 (capture $0.031 · consolidation $0.01 · recall $0.0011)"
+            )
+        );
+    }
+
+    #[test]
+    fn memory_cost_renders_in_the_status_row() {
+        let totals = MemoryCostTotals {
+            recall_usd_ticks: 11_000_000,
+            ..MemoryCostTotals::default()
+        };
+        let mut state = MemoryModalState::new(Vec::new()).with_memory_cost(Some(totals));
+        let text = render_full(&mut state);
+        assert!(
+            text.contains("Memory cost this session: $0.0011 (recall $0.0011)"),
+            "{text}"
+        );
+        let mut without = MemoryModalState::new(Vec::new()).with_memory_cost(None);
+        let text = render_full(&mut without);
+        assert!(!text.contains("Memory cost"), "{text}");
+    }
+
+    #[test]
     fn empty_enabled_state_renders_onboarding_copy() {
         // A fresh v2 store is not an empty list: scope init writes both MEMORY.md indexes.
         let manifest = |scope: &str| xai_grok_shell::extensions::notification::MemoryFileInfo {
@@ -2751,18 +2832,19 @@ mod tests {
         let text = render_full(&mut state);
         assert!(text.contains("Nothing remembered yet"), "{text}");
         assert!(text.contains("/remember"), "{text}");
-        assert!(text.contains("/dream"), "{text}");
+        assert!(text.contains("become topics by themselves"), "{text}");
+        assert!(!text.contains("/dream"), "{text}");
         assert!(text.contains("saved automatically"), "{text}");
         assert!(!text.contains("No file selected"), "{text}");
         let labels: Vec<&str> = build_shortcuts(&state).iter().map(|s| s.label).collect();
         assert_eq!(labels, vec!["t turn off", "^F fullscreen", "Esc close"]);
 
-        // Capture and manual Dream can be pinned off; the copy must not promise them.
+        // Capture and Dream can be pinned off; the copy must not promise them.
         let mut restricted = MemoryModalState::new(build_entries(vec![manifest("global")]))
             .with_capabilities(false, false);
         let text = render_full(&mut restricted);
         assert!(text.contains("/remember"), "{text}");
-        assert!(!text.contains("/dream"), "{text}");
+        assert!(!text.contains("become topics by themselves"), "{text}");
         assert!(!text.contains("saved automatically"), "{text}");
 
         // One real note brings the two-pane browser (indexes included) back.

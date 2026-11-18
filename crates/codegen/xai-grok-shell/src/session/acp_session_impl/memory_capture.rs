@@ -1,4 +1,4 @@
-//! Memory-v2 end-turn extraction and `/flush` barrier.
+//! Memory-v2 end-turn extraction and the `memory/flush` barrier.
 
 use super::*;
 use crate::session::memory::capture_transcript::{
@@ -284,7 +284,7 @@ fn commit_global_observations(
 
 const CONTENT_FILTER_STOP_REASON: &str = "content_filter";
 
-/// Class `/flush` reports when the queue still carries a failed job at its
+/// Class a forced flush reports when the queue still carries a failed job at its
 /// deadline. The durable queue keeps only sanitized error text, so a failure
 /// inherited from another process cannot be attributed more precisely than
 /// "did not converge".
@@ -894,6 +894,9 @@ impl SessionActor {
             )
             .await;
             let latency_ms = started_at.elapsed().as_millis() as u64;
+            if let Some(session) = session.upgrade() {
+                session.report_memory_cost().await;
+            }
             match outcome {
                 Ok((scoped, usage)) => {
                     let observation_count = scoped.observation_count();
@@ -1151,6 +1154,10 @@ impl SessionActor {
                     format!("extractor setup failed: {error}"),
                 ))?,
         };
+        let sampling_client = session_snapshot.memory_billed_client(
+            sampling_client,
+            &session_snapshot.memory.token_totals.capture_cost_usd_ticks,
+        );
         let models_manager = session_snapshot.models_manager.clone();
         drop(session_snapshot);
         let model = tokio::select! {
@@ -1818,6 +1825,65 @@ mod tests {
                         "debug capture notifications must not be persisted into session replay"
                     );
                 }
+            })
+            .await;
+    }
+
+    #[tokio::test(flavor = "current_thread")]
+    async fn memory_cost_reaches_the_client_each_time_the_total_moves() {
+        use std::sync::atomic::Ordering::Relaxed;
+        tokio::task::LocalSet::new()
+            .run_until(async {
+                let (gateway_tx, mut gateway_rx) = tokio::sync::mpsc::unbounded_channel();
+                let (persistence_tx, _persistence_rx) = tokio::sync::mpsc::unbounded_channel();
+                let config = crate::config::MemoryConfig {
+                    enabled: true,
+                    mode: crate::config::MemoryMode::V2,
+                    ..Default::default()
+                };
+                let actor = super::super::memory_config_tests::create_test_actor_with_memory(
+                    50_000,
+                    100_000,
+                    85,
+                    gateway_tx,
+                    persistence_tx,
+                    Some(config),
+                )
+                .await;
+                let mut sent = || -> Vec<String> {
+                    std::iter::from_fn(|| gateway_rx.try_recv().ok())
+                        .map(|message| format!("{message:?}"))
+                        .filter(|message| message.contains("memory_cost"))
+                        .collect()
+                };
+
+                actor.report_memory_cost().await;
+                assert!(sent().is_empty(), "no spend sends no update");
+
+                let totals = &actor.memory.token_totals;
+                totals.capture_cost_usd_ticks.fetch_add(30, Relaxed);
+                totals.recall_cost_usd_ticks.fetch_add(2, Relaxed);
+                actor.report_memory_cost().await;
+                let updates = sent();
+                assert_eq!(updates.len(), 1, "{updates:#?}");
+                let update = updates.first().unwrap();
+                assert!(update.contains("capture_usd_ticks"), "{update}");
+                assert!(update.contains("recall_usd_ticks"), "{update}");
+
+                actor.report_memory_cost().await;
+                assert!(sent().is_empty(), "an unchanged total sends nothing");
+
+                totals.dream_cost_usd_ticks.fetch_add(10, Relaxed);
+                actor.report_memory_cost().await;
+                assert_eq!(sent().len(), 1);
+                assert_eq!(
+                    totals.cost_totals(),
+                    crate::extensions::notification::MemoryCostTotals {
+                        capture_usd_ticks: 30,
+                        consolidation_usd_ticks: 10,
+                        recall_usd_ticks: 2,
+                    }
+                );
             })
             .await;
     }

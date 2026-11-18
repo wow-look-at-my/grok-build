@@ -221,7 +221,14 @@ impl SessionActor {
             })
             .clone();
         let provider = match self.memory.recall.embedding.as_ref() {
-            Some(params) => params.make().await,
+            Some(params) => {
+                let mut params = params.clone();
+                params.usage_sink = crate::session::billed_client::memory_usage_sink(
+                    params.usage_sink,
+                    Arc::clone(&self.memory.token_totals.recall_cost_usd_ticks),
+                );
+                params.make().await
+            }
             None => None,
         };
         let bounded = provider.as_ref().map(|provider| BoundedEmbeddingProvider {
@@ -280,6 +287,9 @@ impl SessionActor {
             elapsed_ms = started_at.elapsed().as_millis() as u64,
             "MEMORY_RECALL: searched stored memory"
         );
+        if bounded.is_some() {
+            self.report_memory_cost().await;
+        }
         let Some(body) = format_recall_reminder(&outcome.hits) else {
             return;
         };

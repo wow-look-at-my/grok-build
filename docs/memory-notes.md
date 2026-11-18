@@ -1,6 +1,6 @@
 # Memory notes
 
-Memory-v2 needs no command. `/flush` and `/dream` are manual overrides of work that runs by itself.
+Memory-v2 needs no command. It has none for saving or consolidating. There is no `/flush` and no `/dream`: the shell's builtin table and the pager's registry hold neither. The `memory/flush` and `memory/dream` extension methods stay for an ACP client that wants to wait for a capture or force a Dream.
 
 ## Capture
 
@@ -14,7 +14,7 @@ Memory-v2 needs no command. `/flush` and `/dream` are manual overrides of work t
 
 - `V2_DREAM_SCOPES` lists both scopes. Promotion, garbage collection and Dream loop over it. A new scope-bound step must use it, or the global inbox grows without limit.
 - `evaluate_automatic_v2_dream` runs after a capture that wrote observations and at session start (`resume_v2_capture`). Nothing polls it. The gate is `V2_DREAM_MIN_PENDING_COUNT` or `V2_DREAM_MAX_PENDING_AGE`.
-- `/dream` runs both scopes. `combine_scope_outcomes` reports the first failure, and a scope with no work never hides the other.
+- A forced Dream (`memory/dream`) runs both scopes. `combine_scope_outcomes` reports the first failure, and a scope with no work never hides the other.
 
 ## Recall
 
@@ -27,6 +27,13 @@ Memory-v2 needs no command. `/flush` and `/dream` are manual overrides of work t
 - Only the most distinctive query terms are matched (`max_query_terms`): frequent in the query, rare in the corpus. Without that cut, a long stretch of conversation holds enough words to match every chunk.
 - Vectors are optional. A cached vector is deleted when its chunk leaves the corpus. With `[memory.embedding].model` set, chunk vectors are cached in the `recall_embeddings` table of the scope's `index.sqlite`, keyed by text hash and model. A provider failure or a slow call returns the word matches and logs one error for the session. It never fails the turn.
 - `[memory_v2] recall_enabled = false` turns recall off.
+
+## Cost
+
+- Every memory model call is billed to the session ledger like any side call. Its client also carries a `MemoryUsageSink` (`session/billed_client.rs`), which adds the price of the call to one total in `MemoryV2TokenTotals`: capture, consolidation or recall. `memory_billed_client` wraps a chat client. Recall wraps the sink of its embedding provider.
+- The totals come from the sink, not from a response. A retry, a backend switch and a call that failed after its usage arrived are all in them. `price_model_call` prices a call whose provider reports no cost.
+- `report_memory_cost` sends `MemoryCost` with the totals and the new session total after each capture, each Dream pass and each recall that used a provider. An unchanged total sends nothing. The pager adopts the session total and shows the memory share in the status bar and in the `/memory` modal.
+- A new kind of memory model call must go through `memory_billed_client` or `memory_usage_sink`. Otherwise it is billed but missing from the memory share.
 
 ## Tests
 

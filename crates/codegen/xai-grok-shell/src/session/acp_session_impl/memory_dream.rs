@@ -8,7 +8,7 @@ const DREAM_MODEL_TIMEOUT: std::time::Duration = std::time::Duration::from_secs(
 const DREAM_LOCK_STALE_FLOOR_SECS: u64 = DREAM_MODEL_TIMEOUT.as_secs() * 2;
 
 /// Whether a dream attempt reached the model call. `Ran` reports its own result; `Skipped` returned
-/// before the model call, so a user-initiated caller surfaces the reason and `/dream` is never silent.
+/// before the model call, so a caller that forced the Dream surfaces the reason.
 enum DreamAttempt {
     Ran(MemoryDreamDisposition),
     Skipped(MemoryDreamDisposition, &'static str),
@@ -247,7 +247,7 @@ impl SessionActor {
         .await;
     }
 
-    /// Run dream from the `/dream` slash command, bypassing the time and session gates.
+    /// Run a forced Dream (`memory/dream`), bypassing the time and session gates.
     pub(super) async fn run_dream_slash_command(self: &Arc<Self>) -> MemoryDreamResponse {
         if self.memory.mode() == Some(crate::config::MemoryMode::V2) {
             return self.run_v2_dream_slash_command().await;
@@ -287,7 +287,7 @@ impl SessionActor {
             "MEMORY_DREAM_SLASH: starting manual consolidation"
         );
 
-        // `/dream` is user-initiated, so a skip must be surfaced rather than logged silently.
+        // The caller forced this Dream, so a skip must be surfaced rather than logged silently.
         match self
             .run_dream_inner(
                 &storage,
@@ -508,7 +508,10 @@ impl SessionActor {
 
     /// Make the dream model call using the session's sampling client.
     async fn run_dream_model_call(&self, user_message: &str) -> Result<String, acp::Error> {
-        let sampling_client = self.prepare_chat_completion(false).await?;
+        let sampling_client = self.memory_billed_client(
+            self.prepare_chat_completion(false).await?,
+            &self.memory.token_totals.dream_cost_usd_ticks,
+        );
         let model = self
             .chat_state_handle
             .get_sampling_config()

@@ -304,6 +304,7 @@ pub(super) fn handle_session_notification_with_origin(
         | XaiSessionUpdate::MemoryCaptureActivity { .. }
         | XaiSessionUpdate::MemoryDreamCompleted { .. }
         | XaiSessionUpdate::MemoryRecalled { .. }
+        | XaiSessionUpdate::MemoryCost { .. }
         | XaiSessionUpdate::MemorySessionSaved { .. }) => {
             apply_compaction_or_retry_update(agent, update, is_api_key_auth)
         }
@@ -1286,9 +1287,10 @@ pub(super) fn handle_session_notification_with_origin(
                 dream_enabled,
             };
             agent.active_modal = Some(crate::views::modal::ActiveModal::MemoryBrowser {
-                state: Box::new(crate::views::memory_modal::MemoryModalState::from_listing(
-                    listing,
-                )),
+                state: Box::new(
+                    crate::views::memory_modal::MemoryModalState::from_listing(listing)
+                        .with_memory_cost(agent.session.tracker.memory_cost()),
+                ),
             });
             true
         }
@@ -1666,6 +1668,7 @@ pub(super) fn handle_child_session_notification(
         | XaiSessionUpdate::MemoryFlushCompleted { .. }
         | XaiSessionUpdate::MemoryDreamCompleted { .. }
         | XaiSessionUpdate::MemoryRecalled { .. }
+        | XaiSessionUpdate::MemoryCost { .. }
         | XaiSessionUpdate::MemorySessionSaved { .. } => {
             let mut changed = false;
             if let Some(child_view) = agent.child_view_for_live_update_mut(child_sid) {
@@ -1991,10 +1994,10 @@ fn memory_capture_failure_message(
 fn automatic_dream_failure_message(result: &str) -> Option<&'static str> {
     match result {
         "failed" => Some(
-            "Automatic memory consolidation (Dream) failed. Captured observations stay pending. Run /dream to retry and see the error.",
+            "Automatic memory consolidation (Dream) failed. Captured notes stay pending. Consolidation runs again after the next capture or at the next session start.",
         ),
         "retry required" => Some(
-            "Automatic memory consolidation (Dream) did not finish and will retry. Run /dream to retry now and see the error.",
+            "Automatic memory consolidation (Dream) did not finish. Captured notes stay pending. Consolidation runs again after the next capture or at the next session start.",
         ),
         _ => None,
     }
@@ -2146,6 +2149,19 @@ pub(super) fn apply_session_event(
             }
             None => false,
         },
+        XaiSessionUpdate::MemoryCost {
+            totals,
+            session_cost_usd_ticks,
+        } => {
+            // A REPLAYED total belongs to the run that wrote it.
+            if session.loading_replay {
+                return false;
+            }
+            let total_changed = session
+                .tracker
+                .set_reported_session_cost(*session_cost_usd_ticks);
+            session.tracker.set_memory_cost(*totals) || total_changed
+        }
         _ => false,
     }
 }

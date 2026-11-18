@@ -10,7 +10,7 @@ use crate::app::app_view::{ActiveView, AppView};
 use crate::app::command_catalog::CommandCatalogSource;
 use crate::scrollback::EntryId;
 use crate::scrollback::block::RenderBlock;
-use crate::scrollback::blocks::{MemoryCommandKind, SessionEvent};
+use crate::scrollback::blocks::SessionEvent;
 use crate::scrollback::state::ScrollbackState;
 use agent_client_protocol as acp;
 use std::time::Instant;
@@ -757,45 +757,17 @@ pub(super) fn maybe_drain_queue(agent: &mut AgentView, notices: &mut Vec<String>
         }
         QueueEntryKind::Command => {
             let invocation = crate::slash::parse_invocation(&queued.text);
-            let token = invocation.as_ref().map_or("", |inv| inv.token);
-            let (command, started, effect) = match token {
-                "flush" => (
-                    AgentCommand::MemoryFlush,
-                    SessionEvent::MemoryCommandStarted {
-                        command: MemoryCommandKind::Flush,
-                    },
-                    Effect::MemoryFlush {
-                        agent_id,
-                        session_id,
-                    },
-                ),
-                "dream" => (
-                    AgentCommand::MemoryDream,
-                    SessionEvent::MemoryCommandStarted {
-                        command: MemoryCommandKind::Dream,
-                    },
-                    Effect::MemoryDream {
-                        agent_id,
-                        session_id,
-                    },
-                ),
-                _ => {
-                    let user_context = invocation
-                        .map(|inv| inv.args.trim())
-                        .filter(|args| !args.is_empty())
-                        .map(str::to_string);
-                    (
-                        AgentCommand::Compact,
-                        SessionEvent::CompactStarted { model: None },
-                        Effect::Compact {
-                            agent_id,
-                            session_id,
-                            user_context,
-                        },
-                    )
-                }
+            let user_context = invocation
+                .map(|inv| inv.args.trim())
+                .filter(|args| !args.is_empty())
+                .map(str::to_string);
+            let started = SessionEvent::CompactStarted { model: None };
+            let effect = Effect::Compact {
+                agent_id,
+                session_id,
+                user_context,
             };
-            agent.session.start_command(command);
+            agent.session.start_command(AgentCommand::Compact);
             // The command owns the pane; a leftover wake marker must not shadow stop.
             agent.running_wake_turn = None;
             agent.turn_started_at = Some(Instant::now());
@@ -1546,61 +1518,6 @@ mod tests {
             scrollback_entry_id: None,
             is_monitor: false,
             restored_from_replay: false,
-        }
-    }
-
-    #[test]
-    fn dream_drain_runs_as_a_tracked_command_with_an_outcome_line() {
-        use crate::app::actions::TaskResult;
-        use crate::app::dispatch::task_result::dispatch_task_result;
-        use crate::scrollback::blocks::SessionEvent;
-        use xai_grok_shell::extensions::memory::{MemoryDreamDisposition, MemoryDreamResponse};
-
-        let mut app = test_app_with_agent();
-        let id = AgentId(0);
-        let agent = app.agents.get_mut(&id).unwrap();
-        agent.session.enqueue_command("/dream".into());
-        let drain = maybe_drain_queue(agent, &mut app.pending_image_notices);
-        assert!(matches!(
-            drain.effects.as_slice(),
-            [Effect::MemoryDream { .. }]
-        ));
-        assert_eq!(
-            agent.session.state.command_in_flight(),
-            Some(&AgentCommand::MemoryDream)
-        );
-
-        dispatch_task_result(
-            TaskResult::MemoryDreamComplete {
-                agent_id: id,
-                result: Ok(MemoryDreamResponse {
-                    disposition: MemoryDreamDisposition::Completed,
-                    observation_count: 7,
-                    topics_affected: 3,
-                    detail: None,
-                }),
-            },
-            &mut app,
-        );
-
-        let agent = test_agent(&app, id);
-        assert!(agent.session.state.is_idle());
-        let events: Vec<SessionEvent> = (0..agent.scrollback.len())
-            .filter_map(|i| match agent.scrollback.entry(i).map(|e| &e.block) {
-                Some(RenderBlock::SessionEvent(ev)) => Some(ev.event.clone()),
-                _ => None,
-            })
-            .collect();
-        match events.as_slice() {
-            [
-                SessionEvent::MemoryCommandStarted { .. },
-                SessionEvent::MemoryCommandCompleted {
-                    summary,
-                    succeeded: true,
-                    ..
-                },
-            ] => assert_eq!(summary, "Dream merged 7 observations into 3 topics."),
-            other => panic!("expected marker → outcome, got {other:?}"),
         }
     }
 

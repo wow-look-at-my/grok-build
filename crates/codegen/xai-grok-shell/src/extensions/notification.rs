@@ -49,6 +49,29 @@ pub struct MemoryCaptureDebugEntry {
     pub path: String,
 }
 
+/// What memory spent on model calls in this run of the session, in USD ticks.
+/// The session total already holds every tick of it.
+#[derive(Debug, Clone, Copy, Default, PartialEq, Eq, serde::Serialize, serde::Deserialize)]
+pub struct MemoryCostTotals {
+    /// Extraction calls after each turn.
+    #[serde(default)]
+    pub capture_usd_ticks: i64,
+    /// Dream calls that merge observations into topics.
+    #[serde(default)]
+    pub consolidation_usd_ticks: i64,
+    /// Embedding calls of recall.
+    #[serde(default)]
+    pub recall_usd_ticks: i64,
+}
+
+impl MemoryCostTotals {
+    pub fn total_usd_ticks(&self) -> i64 {
+        self.capture_usd_ticks
+            .saturating_add(self.consolidation_usd_ticks)
+            .saturating_add(self.recall_usd_ticks)
+    }
+}
+
 /// One stored memory recall showed the model.
 #[derive(Debug, Clone, PartialEq, Eq, serde::Serialize, serde::Deserialize)]
 pub struct MemoryRecalledNote {
@@ -616,6 +639,12 @@ pub enum SessionUpdate {
     },
     /// Recall found stored memory notes that match the conversation and showed them to the model.
     MemoryRecalled { notes: Vec<MemoryRecalledNote> },
+    /// A memory model call ended. Carries the memory totals and the new session total.
+    MemoryCost {
+        totals: MemoryCostTotals,
+        #[serde(default, skip_serializing_if = "Option::is_none")]
+        session_cost_usd_ticks: Option<i64>,
+    },
     /// Session-end memory save completed
     MemorySessionSaved {
         /// Path to the written session log
@@ -1032,7 +1061,7 @@ pub enum SessionUpdate {
         /// Notes are written automatically after turns. Drives the modal's empty-state advice.
         #[serde(default = "default_true")]
         capture_enabled: bool,
-        /// `/dream` is available in this session.
+        /// A forced Dream (`memory/dream`) is available in this session.
         #[serde(default = "default_true")]
         dream_enabled: bool,
     },
@@ -2281,6 +2310,31 @@ mod tests {
         assert_eq!(json["sessionUpdate"], "memory_recalled");
         let parsed: SessionUpdate = serde_json::from_value(json).unwrap();
         assert_eq!(update, parsed);
+    }
+
+    #[test]
+    fn memory_cost_roundtrips_and_sums() {
+        let totals = MemoryCostTotals {
+            capture_usd_ticks: 30,
+            consolidation_usd_ticks: 10,
+            recall_usd_ticks: 2,
+        };
+        assert_eq!(totals.total_usd_ticks(), 42);
+        let update = SessionUpdate::MemoryCost {
+            totals,
+            session_cost_usd_ticks: Some(1_000),
+        };
+        let json = serde_json::to_value(&update).unwrap();
+        assert_eq!(json["sessionUpdate"], "memory_cost");
+        let parsed: SessionUpdate = serde_json::from_value(json).unwrap();
+        assert_eq!(update, parsed);
+
+        let without_total = SessionUpdate::MemoryCost {
+            totals,
+            session_cost_usd_ticks: None,
+        };
+        let json = serde_json::to_string(&without_total).unwrap();
+        assert!(!json.contains("session_cost_usd_ticks"), "{json}");
     }
 
     #[test]

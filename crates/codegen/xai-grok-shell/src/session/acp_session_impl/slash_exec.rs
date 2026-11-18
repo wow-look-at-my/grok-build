@@ -57,20 +57,6 @@ impl SessionActor {
                 );
                 ok_end_turn(0, None)
             }
-            // Prompt-turn path for clients without the pager-local `/flush` and `/dream`;
-            // the pager calls `example.invalid/memory/flush` and `example.invalid/memory/dream` instead.
-            BuiltinAction::FlushMemory => {
-                let response = self.memory_flush_command().await;
-                self.send_host_turn_slash_command_output(&response.summary())
-                    .await;
-                ok_end_turn(0, None)
-            }
-            BuiltinAction::Dream => {
-                let response = self.memory_dream_command().await;
-                self.send_host_turn_slash_command_output(&response.summary())
-                    .await;
-                ok_end_turn(0, None)
-            }
             BuiltinAction::ContextInfo => ok_end_turn(0, None),
             BuiltinAction::HooksTrust => {
                 let msg = match Self::do_hooks_trust_project(&self.session_info.cwd) {
