@@ -1576,6 +1576,19 @@ pub(crate) fn default_settings_with_subagent_rows(
             },
             restart_required: true,
         },
+        // SHELL-owned `[features].session_recap`. The shell re-reads it on each recap request, so it applies live.
+        SettingMeta {
+            key: "session_recap",
+            category: SettingCategory::Agent,
+            owner: SettingOwner::Shell,
+            label: "Session recaps",
+            description: "Writes a short \"where was I\" recap when you come back to the terminal, and enables `/recap`. Turn off to stop every recap.",
+            keywords: &["recap", "where was i", "away", "resume", "summary", "return"],
+            kind: SettingKind::Bool {
+                default: Feature::SessionRecap.default_enabled(),
+            },
+            restart_required: false,
+        },
         // SHELL-owned startup-time settings (restart_required: true).
         // The running pager doesn't re-read these mid-session.
         SettingMeta {

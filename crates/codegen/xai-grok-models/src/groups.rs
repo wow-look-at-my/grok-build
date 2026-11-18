@@ -40,11 +40,10 @@ pub const DEFAULT_MODEL_GROUPS: &[DefaultModelGroup] = &[
         id: "summarization",
         label: "Summarization model",
         description: "Model for the short summaries: session titles, prompt suggestions, \
-		              recaps, turn summaries, thinking summaries and goal summaries.",
+		              turn summaries, thinking summaries and goal summaries.",
         members: &[
             "session_summary",
             "prompt_suggestion",
-            "recap",
             "turn_summary",
             "thinking_summary",
             "goal_summarizer",
@@ -54,8 +53,8 @@ pub const DEFAULT_MODEL_GROUPS: &[DefaultModelGroup] = &[
         id: "dense_summarization",
         label: "Dense summarization model",
         description: "Model for the long summaries: web-search synthesis, context \
-		              compaction and image descriptions.",
-        members: &["web_search", "compaction", "image_description"],
+		              compaction, session recaps and image descriptions.",
+        members: &["web_search", "compaction", "recap", "image_description"],
     },
     DefaultModelGroup {
         id: "query",
@@ -274,7 +273,6 @@ mod tests {
         for slot in [
             "session_summary",
             "prompt_suggestion",
-            "recap",
             "turn_summary",
             "thinking_summary",
             "goal_summarizer",
@@ -284,10 +282,13 @@ mod tests {
                 "summarization must hold {slot}"
             );
         }
-        assert_eq!(
-            group_for_slot(&groups, "compaction").map(|g| g.id.as_str()),
-            Some("dense_summarization")
-        );
+        for slot in ["web_search", "compaction", "recap", "image_description"] {
+            assert_eq!(
+                group_for_slot(&groups, slot).map(|g| g.id.as_str()),
+                Some("dense_summarization"),
+                "{slot} must use the dense summarization model"
+            );
+        }
         assert_eq!(
             group_for_slot(&groups, "todo_capture").map(|g| g.id.as_str()),
             Some("query")
@@ -314,9 +315,12 @@ mod tests {
         assert_eq!(fast.members, ["recap", "goal_planner"]);
         assert_eq!(fast.label, "fast model");
         assert!(fast.description.contains("Recap model"));
-        let summarization = groups.iter().find(|g| g.id == "summarization").unwrap();
-        assert!(!summarization.contains("recap"));
-        assert!(summarization.contains("turn_summary"));
+        let dense = groups
+            .iter()
+            .find(|g| g.id == "dense_summarization")
+            .unwrap();
+        assert!(!dense.contains("recap"));
+        assert!(dense.contains("compaction"));
     }
 
     #[test]
