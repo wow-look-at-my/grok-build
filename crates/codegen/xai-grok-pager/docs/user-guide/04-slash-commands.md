@@ -168,11 +168,11 @@ Browse, view, and manage saved memories. Alias: `/mem`. Inside the modal, `t` tu
 
 ### `/flush`
 
-Save the current session's knowledge to memory right now, triggering an LLM summary of the most important content. Reach for it before compaction, or any time you want to lock in context. The status line shows "Flushing memory…" while it runs, and a scrollback line reports the outcome (for example "Memory flushed through turn 12").
+Wait for the memory capture of the current session to finish. Capture runs by itself after every turn. This command is never required. Use it when you want the outcome confirmed before you leave. The status line shows "Flushing memory…" while it runs. A scrollback line reports the outcome (for example "Memory flushed through turn 12").
 
 ### `/dream`
 
-Run memory consolidation — merge session logs into organized topics. The status line shows "Consolidating memory…" while it runs, and a scrollback line reports what happened: how many observations were merged into how many topics, that there was nothing to consolidate, or that another session is already consolidating.
+Run memory consolidation now, for the workspace and the global scope. Consolidation also runs by itself after a capture and at session start. This command is never required. The status line shows "Consolidating memory…" while it runs. A scrollback line reports what happened: how many observations were merged into how many topics. That there was nothing to consolidate, or that another session is already consolidating.
 
 ### `/remember`
 

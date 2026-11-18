@@ -24,10 +24,23 @@ worktrees of the same repository share one workspace scope.
 Each scope keeps its knowledge as ordinary Markdown files. `topics/` holds
 curated notes, one file per subject, and is what Grok reads at the start of a
 session. New facts captured after each turn, including a turn you stop before it
-finishes, land as small observations that a later consolidation pass (`/dream`)
+finishes, land as small observations that a later consolidation pass
 folds into topics. A bounded generated
 index of both scopes is injected into the model's context once per session so
 it can decide which topics to open.
+
+### Memory runs by itself
+
+You do not tell Grok to remember. You do not run a command to save.
+
+- **Capture.** After every turn, a background call reads the turn and records what a later session needs. Where things are (files, commands, URLs, config keys), your preferences, your corrections, and project facts with their reasons. It does not record a fact the memory index already lists.
+- **Scope.** A fact that holds in every repository, such as how you like to work, goes to global memory and follows you to other projects. A fact about this repository goes to workspace memory.
+- **Consolidation.** Observations become topics when enough of them wait, or when the oldest one waited a while. Grok checks this after each capture and when a session starts, so notes from yesterday are topics today.
+- **Recall.** As the conversation moves, Grok searches stored memory with the new text: your prompt, its own replies and the arguments of its tool calls. A note that matches is shown to the model with its file path, and the scrollback shows a `Recalled from memory` line. Each note is shown one time for each conversation. A compaction removes the reminders. A note can be shown again after it.
+
+Recall matches on words by default. Set `memory.embedding.model` to an embedding model your provider serves to add meaning-based matches. If the embedding call fails, recall keeps the word matches and logs the error.
+
+`/flush` and `/dream` still exist. `/flush` waits for the capture of the current session to finish. `/dream` runs the consolidation now. Neither is needed for memory to work. To turn recall off, set `memory.v2.recall_enabled` to `false`.
 
 Notes you recorded with earlier versions of Grok Build are carried over
 automatically the first time a workspace is opened after updating: each section
