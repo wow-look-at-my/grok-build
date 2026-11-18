@@ -132,7 +132,7 @@ fn spawn_agent_local_with(configure: impl FnOnce(&mut AgentConfig)) -> AgentPipe
     configure(&mut agent_config);
     let auth_manager = Arc::new(agent_config.create_auth_manager());
     let (gw_tx, gw_rx) = tokio::sync::mpsc::unbounded_channel();
-    let agent = MvpAgent::new(
+    let mut agent = MvpAgent::new(
         GatewaySender::new(gw_tx),
         &agent_config,
         auth_manager,
@@ -140,6 +140,10 @@ fn spawn_agent_local_with(configure: impl FnOnce(&mut AgentConfig)) -> AgentPipe
         None,
     )
     .expect("valid config");
+    // The binary's startup makes this call. `MvpAgent::new` does not read `memory_config`.
+    if let Some(memory_config) = agent_config.memory_config.clone() {
+        agent.set_memory_config(memory_config);
+    }
 
     let agent_incoming = LineBufferedRead::spawn_local(c2a_b.compat());
     let (agent_conn, agent_io) =
