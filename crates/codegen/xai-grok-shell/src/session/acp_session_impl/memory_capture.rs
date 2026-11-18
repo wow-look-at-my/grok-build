@@ -1109,7 +1109,7 @@ impl SessionActor {
         cancel: &tokio_util::sync::CancellationToken,
     ) -> Result<
         (
-            CaptureOutcomeDraft,
+            ScopedCaptureOutcome,
             xai_grok_telemetry::memory_telemetry::MemoryV2ModelUsage,
         ),
         CaptureExtractionFailure,
@@ -1598,7 +1598,10 @@ mod tests {
                 1
             )
             .unwrap(),
-            xai_grok_memory::CaptureOutcomeDraft::Noop
+            ScopedCaptureOutcome {
+                workspace: xai_grok_memory::CaptureOutcomeDraft::Noop,
+                global: Vec::new(),
+            }
         );
     }
 
