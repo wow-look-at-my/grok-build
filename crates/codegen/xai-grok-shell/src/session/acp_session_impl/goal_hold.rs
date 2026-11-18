@@ -11,6 +11,29 @@ pub(crate) struct GoalBackground {
     pub(crate) harness_task_ids: parking_lot::Mutex<std::collections::HashSet<String>>,
     /// Tool calls that a queued user message moved to the background and that still run.
     pub(crate) detached_calls: Arc<std::sync::atomic::AtomicUsize>,
+    /// True while the skeptic panel runs in the background.
+    pub(crate) verification_running: std::sync::atomic::AtomicBool,
+    /// The `/goal` commands the user sent while the panel ran. They run when it ends.
+    pub(crate) queued_goal_commands: parking_lot::Mutex<Vec<String>>,
+    /// The session's own command channel. The panel task reports its end on it.
+    pub(crate) session_cmd_tx:
+        Option<mpsc::UnboundedSender<crate::session::commands::SessionCommand>>,
+}
+
+impl GoalBackground {
+    pub(crate) fn new(
+        session_cmd_tx: mpsc::UnboundedSender<crate::session::commands::SessionCommand>,
+    ) -> Self {
+        Self {
+            session_cmd_tx: Some(session_cmd_tx),
+            ..Default::default()
+        }
+    }
+
+    pub(crate) fn verification_running(&self) -> bool {
+        self.verification_running
+            .load(std::sync::atomic::Ordering::Acquire)
+    }
 }
 
 /// Counts one detached tool call as live background work until it drops.
@@ -67,6 +90,8 @@ impl LiveBackgroundWork {
 /// Why a finished round does not go to the goal checker.
 #[derive(Debug, Clone, Copy, PartialEq, Eq)]
 pub(super) enum GoalCheckHold {
+    /// The skeptic panel runs in the background. Its verdict decides what the goal does next.
+    Verification,
     /// A completion wake or a notification is queued. It runs as the next turn.
     WakePending,
     /// Background work still runs. Its completion wakes the session.
@@ -162,6 +187,9 @@ impl SessionActor {
 
     /// The reason the goal checker must not run now, or `None` when the session has nothing left to wait for.
     pub(super) async fn goal_check_hold(&self) -> Option<GoalCheckHold> {
+        if self.goal_background.verification_running() {
+            return Some(GoalCheckHold::Verification);
+        }
         if self.has_pending_wake().await {
             return Some(GoalCheckHold::WakePending);
         }
@@ -175,6 +203,9 @@ impl SessionActor {
         match self.goal_check_hold().await {
             Some(GoalCheckHold::WakePending) => {
                 tracing::info!("goal idle: a wake is queued, no continuation");
+            }
+            Some(GoalCheckHold::Verification) => {
+                tracing::info!("goal idle: the verification panel runs, no continuation");
             }
             Some(GoalCheckHold::BackgroundWork(live)) => {
                 self.announce_goal_wait(live).await;
@@ -229,6 +260,34 @@ impl SessionActor {
             }
         }
         self.resume_goal_or_wait().await;
+        SessionActor::maybe_start_running_task(self, completion_tx).await;
+    }
+
+    /// Runs when the background verification ends. A goal that is still
+    /// active continues, with `note` in front of the directive. The queued
+    /// `/goal` commands are in the queue by now, so this also starts them.
+    pub(super) async fn resume_goal_after_verification(
+        self: Arc<Self>,
+        completion_tx: mpsc::UnboundedSender<super::turn_task::TurnCompletionMsg>,
+        note: Option<String>,
+    ) {
+        let idle = {
+            let state = self.state.lock().await;
+            is_session_idle_for_injection(&state)
+        };
+        // A running turn resumes the goal at its own end.
+        if idle && self.goal_loop_active() {
+            match self.goal_check_hold().await {
+                None => {
+                    self.goal_background
+                        .waiting
+                        .store(false, std::sync::atomic::Ordering::Relaxed);
+                    self.maybe_queue_goal_continuation_with_note(note).await;
+                }
+                Some(GoalCheckHold::BackgroundWork(live)) => self.announce_goal_wait(live).await,
+                Some(hold) => tracing::info!(?hold, "goal verification ended under a hold"),
+            }
+        }
         SessionActor::maybe_start_running_task(self, completion_tx).await;
     }
 }
