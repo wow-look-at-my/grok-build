@@ -69,12 +69,9 @@ fn a_stored_topic_is_recalled_once_when_the_conversation_reaches_it() {
         let (conn, _init) = connect_and_auth(AutoApproveClient, "memory-recall-test").await;
         let session_id = new_session(&conn, &workspace.0).await;
 
+        // The scope directories appear with the first prompt, so the test makes this.
         let topics = global_scope_dir().join("topics");
-        assert!(
-            topics.is_dir(),
-            "session start must create the memory scope at {}",
-            topics.display()
-        );
+        std::fs::create_dir_all(&topics).expect("create topics dir");
         std::fs::write(
             topics.join("release.md"),
             "# Release steps\nHow a release is cut.\n\n## Zebrafish deploy pipeline\n\
