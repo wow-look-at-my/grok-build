@@ -2588,8 +2588,32 @@ impl Config {
     pub fn is_feedback_enabled(&self) -> bool {
         self.is_feature_enabled(Feature::Feedback)
     }
+    /// Reads the config on disk on each call. The `/settings` row then applies to a running agent.
     pub(crate) fn is_session_recap_enabled(&self) -> bool {
-        self.is_feature_enabled(Feature::SessionRecap)
+        self.feature_from_disk(Feature::SessionRecap).value
+    }
+    /// `feature` as the config on disk resolves it now. Env, remote and the
+    /// pin keep their usual rank. A failed load answers the value this config holds.
+    pub(crate) fn feature_from_disk(&self, feature: Feature) -> Resolved<bool> {
+        match crate::config::load_effective_config_with_layers() {
+            Ok((layers, _)) => {
+                let split = feature.config_layers(&layers.layers, &layers.active_campaigns);
+                feature.resolve(FeatureSources {
+                    pin: split.pin,
+                    config: split.merged(),
+                    remote: feature.remote_value(self.remote_settings.as_ref()),
+                    ..FeatureSources::from_process_env(feature)
+                })
+            }
+            Err(e) => {
+                tracing::warn!(
+                    error = %e,
+                    feature = feature.key(),
+                    "config not re-read; the feature keeps its value from agent start"
+                );
+                self.feature(feature)
+            }
+        }
     }
     pub(crate) fn is_turn_summary_enabled(&self) -> bool {
         self.is_feature_enabled(Feature::TurnSummary)

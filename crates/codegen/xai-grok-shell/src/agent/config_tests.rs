@@ -6137,7 +6137,7 @@ fn an_unset_harness_model_slot_falls_back_as_its_table_says() {
 #[test]
 fn a_model_group_sets_every_member() {
     let raw: toml::Value = toml::from_str(
-        "[models]\nrecap = \"own\"\ngoal_planner = \"planner\"\n\
+        "[models]\nturn_summary = \"own\"\ngoal_planner = \"planner\"\n\
          [model_groups.summarization]\nmodel = \"group-model\"\n",
     )
     .unwrap();
@@ -6145,7 +6145,6 @@ fn a_model_group_sets_every_member() {
     for slot in [
         "session_summary",
         "prompt_suggestion",
-        "recap",
         "turn_summary",
         "thinking_summary",
         "goal_summarizer",
@@ -6161,6 +6160,10 @@ fn a_model_group_sets_every_member() {
         Some("planner".to_owned())
     );
     assert!(cfg.resolve_harness_model("side_note").is_none());
+    assert!(
+        cfg.resolve_harness_model("recap").is_none(),
+        "recap uses the dense summarization model, not the summarization model"
+    );
 }
 
 /// `members = []` unrolls a compiled group, and its slots read their own
@@ -6186,6 +6189,10 @@ fn a_model_group_can_be_unrolled_or_replaced_from_config() {
     );
     assert_eq!(
         cfg.resolve_harness_model("web_search").map(|r| r.value),
+        Some("dense".to_owned())
+    );
+    assert_eq!(
+        cfg.resolve_harness_model("recap").map(|r| r.value),
         Some("dense".to_owned())
     );
 }

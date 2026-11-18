@@ -1038,6 +1038,8 @@ pub struct AppView {
     pub subagent_model_inheritance: crate::settings::FeatureOverrideState,
     /// `[features].two_pass_compaction` as the settings modal shows it.
     pub two_pass_compaction: crate::settings::FeatureOverrideState,
+    /// `[features].session_recap` as the settings modal shows it.
+    pub session_recap: crate::settings::FeatureOverrideState,
     /// Mirrors the `models.definitions."<id>".context_window` limits of the user `config.json`, by model key.
     pub model_context_limits: std::collections::BTreeMap<String, u64>,
     /// Whether ZDR users are allowed to use the product.
@@ -1560,6 +1562,9 @@ impl AppView {
             ),
             two_pass_compaction: crate::settings::FeatureOverrideState::new(
                 xai_grok_shell::agent::config::Feature::TwoPassCompaction,
+            ),
+            session_recap: crate::settings::FeatureOverrideState::new(
+                xai_grok_shell::agent::config::Feature::SessionRecap,
             ),
             model_context_limits: std::collections::BTreeMap::new(),
             zdr_access_enabled: false,
