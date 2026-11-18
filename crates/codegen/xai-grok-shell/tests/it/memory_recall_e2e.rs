@@ -94,6 +94,10 @@ fn a_stored_topic_is_recalled_once_when_the_conversation_reaches_it() {
             body.contains("make quokka-release"),
             "the reminder must carry the note's text: {body}"
         );
+        assert!(
+            body.contains("- Release steps (global topic, "),
+            "the reminder must name the note and its scope: {body}"
+        );
         assert!(body.contains("release.md"), "{body}");
 
         let second_prompt = "Run the zebrafish deploy pipeline one more time, please.";
@@ -165,8 +169,8 @@ fn a_preference_from_one_workspace_is_recalled_in_another_without_a_command() {
             "another workspace must recall the global note: {body}"
         );
         assert!(
-            body.contains("every indent to be a tab"),
-            "the reminder must carry the preference: {body}"
+            body.contains("never spaces. (global note, "),
+            "the reminder must carry the preference as a global note: {body}"
         );
         let file_name = note
             .file_name()
