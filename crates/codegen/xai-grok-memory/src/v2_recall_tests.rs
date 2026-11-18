@@ -538,3 +538,66 @@ async fn chunk_cap_keeps_topics_then_newest_observations() {
     );
     assert_eq!(lexical(&topics_only, "sourdough flour").await.hits.len(), 1);
 }
+
+#[tokio::test]
+async fn a_long_query_matches_on_its_most_distinctive_terms() {
+    let fixture = fixture();
+    seed_topics(&fixture.workspace);
+    // The build words repeat. Every other topic has many words in the query too.
+    let query = "sccache rustc sccache rustc sourdough starter flour water recipes cooking \
+                 vim keymaps leader buffers editor";
+
+    let every_term = fixture.recall(V2RecallConfig {
+        max_query_terms: usize::MAX,
+        ..V2RecallConfig::default()
+    });
+    assert_eq!(
+        lexical(&every_term, query).await.hits.len(),
+        3,
+        "without the cut, a query with enough words matches every topic"
+    );
+
+    let distinctive = fixture.recall(V2RecallConfig {
+        max_query_terms: 2,
+        ..V2RecallConfig::default()
+    });
+    let outcome = lexical(&distinctive, query).await;
+    assert_eq!(outcome.hits.len(), 1, "{:?}", outcome.hits);
+    assert!(top(&outcome).path.ends_with("topics/build.md"));
+    assert_eq!(top(&outcome).matched_terms, vec!["rustc", "sccache"]);
+}
+
+#[tokio::test]
+async fn a_cached_vector_leaves_with_its_chunk() {
+    let fixture = fixture();
+    seed_topics(&fixture.workspace);
+    let provider = TestProvider {
+        texts: AtomicUsize::new(0),
+    };
+    let recall = fixture.recall(V2RecallConfig::default());
+    let cached_rows = || {
+        rusqlite::Connection::open(fixture.workspace.join("index.sqlite"))
+            .unwrap()
+            .query_row("SELECT COUNT(*) FROM recall_embeddings", [], |row| {
+                row.get::<_, i64>(0)
+            })
+            .unwrap()
+    };
+
+    recall
+        .recall("a beacon guiding ships", Some(&provider), &HashSet::new())
+        .await
+        .unwrap();
+    assert_eq!(cached_rows(), 3);
+
+    std::fs::remove_file(fixture.workspace.join("topics/cooking.md")).unwrap();
+    recall
+        .recall("a beacon guiding ships", Some(&provider), &HashSet::new())
+        .await
+        .unwrap();
+    assert_eq!(
+        cached_rows(),
+        2,
+        "the removed chunk's vector must be pruned"
+    );
+}

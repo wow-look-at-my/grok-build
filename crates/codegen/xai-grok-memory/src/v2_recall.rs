@@ -85,6 +85,8 @@ pub struct V2RecallConfig {
     pub snippet_chars: usize,
     pub max_chunks: usize,
     pub max_embed_per_call: usize,
+    /// Word matching uses at most this many query terms, the most distinctive ones.
+    pub max_query_terms: usize,
 }
 
 impl Default for V2RecallConfig {
@@ -97,6 +99,7 @@ impl Default for V2RecallConfig {
             snippet_chars: 320,
             max_chunks: 4096,
             max_embed_per_call: 64,
+            max_query_terms: 24,
         }
     }
 }
@@ -214,9 +217,11 @@ impl V2Recall {
         seen: &HashSet<String>,
     ) -> Result<V2RecallOutcome, V2RecallError> {
         let inner = Arc::clone(&self.inner);
-        let query_terms = tokenize(query);
+        let query_counts = term_counts(query);
         let (chunks, lexical) = tokio::task::spawn_blocking(move || {
             let chunks = inner.refresh()?;
+            let query_terms =
+                distinctive_terms(&chunks, &query_counts, inner.config.max_query_terms);
             let lexical = lexical_scores(&chunks, &query_terms, &inner.config);
             Ok::<_, V2RecallError>((chunks, lexical))
         })
@@ -754,6 +759,57 @@ fn tokenize(text: &str) -> BTreeSet<String> {
     terms
 }
 
+/// How often each keyword of `text` occurs. A `_`-joined keyword also counts for its parts.
+fn term_counts(text: &str) -> HashMap<String, usize> {
+    let keywords: HashSet<String> = extract_keywords(text).into_iter().collect();
+    let lowered = text.to_lowercase();
+    let mut counts: HashMap<String, usize> = HashMap::new();
+    for word in lowered.split(|c: char| !c.is_alphanumeric() && c != '_') {
+        if !keywords.contains(word) {
+            continue;
+        }
+        *counts.entry(word.to_owned()).or_default() += 1;
+        if word.contains('_') {
+            for part in extract_keywords(&word.replace('_', " ")) {
+                *counts.entry(part).or_default() += 1;
+            }
+        }
+    }
+    counts
+}
+
+fn inverse_document_frequency(chunks: &[Arc<CorpusChunk>], term: &str) -> (usize, f64) {
+    let total = chunks.len() as f64;
+    let df = chunks
+        .iter()
+        .filter(|chunk| chunk.terms.contains(term))
+        .count();
+    let idf = (1.0 + (total - df as f64 + 0.5) / (df as f64 + 0.5)).ln();
+    (df, idf)
+}
+
+/// The query terms that say the most about the query: frequent in it and rare in the corpus.
+/// A long query holds so many words that the sum over all of them matches every chunk.
+fn distinctive_terms(
+    chunks: &[Arc<CorpusChunk>],
+    query_counts: &HashMap<String, usize>,
+    max_terms: usize,
+) -> BTreeSet<String> {
+    let mut ranked: Vec<(f64, &String)> = query_counts
+        .iter()
+        .filter_map(|(term, count)| {
+            let (df, idf) = inverse_document_frequency(chunks, term);
+            (df > 0).then(|| ((1.0 + (*count as f64).ln()) * idf, term))
+        })
+        .collect();
+    ranked.sort_by(|left, right| right.0.total_cmp(&left.0).then_with(|| left.1.cmp(right.1)));
+    ranked
+        .into_iter()
+        .take(max_terms)
+        .map(|(_, term)| term.clone())
+        .collect()
+}
+
 fn lexical_scores(
     chunks: &[Arc<CorpusChunk>],
     query_terms: &BTreeSet<String>,
@@ -763,13 +819,7 @@ fn lexical_scores(
     let idf_max = (1.0 + (total - 0.5) / 1.5).ln();
     let idf: HashMap<&str, f64> = query_terms
         .iter()
-        .map(|term| {
-            let df = chunks
-                .iter()
-                .filter(|chunk| chunk.terms.contains(term))
-                .count() as f64;
-            (term.as_str(), (1.0 + (total - df + 0.5) / (df + 0.5)).ln())
-        })
+        .map(|term| (term.as_str(), inverse_document_frequency(chunks, term).1))
         .collect();
     chunks
         .iter()
@@ -890,9 +940,14 @@ fn load_cached_vectors(
         })
         .map_err(database_error)?;
     let mut vectors = HashMap::new();
+    let mut stale = Vec::new();
     for row in rows {
         let (hash, bytes) = row.map_err(database_error)?;
-        if bytes.is_empty() || bytes.len() % 4 != 0 || !wanted.contains(&hash) {
+        if !wanted.contains(&hash) {
+            stale.push(hash);
+            continue;
+        }
+        if bytes.is_empty() || bytes.len() % 4 != 0 {
             continue;
         }
         let vector = bytes
@@ -901,6 +956,16 @@ fn load_cached_vectors(
             .map(f32::from_le_bytes)
             .collect();
         vectors.insert(hash, vector);
+    }
+    drop(statement);
+    // A vector whose chunk left the corpus is never read again.
+    for hash in &stale {
+        connection
+            .execute(
+                "DELETE FROM recall_embeddings WHERE hash = ?1 AND model = ?2",
+                params![hash, model],
+            )
+            .map_err(database_error)?;
     }
     Ok(vectors)
 }
