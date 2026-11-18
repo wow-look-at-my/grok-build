@@ -92,12 +92,11 @@ use super::settings::setters::{
     set_page_flip_on_send, set_prompt_suggestions, set_remember_tool_approvals, set_render_mermaid,
     set_respect_manual_folds, set_scroll_lines, set_scroll_mode, set_scroll_speed,
     set_session_recap, set_show_thinking_blocks, set_show_tips, set_split_and_tee_commands,
-    set_stop_gate_ci_failing,
-    set_stop_gate_unfinished_todos, set_subagent_model, set_subagent_model_inheritance, set_theme,
-    set_thinking_summaries, set_thinking_summary_history_min_count,
-    set_thinking_summary_history_window_secs, set_timeline, set_timestamps, set_ttft_timeout_secs,
-    set_two_pass_compaction, set_voice_capture_mode, set_voice_keybind_enabled,
-    set_voice_stt_language,
+    set_stop_gate_ci_failing, set_stop_gate_unfinished_todos, set_subagent_model,
+    set_subagent_model_inheritance, set_theme, set_thinking_summaries,
+    set_thinking_summary_history_min_count, set_thinking_summary_history_window_secs, set_timeline,
+    set_timestamps, set_ttft_timeout_secs, set_two_pass_compaction, set_voice_capture_mode,
+    set_voice_keybind_enabled, set_voice_stt_language,
 };
 use super::settings::ui::{
     dispatch_confirm_reset_setting, dispatch_open_command_palette, dispatch_open_howto_guides,
