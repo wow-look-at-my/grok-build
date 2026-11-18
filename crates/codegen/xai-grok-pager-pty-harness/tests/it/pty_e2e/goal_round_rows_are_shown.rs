@@ -82,7 +82,7 @@ async fn goal_round_shows_check_and_directive() {
         .wait_for_text(WELCOME_SCREEN_SENTINEL, WELCOME_TIMEOUT)
         .expect("welcome");
     harness
-        .inject_keys(b"/goal write two markers")
+        .inject_keys(b"/goal --full write two markers")
         .expect("type goal");
     harness.update(Duration::from_millis(300));
     harness.inject_keys(b"\r").expect("submit goal");
@@ -160,7 +160,7 @@ async fn passed_verification_shows_summarizer_row() {
         .wait_for_text(WELCOME_SCREEN_SENTINEL, WELCOME_TIMEOUT)
         .expect("welcome");
     harness
-        .inject_keys(b"/goal write two markers")
+        .inject_keys(b"/goal --full write two markers")
         .expect("type goal");
     harness.update(Duration::from_millis(300));
     harness.inject_keys(b"\r").expect("submit goal");
@@ -222,7 +222,7 @@ async fn failed_verification_shows_strategist_row() {
         .wait_for_text(WELCOME_SCREEN_SENTINEL, WELCOME_TIMEOUT)
         .expect("welcome");
     harness
-        .inject_keys(b"/goal write two markers")
+        .inject_keys(b"/goal --full write two markers")
         .expect("type goal");
     harness.update(Duration::from_millis(300));
     harness.inject_keys(b"\r").expect("submit goal");
@@ -280,7 +280,7 @@ async fn full_goal_shows_verifier_row() {
         .wait_for_text(WELCOME_SCREEN_SENTINEL, WELCOME_TIMEOUT)
         .expect("welcome");
     harness
-        .inject_keys(b"/goal write two markers")
+        .inject_keys(b"/goal --full write two markers")
         .expect("type goal");
     harness.update(Duration::from_millis(300));
     harness.inject_keys(b"\r").expect("submit goal");
@@ -336,7 +336,7 @@ async fn full_goal_shows_planner_row() {
         .wait_for_text(WELCOME_SCREEN_SENTINEL, WELCOME_TIMEOUT)
         .expect("welcome");
     harness
-        .inject_keys(b"/goal write two markers")
+        .inject_keys(b"/goal --full write two markers")
         .expect("type goal");
     harness.update(Duration::from_millis(300));
     harness.inject_keys(b"\r").expect("submit goal");

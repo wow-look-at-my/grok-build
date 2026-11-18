@@ -98,8 +98,8 @@ fn run_summary(grok_home: &Path) -> String {
 
 fn goal_command() -> &'static str {
     match std::env::var("GROK_LIVE_GOAL_MODE").as_deref() {
-        Err(_) | Ok("lite") => "/goal --lite",
-        Ok("full") => "/goal",
+        Err(_) | Ok("lite") => "/goal",
+        Ok("full") => "/goal --full",
         Ok(other) => panic!("GROK_LIVE_GOAL_MODE must be `lite` or `full`, not {other:?}"),
     }
 }

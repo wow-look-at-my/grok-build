@@ -103,7 +103,7 @@ async fn full_goal_plan_is_published_in_explore_mode() {
     let _plan = planner_step(&content, "plan", false, |endpoint| text(endpoint, &plan));
 
     harness
-        .inject_keys(b"/goal find why the build is slow")
+        .inject_keys(b"/goal --full find why the build is slow")
         .expect("type goal");
     harness.update(Duration::from_millis(300));
     harness.inject_keys(b"\r").expect("submit goal");

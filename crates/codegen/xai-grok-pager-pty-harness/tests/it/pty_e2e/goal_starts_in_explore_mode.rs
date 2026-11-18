@@ -113,7 +113,7 @@ async fn goal_starts_in_explore_mode() {
     content.set_response(ROUND_ONE);
 
     harness
-        .inject_keys(b"/goal --lite find why the build is slow")
+        .inject_keys(b"/goal find why the build is slow")
         .expect("type goal");
     harness.update(Duration::from_millis(300));
     harness.inject_keys(b"\r").expect("submit goal");
@@ -204,7 +204,7 @@ async fn full_goal_planner_runs_in_explore_mode() {
     content.set_response("EXPLORE_PLANNER_FALLBACK");
 
     harness
-        .inject_keys(b"/goal find why the build is slow")
+        .inject_keys(b"/goal --full find why the build is slow")
         .expect("type goal");
     harness.update(Duration::from_millis(300));
     harness.inject_keys(b"\r").expect("submit goal");
