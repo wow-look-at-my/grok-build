@@ -32,6 +32,7 @@ const ALL_SETTINGS_EXERCISED: &[&str] = &[
     "toolset.ask_user_question.timeout_enabled",
     "subagent_model_inheritance",
     "two_pass_compaction",
+    "compact_on_model_switch",
     "session_recap",
     "keep_text_selection",
     "theme",
@@ -283,6 +284,12 @@ fn assert_set_bool_action(outcome: SettingsKeyOutcome, key: &str, expected: bool
             assert_eq!(
                 b, expected,
                 "SetTwoPassCompaction value differs from expected"
+            )
+        }
+        ("compact_on_model_switch", Action::SetCompactOnModelSwitch(b)) => {
+            assert_eq!(
+                b, expected,
+                "SetCompactOnModelSwitch value differs from expected"
             )
         }
         ("session_recap", Action::SetSessionRecap(b)) => {
@@ -559,6 +566,15 @@ fn space_on_two_pass_compaction_dispatches_typed_setter() {
     navigate_to(&mut s, "two_pass_compaction");
     let outcome = handle_settings_key(&mut s, &press(KeyCode::Char(' ')));
     assert_set_bool_action(outcome, "two_pass_compaction", false);
+}
+
+/// The compact-on-model-switch row defaults off, so Space turns it on.
+#[test]
+fn space_on_compact_on_model_switch_dispatches_typed_setter() {
+    let mut s = make_state();
+    navigate_to(&mut s, "compact_on_model_switch");
+    let outcome = handle_settings_key(&mut s, &press(KeyCode::Char(' ')));
+    assert_set_bool_action(outcome, "compact_on_model_switch", true);
 }
 
 /// The session recap row defaults on, so Space turns recaps off.
@@ -2024,6 +2040,7 @@ fn registry_kind_membership_through_pr_14() {
             "toolset.ask_user_question.timeout_enabled",
             "subagent_model_inheritance",
             "two_pass_compaction",
+            "compact_on_model_switch",
             "session_recap",
             "show_tips",
             "voice_keybind_enabled",
@@ -2210,6 +2227,7 @@ fn defaults_round_trip_through_registry() {
             "toolset.ask_user_question.timeout_enabled" => SettingValue::Bool(true),
             "subagent_model_inheritance" => SettingValue::Bool(false),
             "two_pass_compaction" => SettingValue::Bool(true),
+            "compact_on_model_switch" => SettingValue::Bool(false),
             "session_recap" => SettingValue::Bool(true),
             "keep_text_selection" => SettingValue::Enum("flash"),
             "theme" => SettingValue::Enum("groknight"),
@@ -2337,6 +2355,7 @@ fn settings_value_payload_matches_kind() {
             | SettingsKeyOutcome::Action(Action::SetAskUserQuestionTimeoutEnabled(_))
             | SettingsKeyOutcome::Action(Action::SetSubagentModelInheritance(_))
             | SettingsKeyOutcome::Action(Action::SetTwoPassCompaction(_))
+            | SettingsKeyOutcome::Action(Action::SetCompactOnModelSwitch(_))
             | SettingsKeyOutcome::Action(Action::SetSessionRecap(_))
             | SettingsKeyOutcome::Action(Action::SetShowTips(_))
             | SettingsKeyOutcome::Action(Action::SetRespectManualFolds(_))
