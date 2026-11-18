@@ -4,8 +4,9 @@ use super::*;
 
 const V2_DREAM_MODEL_TIMEOUT: std::time::Duration = std::time::Duration::from_secs(30 * 60);
 const V2_DREAM_MODEL_IDLE_TIMEOUT: std::time::Duration = std::time::Duration::from_secs(15 * 60);
-const V2_DREAM_MIN_PENDING_COUNT: usize = 20;
-const V2_DREAM_MAX_PENDING_AGE: std::time::Duration = std::time::Duration::from_secs(24 * 60 * 60);
+const V2_DREAM_MIN_PENDING_COUNT: usize = 12;
+/// Short enough that the notes of one working session are topics before the next one starts.
+const V2_DREAM_MAX_PENDING_AGE: std::time::Duration = std::time::Duration::from_secs(2 * 60 * 60);
 const V2_PROMOTION_RETRY_INTERVAL: std::time::Duration = std::time::Duration::from_secs(30);
 const V2_PROMOTION_MAX_RETRIES: usize = 120;
 
@@ -585,9 +586,26 @@ impl SessionActor {
                 }
             }
         }
-        if !followups.evaluate_automatic_dream {
+        if followups.evaluate_automatic_dream {
+            self.evaluate_automatic_v2_dream(cancel, clock).await;
+        }
+    }
+
+    /// Run Dream when the pending observations meet the count or age gate. Nothing polls it:
+    /// a finished capture and a session start call it, so no backlog waits for `/dream`.
+    pub(super) async fn evaluate_automatic_v2_dream(
+        self: &Arc<Self>,
+        cancel: tokio_util::sync::CancellationToken,
+        clock: xai_grok_memory::SharedV2Clock,
+    ) {
+        if !self.memory.v2_config.can_run_automatic_dream() {
             return;
         }
+        let Some(storage) = self.memory.storage() else {
+            return;
+        };
+        let global = storage.global_dir().to_path_buf();
+        let workspace = storage.workspace_dir().to_path_buf();
         let is_shadow = self.memory.v2_config.rollout == crate::config::MemoryV2Rollout::Shadow;
         let started_at = std::time::Instant::now();
         let eligibility_clock = clock.clone();
