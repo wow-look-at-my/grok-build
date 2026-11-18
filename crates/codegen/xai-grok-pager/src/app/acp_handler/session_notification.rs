@@ -2479,4 +2479,54 @@ mod memory_capture_privacy_tests {
         assert!(long.ends_with('…'), "{long}");
         assert!(long.chars().count() < 120, "{long}");
     }
+
+    #[test]
+    fn a_memory_cost_update_stores_the_totals_and_adopts_the_session_cost() {
+        use crate::app::agent_view::test_fixtures::make_agent;
+        use xai_grok_shell::extensions::notification::{
+            MemoryCostTotals, SessionUpdate as XaiSessionUpdate,
+        };
+        let totals = MemoryCostTotals {
+            capture_usd_ticks: 300_000_000,
+            consolidation_usd_ticks: 0,
+            recall_usd_ticks: 11_000_000,
+        };
+        let update = XaiSessionUpdate::MemoryCost {
+            totals,
+            session_cost_usd_ticks: Some(5_000_000_000),
+        };
+        let mut agent = make_agent();
+        assert!(super::apply_session_event_for_test(
+            &update,
+            &mut agent.session,
+            &mut agent.scrollback,
+        ));
+        assert_eq!(agent.session.tracker.memory_cost(), Some(totals));
+        assert_eq!(
+            agent.session.tracker.reported_session_cost_usd_ticks(),
+            Some(5_000_000_000)
+        );
+        assert!(
+            !super::apply_session_event_for_test(
+                &update,
+                &mut agent.session,
+                &mut agent.scrollback,
+            ),
+            "the same update changes nothing"
+        );
+
+        // A replayed update belongs to the run that wrote it.
+        let mut replayed = make_agent();
+        replayed.session.loading_replay = true;
+        assert!(!super::apply_session_event_for_test(
+            &update,
+            &mut replayed.session,
+            &mut replayed.scrollback,
+        ));
+        assert_eq!(replayed.session.tracker.memory_cost(), None);
+        assert_eq!(
+            replayed.session.tracker.reported_session_cost_usd_ticks(),
+            None
+        );
+    }
 }
