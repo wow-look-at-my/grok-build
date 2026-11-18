@@ -64,7 +64,7 @@ fn empty_state_markdown(capture_enabled: bool, dream_enabled: bool) -> String {
     }
     text.push_str("- `/remember <note>` saves something specific right now.\n");
     if dream_enabled {
-        text.push_str("- `/dream` organizes saved notes into topics.\n");
+        text.push_str("- Saved notes become topics by themselves. `/dream` does it right now.\n");
     }
     text.push_str(
         "\nGrok Build remembers conventions, decisions, and project facts across sessions so you \

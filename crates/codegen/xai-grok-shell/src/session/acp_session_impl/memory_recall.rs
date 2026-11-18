@@ -179,6 +179,14 @@ impl SessionActor {
         let Some(storage) = self.memory.storage() else {
             return;
         };
+        let has_new_items = {
+            let len = self.chat_state_handle.get_conversation_len().await;
+            let state = self.memory.recall.state.borrow();
+            !state.seeded || len != state.cursor
+        };
+        if !has_new_items {
+            return;
+        }
         let conversation = self.chat_state_handle.get_conversation().await;
         let (cursor, mut seen) = {
             let mut state = self.memory.recall.state.borrow_mut();

@@ -93,6 +93,10 @@ CI is the source of truth and builds every pushed branch. A branch that is only 
 
 [docs/harness-model-slot-notes.md](docs/harness-model-slot-notes.md) holds this section.
 
+## Memory notes
+
+[docs/memory-notes.md](docs/memory-notes.md) holds this section: capture after every turn, the global and workspace split, and automatic Dream on both scopes. It also covers recall of stored notes from the conversation.
+
 ## Keep-awake notes
 
 - `[ui.notifications].keep_awake` is `never` | `while_running` (default) | `always`. The old `sleep_prevention` bool still reads as an alias. A child process holds the lock: `caffeinate -i -w <pid>` on macOS, `systemd-inhibit --what=idle` on Linux (`notifications/sleep.rs`).

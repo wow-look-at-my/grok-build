@@ -2228,6 +2228,76 @@ mod tests {
         workspace.join("memory_state.sqlite")
     }
 
+    fn inbox_statements(scope_dir: &Path) -> Vec<String> {
+        let mut statements: Vec<String> = std::fs::read_dir(scope_dir.join("observations/_inbox"))
+            .unwrap()
+            .filter_map(Result::ok)
+            .filter_map(|entry| std::fs::read_to_string(entry.path()).ok())
+            .filter_map(|text| {
+                text.lines()
+                    .find_map(|line| line.strip_prefix("# "))
+                    .map(str::to_owned)
+            })
+            .collect();
+        statements.sort();
+        statements
+    }
+
+    #[test]
+    fn a_global_observation_lands_in_the_global_scope_one_time() {
+        let temp = tempfile::TempDir::new().unwrap();
+        let root = temp.path().join("memory-v2");
+        let (global, workspace) = (root.join("global"), root.join("workspaces/ws"));
+        init_v2_scopes(&root, &global, &workspace);
+        let store = V2CaptureStore::open(&workspace, V2MemoryScope::Workspace).unwrap();
+        let lease = claimed_lease(&store, "session-1");
+        let clock = xai_grok_memory::system_v2_clock();
+        let preference = || xai_grok_memory::ObservationDraft {
+            observation_type: xai_grok_memory::ObservationType::User,
+            topic_hint: None,
+            statement: "Prefers tabs".to_owned(),
+            keywords: vec!["indent".to_owned()],
+            aliases: Vec::new(),
+            extraction_model: "test".to_owned(),
+            prompt_version: "test".to_owned(),
+            created_at: clock.now_unix_seconds(),
+            body: None,
+        };
+
+        let written = commit_global_observations(
+            &global,
+            &lease.job,
+            "test-worker",
+            vec![preference()],
+            true,
+            &clock,
+        )
+        .unwrap();
+        assert_eq!(written.len(), 1);
+        assert!(Path::new(&written.first().unwrap().path).starts_with(&global));
+        assert_eq!(inbox_statements(&global), ["Prefers tabs"]);
+        assert!(
+            inbox_statements(&workspace).is_empty(),
+            "a global observation must not enter the workspace scope"
+        );
+
+        // The workspace job runs again after a crash between both commits.
+        let again = commit_global_observations(
+            &global,
+            &lease.job,
+            "test-worker",
+            vec![preference()],
+            true,
+            &clock,
+        )
+        .unwrap();
+        assert!(
+            again.is_empty(),
+            "the finished global job takes nothing more"
+        );
+        assert_eq!(inbox_statements(&global), ["Prefers tabs"]);
+    }
+
     #[test]
     fn interrupted_lease_release_is_queued_on_the_blocking_pool() {
         let temp = tempfile::TempDir::new().unwrap();
