@@ -34,7 +34,11 @@ You do not tell Grok to remember. You do not run a command to save.
 
 Recall matches on words by default. Set `memory.embedding.model` to an embedding model your provider serves to add meaning-based matches. If the embedding call fails, recall keeps the word matches and logs the error.
 
-`/flush` and `/dream` still exist. `/flush` waits for the capture of the current session to finish. `/dream` runs the consolidation now. Neither is needed for memory to work. To turn recall off, set `memory.v2.recall_enabled` to `false`.
+There is no command for saving or consolidating: both run by themselves. To turn recall off, set `memory.v2.recall_enabled` to `false`.
+
+### What memory costs
+
+Capture, consolidation and recall each call a model, and each call is billed to the session. These calls are part of the session total in the status bar. When memory spent anything, the status bar adds the memory share after the total, for example `$0.52 · mem $0.04`. The `/memory` modal shows the same share split into capture, consolidation and recall.
 
 Notes you recorded with earlier versions of Grok Build are carried over
 automatically the first time a workspace is opened after updating: each section
