@@ -942,6 +942,11 @@ pub fn render_memory_modal(
     if content_area.height < 2 || content_area.width < 10 {
         return;
     }
+    let cost_rows = render_cost_line(buf, content_area, state, &theme);
+    let content_area = Rect {
+        height: content_area.height.saturating_sub(cost_rows),
+        ..content_area
+    };
 
     if state.shows_notice() {
         // No list or preview: clear the hit-test rects so stale mouse clicks do nothing.
@@ -1064,39 +1069,57 @@ fn memory_cost_line(totals: MemoryCostTotals) -> Option<String> {
     ))
 }
 
-/// A status message takes the row before the memory cost.
+/// Draws the memory cost on the last row of `area`, over the full width, so the list column
+/// cannot cut it. Returns the rows it took.
+fn render_cost_line(buf: &mut Buffer, area: Rect, state: &MemoryModalState, theme: &Theme) -> u16 {
+    if area.height < 4 {
+        return 0;
+    }
+    let Some(line) = state.memory_cost.and_then(memory_cost_line) else {
+        return 0;
+    };
+    let text = crate::render::line_utils::truncate_str(&line, area.width as usize);
+    buf.set_span(
+        area.x,
+        area.y + area.height - 1,
+        &Span::styled(
+            text.as_str(),
+            Style::default().fg(theme.gray_dim).bg(theme.bg_base),
+        ),
+        area.width,
+    );
+    1
+}
+
+/// Returns the number of rows used (0 or 1).
 fn render_status_line(
     buf: &mut Buffer,
     area: Rect,
     state: &MemoryModalState,
     theme: &Theme,
 ) -> u16 {
+    let Some(status) = state.status.as_ref() else {
+        return 0;
+    };
     if area.height < 3 {
         return 0;
     }
-    let (text, style) = if let Some(status) = state.status.as_ref() {
-        let fg = if status.is_error {
-            theme.accent_error
-        } else {
-            theme.accent_user
-        };
-        (
-            status.text.clone(),
+    let fg = if status.is_error {
+        theme.accent_error
+    } else {
+        theme.accent_user
+    };
+    let text = crate::render::line_utils::truncate_str(&status.text, area.width as usize);
+    buf.set_span(
+        area.x,
+        area.y + area.height - 1,
+        &Span::styled(
+            text.as_str(),
             Style::default()
                 .fg(fg)
                 .bg(theme.bg_base)
                 .add_modifier(Modifier::BOLD),
-        )
-    } else if let Some(line) = state.memory_cost.and_then(memory_cost_line) {
-        (line, Style::default().fg(theme.gray_dim).bg(theme.bg_base))
-    } else {
-        return 0;
-    };
-    let text = crate::render::line_utils::truncate_str(&text, area.width as usize);
-    buf.set_span(
-        area.x,
-        area.y + area.height - 1,
-        &Span::styled(text.as_str(), style),
+        ),
         area.width,
     );
     1
@@ -2811,6 +2834,33 @@ mod tests {
         let mut without = MemoryModalState::new(Vec::new()).with_memory_cost(None);
         let text = render_full(&mut without);
         assert!(!text.contains("Memory cost"), "{text}");
+    }
+
+    #[test]
+    fn memory_cost_takes_the_full_width_under_the_two_panes() {
+        let totals = MemoryCostTotals {
+            capture_usd_ticks: 310_000_000,
+            consolidation_usd_ticks: 100_000_000,
+            recall_usd_ticks: 11_000_000,
+        };
+        let note = xai_grok_shell::extensions::notification::MemoryFileInfo {
+            path: "/store/workspace/topics/anyrun.md".into(),
+            source: "workspace".into(),
+            size_bytes: 900,
+            modified_epoch_secs: None,
+            generated: false,
+            title: None,
+        };
+        let mut state =
+            MemoryModalState::new(build_entries(vec![note])).with_memory_cost(Some(totals));
+        let text = render_full(&mut state);
+        assert!(text.contains("anyrun.md"), "{text}");
+        assert!(
+            text.contains(
+                "Memory cost this session: $0.0421 (capture $0.031 · consolidation $0.01 · recall $0.0011)"
+            ),
+            "the list column must not cut the cost line: {text}"
+        );
     }
 
     #[test]
