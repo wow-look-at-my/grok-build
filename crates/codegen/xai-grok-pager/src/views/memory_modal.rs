@@ -1063,10 +1063,7 @@ fn memory_cost_line(totals: MemoryCostTotals) -> Option<String> {
         cost_ticks_to_display(Some(ticks)).map(|cost| format!("{name} {cost}"))
     })
     .collect();
-    Some(format!(
-        "Memory cost this session: {total} ({})",
-        parts.join(" · ")
-    ))
+    Some(format!("Memory cost: {total} ({})", parts.join(" · ")))
 }
 
 /// Draws the memory cost on the last row of `area`, over the full width, so the list column
@@ -2800,7 +2797,7 @@ mod tests {
         };
         assert_eq!(
             memory_cost_line(totals).as_deref(),
-            Some("Memory cost this session: $0.031 (capture $0.031)")
+            Some("Memory cost: $0.031 (capture $0.031)")
         );
     }
 
@@ -2813,9 +2810,7 @@ mod tests {
         };
         assert_eq!(
             memory_cost_line(totals).as_deref(),
-            Some(
-                "Memory cost this session: $0.0421 (capture $0.031 · consolidation $0.01 · recall $0.0011)"
-            )
+            Some("Memory cost: $0.0421 (capture $0.031 · consolidation $0.01 · recall $0.0011)")
         );
     }
 
@@ -2828,7 +2823,7 @@ mod tests {
         let mut state = MemoryModalState::new(Vec::new()).with_memory_cost(Some(totals));
         let text = render_full(&mut state);
         assert!(
-            text.contains("Memory cost this session: $0.0011 (recall $0.0011)"),
+            text.contains("Memory cost: $0.0011 (recall $0.0011)"),
             "{text}"
         );
         let mut without = MemoryModalState::new(Vec::new()).with_memory_cost(None);
@@ -2857,7 +2852,7 @@ mod tests {
         assert!(text.contains("anyrun.md"), "{text}");
         assert!(
             text.contains(
-                "Memory cost this session: $0.0421 (capture $0.031 · consolidation $0.01 · recall $0.0011)"
+                "Memory cost: $0.0421 (capture $0.031 · consolidation $0.01 · recall $0.0011)"
             ),
             "the list column must not cut the cost line: {text}"
         );

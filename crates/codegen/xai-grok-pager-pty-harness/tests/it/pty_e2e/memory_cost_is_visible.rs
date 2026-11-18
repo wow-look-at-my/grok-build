@@ -97,10 +97,7 @@ async fn memory_cost_shows_in_the_status_bar_and_in_the_memory_browser() {
 
     harness.inject_keys(b"/memory\r").expect("submit /memory");
     harness
-        .wait_for_text(
-            "Memory cost this session: $0.5 (capture $0.5)",
-            Duration::from_secs(30),
-        )
+        .wait_for_text("Memory cost: $0.5 (capture $0.5)", Duration::from_secs(30))
         .unwrap_or_else(|error| {
             panic!(
                 "the memory browser must show the cost by kind: {error}\nscreen:\n{}",
