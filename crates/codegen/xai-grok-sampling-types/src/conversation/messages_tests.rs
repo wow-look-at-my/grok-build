@@ -577,9 +577,38 @@ fn thinking_blocks(req: &ConversationRequest) -> Vec<(String, String)> {
 /// Every text block the built request carries, joined. It says what reached
 /// the model as ordinary words rather than as a typed block.
 fn request_text(req: &ConversationRequest) -> String {
+    format!(
+        "{}\n{}",
+        role_text(req, crate::messages::MessageRole::Assistant),
+        role_text(req, crate::messages::MessageRole::User)
+    )
+}
+
+/// The words of a block that cannot ride typed reach the model in a user-role
+/// client note. No assistant text shows them, and no `<thinking>` tag does.
+fn assert_words_ride_as_a_note(req: &ConversationRequest, words: &str) {
+    let user = role_text(req, crate::messages::MessageRole::User);
+    let assistant = role_text(req, crate::messages::MessageRole::Assistant);
+    assert!(
+        user.contains("Client note") && user.contains(words),
+        "the words must reach the model in a user-role note: {user}"
+    );
+    assert!(
+        !assistant.contains(words),
+        "assistant text must not show the words: {assistant}"
+    );
+    assert!(
+        !request_text(req).contains("<thinking>"),
+        "no text may carry a thinking tag"
+    );
+}
+
+/// The text blocks of every message with `role`, joined.
+fn role_text(req: &ConversationRequest, role: crate::messages::MessageRole) -> String {
     build_messages_request(req)
         .messages
         .iter()
+        .filter(|m| std::mem::discriminant(&m.role) == std::mem::discriminant(&role))
         .flat_map(|m| match &m.content {
             crate::messages::MessageContent::Blocks(blocks) => blocks
                 .iter()
@@ -646,10 +675,9 @@ fn redacted_thinking_is_replayed_to_its_own_model_only() {
 }
 
 /// The signature cannot be re-minted, so the BLOCK gives. Its words do not:
-/// they ride as ordinary assistant text, and the rest of the turn is
-/// untouched.
+/// they ride as a client note, and the rest of the turn is untouched.
 #[test]
-fn thinking_minted_by_another_model_rides_as_text() {
+fn thinking_minted_by_another_model_rides_as_a_note() {
     let req = ConversationRequest::from_items(switched_model_conversation(Some("grok-4-fast")))
         .with_model("claude-opus-5");
 
@@ -657,16 +685,11 @@ fn thinking_minted_by_another_model_rides_as_text() {
         thinking_blocks(&req).is_empty(),
         "a thinking block from grok-4-fast must not be replayed to claude-opus-5",
     );
-
-    let text = request_text(&req);
     assert!(
-        text.contains("The answer."),
-        "the turn the block belongs to stays: {text}",
+        role_text(&req, crate::messages::MessageRole::Assistant).contains("The answer."),
+        "the turn the block belongs to stays",
     );
-    assert!(
-        text.contains("<thinking>"),
-        "and its words reach the model as text: {text}",
-    );
+    assert_words_ride_as_a_note(&req, "weighing the options");
 }
 
 /// The model answers as the dated snapshot its alias resolves to, and a
@@ -693,16 +716,153 @@ fn thinking_survives_a_snapshot_date_and_a_gateway_prefix() {
     }
 }
 
-/// A near-miss must not read as the same lineage: the shared prefix is not a
-/// snapshot date, so the signature is another model's.
+/// A switch between Claude models, in both directions. The block of the first
+/// model stays off the wire. Its summary reaches the second model in a client
+/// names the first model.
 #[test]
-fn thinking_from_a_sibling_model_is_left_off_the_wire() {
-    let req = ConversationRequest::from_items(switched_model_conversation(Some("claude-opus-5")))
-        .with_model("claude-opus-5-mini");
-    assert!(
-        thinking_blocks(&req).is_empty(),
-        "claude-opus-5-mini is not claude-opus-5",
+fn a_switch_between_claude_models_keeps_the_summary() {
+    for (origin, target) in [
+        ("claude-opus-5-5", "claude-fable-5-2"),
+        ("claude-fable-5-2", "claude-opus-5-5"),
+        ("anthropic/claude-opus-5-5", "claude-fable-5-2"),
+        ("claude-opus-5", "claude-opus-5-mini"),
+    ] {
+        let req = ConversationRequest::from_items(switched_model_conversation(Some(origin)))
+            .with_model(target);
+        assert!(
+            thinking_blocks(&req).is_empty(),
+            "{origin} -> {target}: the target did not sign this block",
+        );
+        assert_words_ride_as_a_note(&req, "weighing the options");
+        assert!(
+            role_text(&req, crate::messages::MessageRole::User).contains(origin),
+            "{origin} -> {target}: the note names the model that thought it",
+        );
+    }
+}
+
+/// A round trip, opus to fable and back. Each model gets its own blocks typed
+/// and the summary of every block the other model made.
+#[test]
+fn a_round_trip_between_claude_models_keeps_every_summary() {
+    let turn = |q: &str, thought: &str, sig: &str, model: &str| {
+        vec![
+            ConversationItem::user(q),
+            reasoning_sibling("", thought, Some(sig)),
+            ConversationItem::assistant_with_model("ok", model),
+        ]
+    };
+    let mut items = turn("q1", "opus first", "sig-opus-1", "claude-opus-5-5");
+    items.extend(turn("q2", "fable middle", "sig-fable", "claude-fable-5-2"));
+    items.extend(turn("q3", "opus last", "sig-opus-2", "claude-opus-5-5"));
+    items.push(ConversationItem::user("q4"));
+
+    let pair = |t: &str, s: &str| (t.to_string(), s.to_string());
+
+    let opus = ConversationRequest::from_items(items.clone()).with_model("claude-opus-5-5");
+    assert_eq!(
+        thinking_blocks(&opus),
+        vec![
+            pair("opus first", "sig-opus-1"),
+            pair("opus last", "sig-opus-2")
+        ]
     );
+    assert_words_ride_as_a_note(&opus, "fable middle");
+
+    let fable = ConversationRequest::from_items(items).with_model("claude-fable-5-2");
+    assert_eq!(
+        thinking_blocks(&fable),
+        vec![pair("fable middle", "sig-fable")]
+    );
+    assert_words_ride_as_a_note(&fable, "opus first");
+    assert_words_ride_as_a_note(&fable, "opus last");
+}
+
+/// The note lands in the user-role message that follows the turn it is about.
+/// After a tool call that is the tool-result message, behind the results.
+#[test]
+fn a_note_follows_the_turn_it_is_about() {
+    let req = ConversationRequest::from_items(vec![
+        ConversationItem::user("q1"),
+        reasoning_sibling("r1", "planning the call", Some("sig-from-opus")),
+        ConversationItem::Assistant(AssistantItem {
+            content: String::new().into(),
+            tool_calls: vec![ToolCall {
+                id: "call_1".into(),
+                name: "read_file".to_string(),
+                arguments: r#"{"path":"src/main.rs"}"#.into(),
+                vendor: Default::default(),
+            }],
+            model_id: Some("claude-opus-5-5".into()),
+            model_fingerprint: None,
+            reasoning_effort: None,
+        }),
+        ConversationItem::tool_result("call_1", "fn main() {}"),
+        reasoning_sibling("r2", "reading the result", Some("sig-from-opus-2")),
+        ConversationItem::assistant_with_model("Done.", "claude-opus-5-5"),
+        ConversationItem::user("q2"),
+    ])
+    .with_model("claude-fable-5-2");
+
+    let json = serde_json::to_value(build_messages_request(&req)).unwrap();
+    let shape: Vec<(String, Vec<String>)> = json["messages"]
+        .as_array()
+        .unwrap()
+        .iter()
+        .map(|m| {
+            let kinds = m["content"]
+                .as_array()
+                .unwrap()
+                .iter()
+                .map(|b| b["type"].as_str().unwrap().to_owned())
+                .collect();
+            (m["role"].as_str().unwrap().to_owned(), kinds)
+        })
+        .collect();
+    let row = |role: &str, kinds: &[&str]| {
+        let kinds: Vec<String> = kinds.iter().map(|k| k.to_string()).collect();
+        (role.to_owned(), kinds)
+    };
+    assert_eq!(
+        shape,
+        vec![
+            row("user", &["text"]),
+            row("assistant", &["tool_use"]),
+            row("user", &["tool_result", "text"]),
+            row("assistant", &["text"]),
+            row("user", &["text", "text"]),
+        ],
+        "{json:#}"
+    );
+    let text =
+        |msg: usize, block: usize| json["messages"][msg]["content"][block]["text"].to_string();
+    assert!(text(2, 1).contains("planning the call"), "{json:#}");
+    assert!(text(4, 0).contains("reading the result"), "{json:#}");
+    assert!(text(4, 1).contains("q2"), "{json:#}");
+}
+
+/// The sampler's recovery after a signature rejection, on a conversation of
+/// Claude models. The step down takes every block off the wire and keeps every
+/// summary, the target's own included. No step writes assistant text.
+#[test]
+fn a_rejected_signature_keeps_every_summary_as_a_note() {
+    let mut req = ConversationRequest::from_items(vec![
+        ConversationItem::user("q1"),
+        reasoning_sibling("", "opus thought", Some("sig-opus")),
+        ConversationItem::assistant_with_model("a1", "claude-opus-5-5"),
+        ConversationItem::user("q2"),
+        reasoning_sibling("", "fable thought", Some("sig-fable")),
+        ConversationItem::assistant_with_model("a2", "claude-fable-5-2"),
+        ConversationItem::user("q3"),
+    ])
+    .with_model("claude-fable-5-2");
+    assert_eq!(thinking_blocks(&req).len(), 1, "the target's own block");
+    assert_words_ride_as_a_note(&req, "opus thought");
+
+    assert!(req.degrade_thinking_replay());
+    assert!(thinking_blocks(&req).is_empty());
+    assert_words_ride_as_a_note(&req, "opus thought");
+    assert_words_ride_as_a_note(&req, "fable thought");
 }
 
 /// History that never recorded which model produced a turn (`model_id`
@@ -716,7 +876,7 @@ fn thinking_without_a_recorded_origin_is_replayed() {
 
 /// The recovery the sampler applies when the server rejects a signature. The
 /// table let through: the level steps to `TextOnly`, and the block that was
-/// the model's own stops being thinking. Its words stay as assistant text. One
+/// the model's own stops being thinking. Its words stay as a client note. One
 /// more step and nothing of it reaches the wire.
 #[test]
 fn a_rejected_signature_steps_the_replay_level_down() {
@@ -731,11 +891,7 @@ fn a_rejected_signature_steps_the_replay_level_down() {
 
     assert!(req.degrade_thinking_replay());
     assert!(thinking_blocks(&req).is_empty());
-    let text = request_text(&req);
-    assert!(
-        text.contains("<thinking>") && text.contains("weighing the options"),
-        "the words survive as a plain message: {text}"
-    );
+    assert_words_ride_as_a_note(&req, "weighing the options");
 
     assert!(req.degrade_thinking_replay());
     assert!(thinking_blocks(&req).is_empty());
@@ -963,7 +1119,7 @@ fn unsigned_thinking_rides_a_switch_between_two_models_that_do_not_sign() {
 /// by somebody else. What says so is the conversation itself — this model
 /// already signed a block earlier in it.
 #[test]
-fn unsigned_thinking_is_dropped_at_a_model_that_signs_its_own() {
+fn unsigned_thinking_rides_as_a_note_at_a_model_that_signs_its_own() {
     let req = ConversationRequest::from_items(vec![
         ConversationItem::user("q1"),
         reasoning_sibling("r1", "the signing model's own thinking", Some("sig-1")),
@@ -995,6 +1151,7 @@ fn unsigned_thinking_is_dropped_at_a_model_that_signs_its_own() {
         )],
         "the signing model keeps its own block and must not be handed an unsigned one",
     );
+    assert_words_ride_as_a_note(&req, "the other model's thinking");
 }
 
 /// Mid-tool-loop, the same way round. The turn being continued kept its

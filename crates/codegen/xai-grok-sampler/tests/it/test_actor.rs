@@ -1285,6 +1285,235 @@ async fn messages_unparseable_event_is_fatal_without_retry() {
     assert_eq!(counter.load(Ordering::SeqCst), 1, "exactly one attempt");
 }
 
+// Messages API: thinking blocks across a switch between Claude models
+
+/// A Messages stream with one signed thinking block and one text block.
+fn messages_thinking_events(thought: &str, signature: &str, model: &str) -> Vec<Event> {
+    [
+        json!({"type":"message_start","message":{
+            "id":"msg_test","type":"message","role":"assistant","content":[],
+            "model":model,"stop_reason":null,
+            "usage":{"input_tokens":10,"output_tokens":0}
+        }}),
+        json!({"type":"content_block_start","index":0,
+            "content_block":{"type":"thinking","thinking":"","signature":""}}),
+        json!({"type":"content_block_delta","index":0,
+            "delta":{"type":"thinking_delta","thinking":thought}}),
+        json!({"type":"content_block_delta","index":0,
+            "delta":{"type":"signature_delta","signature":signature}}),
+        json!({"type":"content_block_stop","index":0}),
+        json!({"type":"content_block_start","index":1,"content_block":{"type":"text","text":""}}),
+        json!({"type":"content_block_delta","index":1,
+            "delta":{"type":"text_delta","text":"The answer."}}),
+        json!({"type":"content_block_stop","index":1}),
+        json!({"type":"message_delta","delta":{"stop_reason":"end_turn"},
+            "usage":{"output_tokens":5,"input_tokens":10}}),
+        json!({"type":"message_stop"}),
+    ]
+    .into_iter()
+    .map(|event| Event::default().data(event.to_string()))
+    .collect()
+}
+
+type WireBodies = Arc<std::sync::Mutex<Vec<serde_json::Value>>>;
+
+/// A mock `/v1/messages` that records each body. Opus and Fable each sign
+/// their own thinking. With `reject_blocks`, Fable answers a body that holds a
+/// typed thinking block with the signature error of the API.
+fn claude_thinking_router(bodies: WireBodies, reject_blocks: bool) -> Router {
+    use axum::response::IntoResponse;
+    Router::new().route(
+        "/v1/messages",
+        post(move |axum::Json(body): axum::Json<serde_json::Value>| {
+            let bodies = Arc::clone(&bodies);
+            async move {
+                let model = body["model"].as_str().unwrap_or_default().to_owned();
+                let holds_block = !wire_thinking_blocks(&body).is_empty();
+                bodies.lock().unwrap().push(body);
+                let fable = model.contains("fable");
+                if reject_blocks && fable && holds_block {
+                    return (
+                        StatusCode::BAD_REQUEST,
+                        axum::Json(json!({"type":"error","error":{
+                            "type":"invalid_request_error",
+                            "message":"messages.1.content.0: Invalid `signature` in `thinking` block. The block is bound to a different conversation."
+                        }})),
+                    )
+                        .into_response();
+                }
+                let events = if fable {
+                    messages_thinking_events("fable thought", "sig-fable", &model)
+                } else {
+                    messages_thinking_events("opus thought", "sig-opus", &model)
+                };
+                Sse::new(stream::iter(
+                    events.into_iter().map(Ok::<_, std::convert::Infallible>),
+                ))
+                .into_response()
+            }
+        }),
+    )
+}
+
+fn claude_config(base_url: String, model: &str) -> SamplerConfig {
+    let mut cfg = test_config(base_url, model);
+    cfg.api_backend = ApiBackend::Messages;
+    cfg
+}
+
+/// The `(thinking, signature)` of every typed thinking block in a wire body.
+fn wire_thinking_blocks(body: &serde_json::Value) -> Vec<(String, String)> {
+    wire_blocks(body, "thinking")
+        .map(|b| {
+            let field = |key: &str| b[key].as_str().unwrap_or_default().to_owned();
+            (field("thinking"), field("signature"))
+        })
+        .collect()
+}
+
+fn wire_blocks<'a>(
+    body: &'a serde_json::Value,
+    kind: &'a str,
+) -> impl Iterator<Item = &'a serde_json::Value> {
+    body["messages"]
+        .as_array()
+        .into_iter()
+        .flatten()
+        .filter_map(|m| m["content"].as_array())
+        .flatten()
+        .filter(move |b| b["type"] == kind)
+}
+
+/// The text blocks of every wire message with `role`, joined.
+fn wire_role_text(body: &serde_json::Value, role: &str) -> String {
+    body["messages"]
+        .as_array()
+        .into_iter()
+        .flatten()
+        .filter(|m| m["role"] == role)
+        .filter_map(|m| m["content"].as_array())
+        .flatten()
+        .filter_map(|b| b["text"].as_str())
+        .collect::<Vec<_>>()
+        .join("\n")
+}
+
+/// The summaries reach the model in user-role client notes. No assistant text
+/// shows reasoning, and no text carries a thinking tag.
+fn assert_summaries_ride_as_notes(body: &serde_json::Value, summaries: &[&str]) {
+    let user = wire_role_text(body, "user");
+    for summary in summaries {
+        assert!(
+            user.contains("Client note") && user.contains(summary),
+            "`{summary}` must reach the model in a user-role note: {body:#}"
+        );
+    }
+    let assistant = wire_role_text(body, "assistant");
+    assert!(
+        !assistant.contains("thought") && !body.to_string().contains("<thinking>"),
+        "reasoning reached the wire as assistant text: {body:#}"
+    );
+}
+
+/// One turn per model, each built on the items the last turn returned.
+async fn run_claude_turns(base_url: String, models: &[&str]) -> Vec<Result<(), String>> {
+    let (event_tx, _event_rx) = mpsc::unbounded_channel();
+    let handle = SamplerActor::spawn(
+        claude_config(base_url.clone(), models[0]),
+        RetryPolicy::default(),
+        event_tx,
+    );
+    let mut items = user_request("q").items;
+    let mut outcomes = Vec::new();
+    for model in models {
+        handle.update_config(claude_config(base_url.clone(), model));
+        let request = ConversationRequest {
+            items: items.clone(),
+            ..Default::default()
+        };
+        match handle
+            .submit_and_collect(RequestId::from("req-switch"), request)
+            .await
+        {
+            Ok((response, _metrics)) => {
+                items.extend(response.items);
+                items.extend(user_request("next").items);
+                outcomes.push(Ok(()));
+            }
+            Err(error) => outcomes.push(Err(error.to_string())),
+        }
+    }
+    outcomes
+}
+
+/// Opus, then Fable, then Opus again. Each model gets its own blocks typed and
+/// the summary of every block the other model made.
+#[tokio::test(flavor = "multi_thread", worker_threads = 2)]
+async fn messages_claude_model_switch_keeps_every_thinking_summary() {
+    let bodies = WireBodies::default();
+    let server = MockServer::spawn(claude_thinking_router(Arc::clone(&bodies), false)).await;
+    let outcomes = run_claude_turns(
+        server.base_url(),
+        &["claude-opus-5-5", "claude-fable-5-2", "claude-opus-5-5"],
+    )
+    .await;
+    server.shutdown();
+    assert!(outcomes.iter().all(Result::is_ok), "{outcomes:?}");
+
+    let bodies = bodies.lock().unwrap();
+    assert_eq!(bodies.len(), 3, "one request per turn: {bodies:#?}");
+    assert_summaries_ride_as_notes(&bodies[0], &[]);
+
+    assert_eq!(bodies[1]["model"], "claude-fable-5-2");
+    assert!(
+        wire_thinking_blocks(&bodies[1]).is_empty(),
+        "Fable did not sign the Opus block: {:#}",
+        bodies[1]
+    );
+    assert_summaries_ride_as_notes(&bodies[1], &["opus thought", "claude-opus-5-5"]);
+
+    assert_eq!(bodies[2]["model"], "claude-opus-5-5");
+    assert_eq!(
+        wire_thinking_blocks(&bodies[2]),
+        vec![("opus thought".to_string(), "sig-opus".to_string())],
+        "Opus keeps its own block typed"
+    );
+    assert_summaries_ride_as_notes(&bodies[2], &["fable thought", "claude-fable-5-2"]);
+}
+
+/// Fable rejects its own typed block with the signature error. The retry
+/// carries no block and keeps both summaries as notes.
+#[tokio::test(flavor = "multi_thread", worker_threads = 2)]
+async fn messages_signature_rejection_keeps_every_thinking_summary() {
+    let bodies = WireBodies::default();
+    let server = MockServer::spawn(claude_thinking_router(Arc::clone(&bodies), true)).await;
+    let outcomes = run_claude_turns(
+        server.base_url(),
+        &["claude-opus-5-5", "claude-fable-5-2", "claude-fable-5-2"],
+    )
+    .await;
+    server.shutdown();
+    assert!(outcomes.iter().all(Result::is_ok), "{outcomes:?}");
+
+    let bodies = bodies.lock().unwrap();
+    assert_eq!(
+        bodies.len(),
+        4,
+        "the second Fable turn is one rejection and one retry: {bodies:#?}"
+    );
+    assert_eq!(
+        wire_thinking_blocks(&bodies[2]),
+        vec![("fable thought".to_string(), "sig-fable".to_string())],
+        "the rejected request carried Fable's own block"
+    );
+    assert!(
+        wire_thinking_blocks(&bodies[3]).is_empty(),
+        "the retry carries no typed block: {:#}",
+        bodies[3]
+    );
+    assert_summaries_ride_as_notes(&bodies[3], &["opus thought", "fable thought"]);
+}
+
 // ---------------------------------------------------------------------------
 // UpdateConfig invalidates cache + applies to subsequent requests
 // ---------------------------------------------------------------------------

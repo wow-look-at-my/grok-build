@@ -458,6 +458,10 @@ pub enum Action {
     SetTwoPassCompaction(bool),
     /// Delete the saved `[features].two_pass_compaction` key so the remote setting or the default applies again.
     ClearTwoPassCompaction,
+    /// Save `[features].compact_on_model_switch` as an explicit override. SHELL-owned; agents latch it when built, so it applies on restart.
+    SetCompactOnModelSwitch(bool),
+    /// Delete the saved `[features].compact_on_model_switch` key so the default applies again.
+    ClearCompactOnModelSwitch,
     /// Save `[features].session_recap` as an explicit override. SHELL-owned; the shell re-reads it per request, so it applies live.
     SetSessionRecap(bool),
     /// Delete the saved `[features].session_recap` key so the remote setting or the default applies again.

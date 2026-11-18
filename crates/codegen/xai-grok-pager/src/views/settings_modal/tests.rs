@@ -819,6 +819,7 @@ fn rows_contain_categories_and_settings_through_pr_14() {
         "plan_mode",
         // SHELL-owned `[features]` rows (Agent category, registered right after plan_mode).
         "two_pass_compaction",
+        "compact_on_model_switch",
         "session_recap",
         // SHELL-owned coding_data_sharing (Privacy category).
         "coding_data_sharing",

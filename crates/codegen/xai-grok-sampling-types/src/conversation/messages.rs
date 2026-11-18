@@ -252,8 +252,14 @@ pub fn build_messages_request(req: &ConversationRequest) -> crate::messages::Mes
         }
     };
 
-    let flush_tool_results = |pending: &mut Vec<ContentBlock>, msgs: &mut Vec<Message>| {
+    // Thinking that cannot ride as a typed block rides as a client note in the next user-role message.
+    let mut pending_notes: Vec<ContentBlock> = Vec::new();
+
+    let flush_tool_results = |pending: &mut Vec<ContentBlock>,
+                              notes: &mut Vec<ContentBlock>,
+                              msgs: &mut Vec<Message>| {
         if !pending.is_empty() {
+            pending.append(notes);
             msgs.push(Message {
                 role: MessageRole::User,
                 content: MessageContent::Blocks(pending.clone()),
@@ -272,7 +278,7 @@ pub fn build_messages_request(req: &ConversationRequest) -> crate::messages::Mes
         match item {
             ConversationItem::System(s) => {
                 flush_assistant(&mut pending_assistant, &mut messages);
-                flush_tool_results(&mut pending_tool_results, &mut messages);
+                flush_tool_results(&mut pending_tool_results, &mut pending_notes, &mut messages);
                 system_blocks.push(TextBlock {
                     r#type: "text".to_string(),
                     text: s.content.as_ref().to_owned(),
@@ -281,15 +287,16 @@ pub fn build_messages_request(req: &ConversationRequest) -> crate::messages::Mes
             }
             ConversationItem::User(u) => {
                 flush_assistant(&mut pending_assistant, &mut messages);
-                flush_tool_results(&mut pending_tool_results, &mut messages);
-                let blocks = content_parts_to_anthropic_blocks(&u.content);
+                flush_tool_results(&mut pending_tool_results, &mut pending_notes, &mut messages);
+                let mut blocks = std::mem::take(&mut pending_notes);
+                blocks.extend(content_parts_to_anthropic_blocks(&u.content));
                 messages.push(Message {
                     role: MessageRole::User,
                     content: MessageContent::Blocks(blocks),
                 });
             }
             ConversationItem::Assistant(a) => {
-                flush_tool_results(&mut pending_tool_results, &mut messages);
+                flush_tool_results(&mut pending_tool_results, &mut pending_notes, &mut messages);
 
                 if !a.content.is_empty() {
                     pending_assistant.push(ContentBlock::Text {
@@ -352,7 +359,7 @@ pub fn build_messages_request(req: &ConversationRequest) -> crate::messages::Mes
             }
             // No native equivalent, so emit synthetic text to retain context.
             ConversationItem::BackendToolCall(b) => {
-                flush_tool_results(&mut pending_tool_results, &mut messages);
+                flush_tool_results(&mut pending_tool_results, &mut pending_notes, &mut messages);
                 pending_assistant.push(ContentBlock::Text {
                     text: b.text_summary(),
                     cache_control: None,
@@ -360,7 +367,7 @@ pub fn build_messages_request(req: &ConversationRequest) -> crate::messages::Mes
             }
             // `tco_*` blobs carry only `signature`; real reasoning sets `thinking`
             ConversationItem::Reasoning(r) => {
-                flush_tool_results(&mut pending_tool_results, &mut messages);
+                flush_tool_results(&mut pending_tool_results, &mut pending_notes, &mut messages);
                 let thinking = reasoning_item_text(r);
                 let signature = r
                     .encrypted_content
@@ -369,13 +376,8 @@ pub fn build_messages_request(req: &ConversationRequest) -> crate::messages::Mes
                     .unwrap_or_default();
                 let mut disposition = plan.disposition(&req.items, idx, r);
                 // Thinking off for this request means no typed block at all.
-                // The words still ride, as an ordinary assistant message.
                 if thinking_off && disposition == ThinkingDisposition::Native {
-                    disposition = if thinking.is_empty() {
-                        ThinkingDisposition::Drop
-                    } else {
-                        ThinkingDisposition::Text
-                    };
+                    disposition = ThinkingReplayPlan::without_block(r);
                 }
                 match disposition {
                     ThinkingDisposition::Drop => {
@@ -385,8 +387,8 @@ pub fn build_messages_request(req: &ConversationRequest) -> crate::messages::Mes
                     }
                     ThinkingDisposition::Text => {
                         converted_foreign_thinking += 1;
-                        pending_assistant.push(ContentBlock::Text {
-                            text: thinking_as_text(r),
+                        pending_notes.push(ContentBlock::Text {
+                            text: thinking_as_note(r, reasoning_origin_model(&req.items, idx)),
                             cache_control: None,
                         });
                     }
@@ -408,7 +410,15 @@ pub fn build_messages_request(req: &ConversationRequest) -> crate::messages::Mes
     }
 
     flush_assistant(&mut pending_assistant, &mut messages);
-    flush_tool_results(&mut pending_tool_results, &mut messages);
+    flush_tool_results(&mut pending_tool_results, &mut pending_notes, &mut messages);
+
+    // No user-role message followed the last note.
+    if !pending_notes.is_empty() {
+        messages.push(Message {
+            role: MessageRole::User,
+            content: MessageContent::Blocks(std::mem::take(&mut pending_notes)),
+        });
+    }
 
     if dropped_foreign_thinking > 0 || converted_foreign_thinking > 0 {
         tracing::warn!(
@@ -417,7 +427,7 @@ pub fn build_messages_request(req: &ConversationRequest) -> crate::messages::Mes
             model = req.model.as_deref().unwrap_or_default(),
             thinking_off,
             level = plan.level().as_str(),
-            "thinking block(s) this model cannot take: the ones carrying text went as plain assistant messages, the rest went"
+            "thinking block(s) this request cannot carry typed: `converted` went as client notes in user messages, `dropped` had no words to send"
         );
     }
 
