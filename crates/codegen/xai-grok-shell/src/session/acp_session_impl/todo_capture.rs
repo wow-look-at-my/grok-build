@@ -424,7 +424,7 @@ impl SessionActor {
         })
     }
 
-    /// The capture run alone: it appends the items and tells nobody. `/goal --lite` uses it to seed the list.
+    /// The capture run alone: it appends the items and tells nobody. A lite `/goal` uses it to seed the list.
     pub(super) async fn run_todo_capture(
         &self,
         request: &str,

@@ -245,11 +245,14 @@ Set, manage, or check an autonomous goal. Grok works across rounds and only mark
 
 ```
 /goal Migrate the auth module to the new API
+/goal --full Migrate the auth module to the new API
 /goal status
 /goal pause
 /goal resume
 /goal clear
 ```
+
+A plain `/goal` is lite: there is no planner and no skeptic panel, and the per-round evaluator decides when the goal is done. `/goal --full` adds a planner and a panel of skeptics with a summarizer. The flag may also come last.
 
 The `--budget` here is a **token** budget for the goal run, separate from the agent-count budgets that workflows use. `/goal` appears when goal mode is enabled for the session. The host evaluates each model round and runs adversarial verification on completion candidates.
 

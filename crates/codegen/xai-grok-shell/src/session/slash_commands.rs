@@ -332,14 +332,8 @@ pub(super) const BUILTIN_COMMANDS: &[BuiltinCommand] = &[
 ];
 /// Split the `/goal` flags off an objective: a `--lite` or `--full` token
 /// at either end, and a trailing `--budget <tokens>`. A mode flag must be
-/// its own token, and text must remain after it.
-fn parse_goal_args(
-    trimmed: &str,
-) -> (
-    String,
-    Option<i64>,
-    Option<crate::session::goal_tracker::GoalMode>,
-) {
+/// its own token, and text must remain after it. With no flag, the goal is lite.
+fn parse_goal_args(trimmed: &str) -> (String, Option<i64>, crate::session::goal_tracker::GoalMode) {
     let (leading, rest) = take_goal_mode_flag(trimmed, true);
     let (trailing, rest) = take_goal_mode_flag(rest, false);
     let (objective, budget) = parse_goal_budget(rest);
@@ -351,7 +345,11 @@ fn parse_goal_args(
         }
         _ => (None, objective),
     };
-    (objective, budget, leading.or(trailing).or(before_budget))
+    let mode = leading
+        .or(trailing)
+        .or(before_budget)
+        .unwrap_or(crate::session::goal_tracker::GoalMode::Lite);
+    (objective, budget, mode)
 }
 
 fn take_goal_mode_flag(
@@ -1284,7 +1282,7 @@ pub(super) enum BuiltinAction {
     GoalSet {
         objective: String,
         token_budget: Option<i64>,
-        mode: Option<crate::session::goal_tracker::GoalMode>,
+        mode: crate::session::goal_tracker::GoalMode,
     },
     GoalStatus,
     GoalPause,
