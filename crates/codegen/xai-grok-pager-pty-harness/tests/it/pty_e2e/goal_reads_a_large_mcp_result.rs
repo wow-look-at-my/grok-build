@@ -96,7 +96,7 @@ async fn goal_reads_a_large_mcp_result_dump() {
     // The MCP server must be connected before the round, so its tool is offered.
     harness.update(Duration::from_secs(5));
     harness
-        .inject_keys(b"/goal read the large mcp result")
+        .inject_keys(b"/goal --full read the large mcp result")
         .expect("type goal");
     harness.update(Duration::from_millis(300));
     harness.inject_keys(b"\r").expect("submit goal");
