@@ -433,33 +433,42 @@ impl AgentView {
             return InputOutcome::Changed;
         }
 
-        // 0d. Bash mode activation: `!` on empty prompt enters bash mode.
+        // 0d. The input mode is the composer's virtual first character. `!` typed at the start of the composer enters bash
+        //     mode, and `#` enters remember mode (gated by `features.remember_mode`), whatever text follows the cursor.
         if self.prompt_input_mode == PromptInputMode::Normal
-            && is_bang_key(key)
-            && self.prompt.text().is_empty()
+            && self.prompt.insertion_at_start()
             && !self.prompt.file_search_visible()
             && !self.prompt.history_search.is_active()
         {
-            self.prompt_input_mode = PromptInputMode::Bash;
-            return InputOutcome::Changed;
+            let mode = if is_bang_key(key) {
+                Some(PromptInputMode::Bash)
+            } else if is_hash_key(key) && remember_mode_enabled() {
+                Some(PromptInputMode::Remember)
+            } else {
+                None
+            };
+            if let Some(mode) = mode {
+                if self.prompt.selection_range().is_some() {
+                    self.prompt.insert_replacing_selection("");
+                    self.prompt.refresh_slash(&self.session.models);
+                }
+                if self.prompt.slash_open() {
+                    self.prompt.slash_dismiss();
+                }
+                self.prompt_input_mode = mode;
+                return InputOutcome::Changed;
+            }
         }
 
-        // 0d2. Remember mode activation: `#` on empty prompt enters remember mode.
-        //     Gated by `features.remember_mode` = `true` in config.json (default: off).
-        if self.prompt_input_mode == PromptInputMode::Normal
-            && is_hash_key(key)
-            && self.prompt.text().is_empty()
-            && !self.prompt.file_search_visible()
-            && !self.prompt.history_search.is_active()
-            && remember_mode_enabled()
+        // 0e. Exit special input mode with per-mode exit keys (Bash/Remember:
+        // Backspace/Esc/Ctrl+W/U/C) on an empty prompt.
+        let backspace_at_start = key.code == KeyCode::Backspace
+            && key.modifiers.is_empty()
+            && self.prompt.cursor() == 0
+            && self.prompt.selection_range().is_none();
+        if self.prompt_input_mode.is_exit_key(key)
+            && (self.prompt.text().is_empty() || backspace_at_start)
         {
-            self.prompt_input_mode = PromptInputMode::Remember;
-            return InputOutcome::Changed;
-        }
-
-        // 0e. Exit special input mode on empty prompt using per-mode exit keys (Bash/Remember: Backspace/Esc/Ctrl+W/U/C).
-        //     With non-empty text, Esc falls through to Esc policy (cancel / mid-turn swallow / clear / rewind). Mode is preserved for re-focus.
-        if self.prompt_input_mode.is_exit_key(key) && self.prompt.text().is_empty() {
             self.prompt_input_mode = PromptInputMode::Normal;
             return InputOutcome::Changed;
         }
@@ -2018,5 +2027,92 @@ mod queue_recall_tests {
 
         assert_eq!(agent.active_pane, AgentPane::Prompt);
         assert_eq!(agent.prompt.text(), "an older prompt");
+    }
+}
+
+#[cfg(test)]
+mod input_mode_prefix_tests {
+    use super::*;
+    use crossterm::event::{KeyCode, KeyEvent, KeyModifiers};
+
+    fn press(agent: &mut AgentView, code: KeyCode) -> InputOutcome {
+        agent.handle_prompt_key_for_test(&KeyEvent::new(code, KeyModifiers::NONE))
+    }
+
+    fn agent_with_draft(text: &str, cursor: usize) -> AgentView {
+        let mut agent = super::test_fixtures::make_agent();
+        agent.active_pane = AgentPane::Prompt;
+        agent.prompt.set_text(text);
+        agent.prompt.set_cursor(cursor);
+        agent
+    }
+
+    #[test]
+    fn bang_at_the_start_of_a_draft_enters_bash_mode() {
+        let mut agent = agent_with_draft("git status", 0);
+        press(&mut agent, KeyCode::Char('!'));
+        assert_eq!(agent.prompt_input_mode, PromptInputMode::Bash);
+        assert_eq!(
+            agent.prompt.text(),
+            "git status",
+            "the draft stays, the `!` becomes the mode"
+        );
+    }
+
+    #[test]
+    fn bang_before_a_slash_draft_enters_bash_mode_and_closes_the_slash_menu() {
+        let mut agent = agent_with_draft("", 0);
+        for c in "/help".chars() {
+            press(&mut agent, KeyCode::Char(c));
+        }
+        assert!(agent.prompt.slash_open(), "precondition: slash menu open");
+        agent.prompt.set_cursor(0);
+        press(&mut agent, KeyCode::Char('!'));
+        assert_eq!(agent.prompt_input_mode, PromptInputMode::Bash);
+        assert_eq!(agent.prompt.text(), "/help");
+        assert!(!agent.prompt.slash_open());
+    }
+
+    #[test]
+    fn bang_after_the_start_is_a_literal_character() {
+        let mut agent = agent_with_draft("git status", 3);
+        press(&mut agent, KeyCode::Char('!'));
+        assert_eq!(agent.prompt_input_mode, PromptInputMode::Normal);
+        assert_eq!(agent.prompt.text(), "git! status");
+    }
+
+    #[test]
+    fn bang_over_a_selection_from_the_start_replaces_it_and_enters_bash_mode() {
+        let mut agent = agent_with_draft("git status", 0);
+        agent.prompt.set_selection_for_test(0, 10);
+        press(&mut agent, KeyCode::Char('!'));
+        assert_eq!(agent.prompt_input_mode, PromptInputMode::Bash);
+        assert_eq!(agent.prompt.text(), "");
+    }
+
+    #[test]
+    fn backspace_at_the_start_of_a_bash_draft_returns_to_normal_mode() {
+        let mut agent = agent_with_draft("git status", 0);
+        agent.prompt_input_mode = PromptInputMode::Bash;
+        press(&mut agent, KeyCode::Backspace);
+        assert_eq!(agent.prompt_input_mode, PromptInputMode::Normal);
+        assert_eq!(agent.prompt.text(), "git status");
+    }
+
+    #[test]
+    fn backspace_inside_a_bash_draft_edits_the_text() {
+        let mut agent = agent_with_draft("git status", 3);
+        agent.prompt_input_mode = PromptInputMode::Bash;
+        press(&mut agent, KeyCode::Backspace);
+        assert_eq!(agent.prompt_input_mode, PromptInputMode::Bash);
+        assert_eq!(agent.prompt.text(), "gi status");
+    }
+
+    #[test]
+    fn pasted_bang_command_at_the_start_of_a_draft_enters_bash_mode() {
+        let mut agent = agent_with_draft(" --short", 0);
+        agent.insert_bracketed_prompt_text("! git status");
+        assert_eq!(agent.prompt_input_mode, PromptInputMode::Bash);
+        assert_eq!(agent.prompt.text(), "git status --short");
     }
 }
