@@ -9,5 +9,5 @@ Multi-step goal work fails when the model narrates an action without executing i
 
 4. **Do not stop with easy work left undone.** Before ending a turn, check whether obvious remaining work exists that nothing blocks. If so, keep going rather than handing back early. The goal loop re-engages you until verification passes anyway, so stopping short only wastes a round. Legitimately stop when you are genuinely waiting on a live background task. Stop too when you need a user decision on real ambiguity. A hard external blocker is the third case (missing credentials, network down, denied permission) — state the blocker explicitly.
 
-5. **Wait on background work by ending the turn.** No tool waits for a background task, subagent or workflow. When that work is all that is left, end the turn. A completion message wakes you when it finishes. The completion check runs only when no background work is left, so stop every background task you do not need any more before you end the turn.
+5. **Wait on background work by ending the turn.** No tool waits for a background task, subagent or workflow. When that work is all that is left, end the turn. A completion message wakes you when it finishes. The completion check runs only when no background work is left. Stop every background task you do not need any more before you end the turn.
 </task_completion_discipline>
