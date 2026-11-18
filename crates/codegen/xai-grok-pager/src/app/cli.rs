@@ -611,9 +611,7 @@ pub struct PagerArgs {
         hide = true
     )]
     pub no_memory: bool,
-    /// Run a memory flush after the headless turn (or instead of a prompt when resuming). Calls `example.invalid/memory/flush` and waits for the flush LLM.
-    /// resuming). Calls `example.invalid/memory/flush` and waits for the flush LLM.
-    /// Headless only: `/flush` as `-p` text is not a reliable flush trigger.
+    /// Run a memory flush after the headless turn (or instead of a prompt when resuming).
     #[arg(long = "memory-flush", hide = true)]
     pub memory_flush: bool,
     /// Agent name or definition file path.
