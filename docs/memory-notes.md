@@ -39,3 +39,4 @@ Memory-v2 needs no command. It has none for saving or consolidating. There is no
 
 - `xai-grok-memory`: `v2_recall_tests.rs` drives the engine on real scope directories.
 - `xai-grok-shell`: `tests/it/memory_recall_e2e.rs` drives a real agent against the mock model. It needs a workspace outside the system temp directory, because memory is off for a temp workspace.
+- `MvpAgent::new` does not read `Config::memory_config`. The binary's startup calls `set_memory_config` after it. The test harness does the same only through `connect_and_auth_with_memory`, so every other harness session runs with no memory.
