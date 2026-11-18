@@ -707,6 +707,8 @@ pub(crate) async fn generate_session_compact(
             // Messages API uses similar streaming to Responses.
             let request = ConversationRequest {
                 items: chat_history,
+                // The summarizer runs under its own prompt, so no thinking block verifies here.
+                thinking_replay: xai_grok_sampling_types::ThinkingReplay::TextOnly,
                 // Prefix-cache alignment (see doc comment).
                 tools,
                 hosted_tools,

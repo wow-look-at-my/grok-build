@@ -1148,6 +1148,11 @@ pub(crate) async fn run(
         config_layers.as_ref(),
         remote_settings.as_ref(),
     );
+    app.compact_on_model_switch = crate::settings::FeatureOverrideState::from_layers(
+        xai_grok_shell::agent::config::Feature::CompactOnModelSwitch,
+        config_layers.as_ref(),
+        remote_settings.as_ref(),
+    );
     app.session_recap = crate::settings::FeatureOverrideState::from_layers(
         xai_grok_shell::agent::config::Feature::SessionRecap,
         config_layers.as_ref(),

@@ -27,7 +27,8 @@ pub use responses::{
 };
 pub use thinking_replay::{
     ThinkingDisposition, ThinkingReplay, ThinkingReplayPlan, apply_thinking_replay,
-    names_replayed_thinking, reasoning_origin_model, same_model, thinking_as_text,
+    names_replayed_thinking, reasoning_origin_model, same_model, thinking_as_note,
+    thinking_as_text,
 };
 pub use tool_schema::{
     ToolSchemaForm, has_top_level_combinator, names_top_level_schema_combinator,
