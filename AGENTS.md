@@ -133,6 +133,10 @@ CI is the source of truth and builds every pushed branch. A branch that is only 
 - A `## Verification plan` step reads back what the goal built. It is not a permit. The implementer read "do X to confirm Y" as an instruction to do X. A planner-invented check then became an action on a system nobody put in scope. Every place that demands verification says so now. Those are the planner prompt's `## Verification plan` contract, `goal_rules.md`'s VERIFY AS YOU GO, `goal_plan_block.md`, and the per-turn continuation directive.
 - The planner is told to prefer reading what the work already produced over operating anything. Files, logs, hashes, build output and source are what it reads. That is the whole mechanism. There is no label grammar and no validator. An earlier try added a reach DSL, a keyword list and a reject-and-retry loop to a planner prompt that is already long. That buys rigidity rather than scope discipline.
 
+## Goal verification runs in the background
+
+[docs/goal-verification-runs-in-the-background.md](docs/goal-verification-runs-in-the-background.md) holds this section: the panel task, its hold, and the `/goal` queue.
+
 ## A user cancel of a skeptic stops the panel
 
 - The first cancelled skeptic cancels the rest of the panel (`run_panel_cancel_together`, `ChannelSpawner::panel_cancel`). The stage returns `GoalClassifierOutcome::UserCancelled`. It is no verdict and no infra failure: the try is rolled back and the goal stays active. A cancel never pauses or ends a goal.
