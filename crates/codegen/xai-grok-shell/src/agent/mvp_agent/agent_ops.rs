@@ -4516,6 +4516,10 @@ impl MvpAgent {
         );
         let compaction_mode = pins.mode;
         let two_pass_enabled = pins.two_pass;
+        let compact_on_model_switch = self
+            .cfg
+            .borrow()
+            .is_feature_enabled(crate::agent::config::Feature::CompactOnModelSwitch);
         let (session_model_id, mut sampling_config) = self
             .apply_agent_model_override(
                 pinned_model.as_ref(),
@@ -4892,6 +4896,7 @@ impl MvpAgent {
                     long_reasoning_reminder,
                     compaction_tool_choice,
                     two_pass_enabled,
+                    compact_on_model_switch,
                     buffering_settings,
                     origin_client.clone(),
                     self.codebase_indexes.clone(),
