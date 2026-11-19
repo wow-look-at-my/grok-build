@@ -3109,7 +3109,10 @@ mod resumed_prefix_fallback_tests {
 }
 #[cfg(test)]
 mod memory_storage_select_tests {
-    use super::{MemoryStorageSelection, memory_v2_exposed, select_memory_storage};
+    use super::{
+        KEYLESS_EMBEDDING_KEY, MemoryStorageSelection, embedding_endpoint, memory_v2_exposed,
+        select_memory_storage,
+    };
     use crate::config::{MemoryConfig, MemoryMode, MemoryV2Rollout};
     use crate::session::memory::MemoryStorage;
     use std::path::Path;
