@@ -34,9 +34,17 @@ pub struct ApiEmbeddingProvider {
     auth: xai_grok_net::Auth,
     usage_sink: xai_grok_sampler::SharedUsageSink,
     max_batch_size: usize,
+    max_attempts: usize,
 }
 
 impl ApiEmbeddingProvider {
+    /// One attempt for each batch. A caller that a turn waits on tries again at its next call
+    /// and never sleeps between attempts.
+    pub fn without_retries(mut self) -> Self {
+        self.max_attempts = 1;
+        self
+    }
+
     pub fn new(
         api_base: String,
         model: String,
@@ -51,6 +59,7 @@ impl ApiEmbeddingProvider {
             auth,
             usage_sink,
             max_batch_size: 32,
+            max_attempts: MAX_RETRIES,
         }
     }
 
@@ -139,7 +148,7 @@ impl EmbeddingProvider for ApiEmbeddingProvider {
             // Transient errors (429, 5xx) are retried with exponential backoff
             let mut last_err = String::new();
             let mut success = false;
-            for attempt in 0..MAX_RETRIES {
+            for attempt in 0..self.max_attempts {
                 if attempt > 0 {
                     let delay = INITIAL_BACKOFF_MS * 2u64.pow(attempt as u32 - 1);
                     tracing::warn!(
@@ -200,7 +209,8 @@ impl EmbeddingProvider for ApiEmbeddingProvider {
 
             if !success {
                 return Err(format!(
-                    "embedding API failed after {MAX_RETRIES} attempts: {last_err}"
+                    "embedding API failed after {} attempts: {last_err}",
+                    self.max_attempts
                 )
                 .into());
             }
@@ -336,6 +346,41 @@ mod tests {
         let provider = MockEmbeddingProvider { dimensions: 4 };
         let results = provider.embed_batch(&[]).await.unwrap();
         assert!(results.is_empty());
+    }
+
+    /// A provider without retries sends one request to a failing server and returns at once.
+    #[tokio::test]
+    async fn without_retries_sends_one_request_to_a_failing_server() {
+        let server = wiremock::MockServer::start().await;
+        wiremock::Mock::given(wiremock::matchers::method("POST"))
+            .and(wiremock::matchers::path("/v1/embeddings"))
+            .respond_with(wiremock::ResponseTemplate::new(503))
+            .expect(1)
+            .mount(&server)
+            .await;
+        let provider = ApiEmbeddingProvider::new(
+            format!("{}/v1", server.uri()),
+            "embed-model".into(),
+            2,
+            xai_grok_net::Auth::ApiKey {
+                key: "key".into(),
+                scheme: xai_grok_net::KeyScheme::Bearer,
+            },
+            std::sync::Arc::new(Recorder::default()),
+        )
+        .without_retries();
+
+        let started = std::time::Instant::now();
+        let error = provider
+            .embed_batch(&["hello"])
+            .await
+            .expect_err("a 503 is a failure");
+
+        assert!(error.to_string().contains("after 1 attempts"), "{error}");
+        assert!(
+            started.elapsed() < std::time::Duration::from_millis(INITIAL_BACKOFF_MS),
+            "one attempt sleeps for no backoff"
+        );
     }
 
     #[tokio::test]

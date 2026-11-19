@@ -282,7 +282,11 @@ impl SessionActor {
                     params.usage_sink,
                     Arc::clone(&self.memory.token_totals.recall_cost_usd_ticks),
                 );
-                params.make().await
+                // A turn waits on this call. One attempt now, and the next recall tries again.
+                params
+                    .make()
+                    .await
+                    .map(xai_grok_memory::embedding::ApiEmbeddingProvider::without_retries)
             }
             None => None,
         };
