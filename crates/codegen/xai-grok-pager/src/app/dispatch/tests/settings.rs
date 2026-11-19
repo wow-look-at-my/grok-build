@@ -1730,6 +1730,18 @@ fn move_setting_away_from_default(app: &mut AppView, key: crate::settings::Setti
         "toolset.ask_user_question.timeout_enabled" => {
             let _ = dispatch(Action::SetAskUserQuestionTimeoutEnabled(false), app);
         }
+        "memory.v2.recall_enabled" => {
+            let value = crate::settings::SettingValue::Bool(false);
+            let _ = dispatch(Action::SetMemorySetting { key, value }, app);
+        }
+        "memory.embedding.model" | "memory.embedding.base_url" | "memory.embedding.api_key_env" => {
+            let value = crate::settings::SettingValue::String("http://localhost:11434/v1".into());
+            let _ = dispatch(Action::SetMemorySetting { key, value }, app);
+        }
+        "memory.embedding.dimensions" => {
+            let value = crate::settings::SettingValue::Int(768);
+            let _ = dispatch(Action::SetMemorySetting { key, value }, app);
+        }
         "subagent_model_inheritance" => {
             let _ = dispatch(Action::SetSubagentModelInheritance(true), app);
         }
