@@ -1145,6 +1145,8 @@ pub(super) fn dispatch_dashboard_dispatch_slash(app: &mut AppView, text: String)
     let voice_stt_language_from_app = app.voice_config.language.clone();
     let subagent_model_inheritance_from_app = app.subagent_model_inheritance;
     let two_pass_compaction_from_app = app.two_pass_compaction;
+    let compact_on_model_switch_from_app = app.compact_on_model_switch;
+    let session_recap_from_app = app.session_recap;
     let keep_awake_from_app = app.notification_service.sleep_inhibitor.mode();
     let result = {
         let Some(invocation) = parse_invocation(trimmed.as_str()) else {
@@ -1231,6 +1233,8 @@ pub(super) fn dispatch_dashboard_dispatch_slash(app: &mut AppView, text: String)
                 voice_stt_language: voice_stt_language_from_app,
                 subagent_model_inheritance: subagent_model_inheritance_from_app,
                 two_pass_compaction: two_pass_compaction_from_app,
+                compact_on_model_switch: compact_on_model_switch_from_app,
+                session_recap: session_recap_from_app,
                 model_windows: crate::settings::context_limits::catalog_windows(
                     &app.models.available,
                 ),

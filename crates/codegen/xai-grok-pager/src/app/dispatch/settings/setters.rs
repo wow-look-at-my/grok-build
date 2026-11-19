@@ -315,12 +315,16 @@ pub(in crate::app::dispatch) fn set_ask_user_question_timeout_enabled(
 
 const SUBAGENT_MODEL_INHERITANCE_LABEL: &str = "Subagent model inheritance";
 const TWO_PASS_COMPACTION_LABEL: &str = "Two-pass compaction";
+const COMPACT_ON_MODEL_SWITCH_LABEL: &str = "Compact on model switch";
+const SESSION_RECAP_LABEL: &str = "Session recaps";
 
 /// The settings-row state of a `[features]` flag that has a row.
 fn feature_state_mut(app: &mut AppView, feature: Feature) -> Option<&mut FeatureOverrideState> {
     [
         &mut app.subagent_model_inheritance,
         &mut app.two_pass_compaction,
+        &mut app.compact_on_model_switch,
+        &mut app.session_recap,
     ]
     .into_iter()
     .find(|state| state.feature == feature)
@@ -380,6 +384,8 @@ pub(super) fn settle_feature_override_write(
         Some(_) | None => {
             state.config.user = write.persisted;
             state.writes = None;
+            // A failed write moves the mirror back to the disk value.
+            apply_live_feature(app, feature);
             vec![]
         }
     }
@@ -409,13 +415,27 @@ fn set_feature_override(
         return vec![];
     }
     let effects = set_feature_override_inner(app, feature, Some(new));
+    let live = apply_live_feature(app, feature);
     refresh_open_settings_modals(app);
     tracing::info!(target: "settings", key, value = new, "setting changed");
-    app.show_toast(&format!(
-        "{} (restart to apply)",
-        save_success_toast(label, new),
-    ));
+    let toast = save_success_toast(label, new);
+    if live {
+        app.show_toast(&toast);
+    } else {
+        app.show_toast(&format!("{toast} (restart to apply)"));
+    }
     effects
+}
+
+/// Push a `[features]` row that applies without a restart into the running pager.
+/// Returns false for a row that agents latch when they are built.
+fn apply_live_feature(app: &mut AppView, feature: Feature) -> bool {
+    if feature != Feature::SessionRecap {
+        return false;
+    }
+    let available = app.session_recap.resolve().value;
+    crate::app::event_loop::apply_session_recap_available(app, available);
+    true
 }
 
 /// Shared body of the `[features]` row resets: deletes the saved key rather than writing the compiled default.
@@ -442,9 +462,14 @@ fn clear_feature_override(
         return vec![];
     }
     let effects = set_feature_override_inner(app, feature, None);
+    let live = apply_live_feature(app, feature);
     refresh_open_settings_modals(app);
     tracing::info!(target: "settings", key, value = "<cleared>", "setting changed");
-    app.show_toast(&format!("\u{2713} {label}: reset (restart to apply)"));
+    if live {
+        app.show_toast(&format!("\u{2713} {label}: reset"));
+    } else {
+        app.show_toast(&format!("\u{2713} {label}: reset (restart to apply)"));
+    }
     effects
 }
 
@@ -493,6 +518,51 @@ pub(in crate::app::dispatch) fn clear_two_pass_compaction(app: &mut AppView) -> 
         Feature::TwoPassCompaction,
         "two_pass_compaction",
         TWO_PASS_COMPACTION_LABEL,
+    )
+}
+
+/// SHELL-owned setter for `[features].compact_on_model_switch`.
+pub(in crate::app::dispatch) fn set_compact_on_model_switch(
+    app: &mut AppView,
+    new: bool,
+) -> Vec<Effect> {
+    set_feature_override(
+        app,
+        Feature::CompactOnModelSwitch,
+        "compact_on_model_switch",
+        COMPACT_ON_MODEL_SWITCH_LABEL,
+        new,
+    )
+}
+
+/// Outer dispatcher for `Action::ClearCompactOnModelSwitch`.
+pub(in crate::app::dispatch) fn clear_compact_on_model_switch(app: &mut AppView) -> Vec<Effect> {
+    clear_feature_override(
+        app,
+        Feature::CompactOnModelSwitch,
+        "compact_on_model_switch",
+        COMPACT_ON_MODEL_SWITCH_LABEL,
+    )
+}
+
+/// SHELL-owned setter for `[features].session_recap`.
+pub(in crate::app::dispatch) fn set_session_recap(app: &mut AppView, new: bool) -> Vec<Effect> {
+    set_feature_override(
+        app,
+        Feature::SessionRecap,
+        "session_recap",
+        SESSION_RECAP_LABEL,
+        new,
+    )
+}
+
+/// Outer dispatcher for `Action::ClearSessionRecap`.
+pub(in crate::app::dispatch) fn clear_session_recap(app: &mut AppView) -> Vec<Effect> {
+    clear_feature_override(
+        app,
+        Feature::SessionRecap,
+        "session_recap",
+        SESSION_RECAP_LABEL,
     )
 }
 pub(super) fn set_show_thinking_blocks_inner(app: &mut AppView, new: bool) {

@@ -530,7 +530,7 @@ mod tests {
 
         // Regression: an execute tool WITHOUT `is_background` in its schema (e.g. OpenCode's foreground-only bash) seeds
         // `params.execute` from its real fields only. `param_for_kind` must report the missing field as absent so
-        // `get_task_output` does not tell the model to pass `is_background=true` to a tool that has no such field.
+        // `get_task_output` does not tell the model to pass `is_background=true` to a tool. That tool has no such field.
         let opencode_bash = make_renderer(
             &[(ToolKind::Execute, "bash")],
             &[(

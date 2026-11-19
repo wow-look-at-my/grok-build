@@ -1673,6 +1673,7 @@ fn restore_orphan_create_draft_to_welcome(app: &mut AppView, agent_id: AgentId) 
     let Some(first) = queued.next() else {
         if !draft_text.trim().is_empty() {
             app.welcome_prompt.set_text(&draft_text);
+            app.welcome_prompt.set_cursor(draft_text.len());
         }
         if !draft_images.is_empty() {
             app.welcome_prompt.set_images(draft_images);
@@ -1680,6 +1681,7 @@ fn restore_orphan_create_draft_to_welcome(app: &mut AppView, agent_id: AgentId) 
         return;
     };
     app.welcome_prompt.set_text(&first.text);
+    app.welcome_prompt.set_cursor(first.text.len());
     app.welcome_prompt
         .restore_chip_elements(&first.chip_elements);
     app.welcome_prompt.set_images(first.images);
@@ -1783,6 +1785,7 @@ pub(in crate::app::dispatch) fn handle_session_failed(
             push_session_create_failure_warning(app, &msg);
             if !draft.is_empty() && app.welcome_prompt.text().is_empty() {
                 app.welcome_prompt.set_text(&draft);
+                app.welcome_prompt.set_cursor(draft.len());
             }
         }
     } else if let Some(agent) = app.agents.get_mut(&agent_id) {

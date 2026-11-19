@@ -710,6 +710,26 @@ impl SessionActor {
                     span.record("command_source", "builtin");
                 }
                 otel_command_name = Some(action.command_name().to_string());
+                // A `/goal` change waits for the background panel. `/goal status` does not.
+                if matches!(
+                    action,
+                    BuiltinAction::GoalSet { .. }
+                        | BuiltinAction::GoalResume
+                        | BuiltinAction::GoalPause
+                        | BuiltinAction::GoalClear
+                ) && self
+                    .defer_goal_command_while_verifying(&original_prompt_text)
+                    .await
+                {
+                    self.persist_host_turn_user_echo(&original_prompt_text, prompt_id);
+                    self.mark_front_message_committed().await;
+                    self.send_host_turn_slash_command_output(
+                        "Goal verification runs in the background. This /goal command is \
+                         queued. It runs when the verification ends.",
+                    )
+                    .await;
+                    return ok_end_turn(0, None);
+                }
                 match action {
                     BuiltinAction::GoalSet {
                         objective,
@@ -717,10 +737,7 @@ impl SessionActor {
                         mode,
                     } => {
                         xai_grok_telemetry::session_ctx::log_event(slash_used);
-                        match self
-                            .setup_goal(&objective, token_budget, mode.unwrap_or_default())
-                            .await
-                        {
+                        match self.setup_goal(&objective, token_budget, mode).await {
                             GoalSetupOutcome::Inference { reminder } => {
                                 vec![text_block(reminder)]
                             }
@@ -2933,6 +2950,7 @@ impl SessionActor {
                 );
             }
             if !salvage.awaiting_continuation() {
+                self.inject_memory_recall(loop_index == 1).await;
                 self.maybe_inject_mcp_reminder().await;
             }
             let turn_parked = if self.uncharged_401_park_enabled && auth_retry_schedule.is_parked()

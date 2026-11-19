@@ -93,6 +93,10 @@ CI is the source of truth and builds every pushed branch. A branch that is only 
 
 [docs/harness-model-slot-notes.md](docs/harness-model-slot-notes.md) holds this section.
 
+## Memory notes
+
+[docs/memory-notes.md](docs/memory-notes.md) holds this section: capture after every turn, the global and workspace split, and automatic Dream on both scopes. It also covers recall of stored notes from the conversation.
+
 ## Keep-awake notes
 
 - `[ui.notifications].keep_awake` is `never` | `while_running` (default) | `always`. The old `sleep_prevention` bool still reads as an alias. A child process holds the lock: `caffeinate -i -w <pid>` on macOS, `systemd-inhibit --what=idle` on Linux (`notifications/sleep.rs`).
@@ -133,6 +137,10 @@ CI is the source of truth and builds every pushed branch. A branch that is only 
 - A `## Verification plan` step reads back what the goal built. It is not a permit. The implementer read "do X to confirm Y" as an instruction to do X. A planner-invented check then became an action on a system nobody put in scope. Every place that demands verification says so now. Those are the planner prompt's `## Verification plan` contract, `goal_rules.md`'s VERIFY AS YOU GO, `goal_plan_block.md`, and the per-turn continuation directive.
 - The planner is told to prefer reading what the work already produced over operating anything. Files, logs, hashes, build output and source are what it reads. That is the whole mechanism. There is no label grammar and no validator. An earlier try added a reach DSL, a keyword list and a reject-and-retry loop to a planner prompt that is already long. That buys rigidity rather than scope discipline.
 
+## Goal verification runs in the background
+
+[docs/goal-verification-runs-in-the-background.md](docs/goal-verification-runs-in-the-background.md) holds this section: the panel task, its hold, and the `/goal` queue.
+
 ## A user cancel of a skeptic stops the panel
 
 - The first cancelled skeptic cancels the rest of the panel (`run_panel_cancel_together`, `ChannelSpawner::panel_cancel`). The stage returns `GoalClassifierOutcome::UserCancelled`. It is no verdict and no infra failure: the try is rolled back and the goal stays active. A cancel never pauses or ends a goal.
@@ -145,10 +153,20 @@ CI is the source of truth and builds every pushed branch. A branch that is only 
 
 ## Lite `/goal` mode
 
-- `/goal --lite <objective>` (the flag may also be the last token) runs no planner and no skeptic panel. `GoalOrchestration::mode` holds the choice. A snapshot with no `mode` field reads as `Full`.
-- A lite goal starts the way `/todo <objective>` does. So does a full goal when the planner is off. `setup_goal` runs the capture (`run_todo_capture`) before it creates the goal. A capture that adds nothing returns an error, and no goal starts. A goal never runs without todos.
+- `/goal <objective>` is lite: no planner and no skeptic panel. `/goal --full <objective>` runs the planner and the full panel. A flag may also be the last token. `parse_goal_args` resolves the mode, and `GoalOrchestration::mode` holds it. A snapshot with no `mode` field reads as `Full`.
+- A lite goal starts the way `/todo <objective>` does. So does a full goal when the planner is off. `setup_goal` runs the capture (`run_todo_capture`) before it creates the goal. No capture failure stops the goal. When the capture adds nothing, the objective itself goes on the list as one item (`append_objective_todo`). An agent with no todo tool has no list. Its goal starts with no capture (`TodoCaptureError::NoTodoTool`). The evaluator is the check.
 - The per-round evaluator (`goal_evaluator.rs`) is the whole check. Its `candidate_complete` ends the goal (`complete_lite_goal`). Any other verdict sends the model back. And the directive carries the evaluator's evidence as the reason. The evaluator prompt changes with the mode, because a lite verdict is last.
 - Every planner entry and plan-path read goes through `goal_planner_on()`, which is false for a lite goal. That includes the load-time reconcile, which otherwise pauses an active goal that has no plan.
+
+## `/goal` in explore mode
+
+- Explore keeps a todo list (`TodoWriteTool` in `explore_toolset`). The list is session state. The workspace stays read-only. `every_shift_tab_agent_keeps_a_todo_list` is the guard.
+- The harness spawns each `/goal` role (planner, skeptic, summarizer, strategist) as a `general-purpose` child. `SubagentRuntimeOverrides::harness_role` exempts that spawn from the parent's `allowed_subagent_types`, which limits the model's own spawns. `[subagents.toggle]` still applies.
+- The planner is a forked child, so it offers the parent's tools. Under explore it has no tool that writes a file. `RoleToolNames::can_write` is then false: the prompt gets `PLAN_BY_REPLY_INSTRUCTION`, the planner replies with the plan, and the harness saves that reply (`reply_is_a_plan` in `goal_planner.rs`).
+- A skeptic is not forked. It keeps its own tools under an explore parent. It can run a command.
+- `pty_e2e_queue::goal_starts_in_explore_mode` and `goal_plan_is_published_in_explore_mode` run these flows in the real pager with a scripted model, and CI runs them. `live_model::live_goal_runs_in_explore_mode` runs them against a live model. It needs the `GROK_LIVE_*` variables that [docs/background-waits-and-the-goal-check.md](docs/background-waits-and-the-goal-check.md) names.
+- A todo item's verifier is different: the model writes its condition, so the allow-list applies. Under a list that leaves out `general-purpose`, it runs as the first allowed type that can run (`verifier_subagent_type` in `grok_build/todo/mod.rs`).
+
 ## A give-up claim is reviewed, not counted
 
 - The agent claims it cannot finish with a `## Cannot complete` section in its reply. The round end calls `review_blocked_claim` (`acp_session_impl/goal.rs`) before the todo bounce. Lite and full share this path.
@@ -197,13 +215,7 @@ CI is the source of truth and builds every pushed branch. A branch that is only 
 
 ## The todo list cannot be discarded or overwritten
 
-- A todo is the user's. Nothing can delete one: an item leaves the actionable set only by becoming `Completed` or `Cancelled`, both of which name it by id. Sending that id with new content changes text.
-- Every `todo_write` is a merge, and an item the call omits survives with its status untouched. `merge: false` used to clear the list and keep only what the call resent. This is how a status update that forgot the flag erased the user's list.
-- `merge` is still accepted on the wire and ignored. It is `#[schemars(skip)]` now that both values behave the same — advertising it will describe a choice the tool no longer offers.
-- `TodoState` has no `clear` and no remove of any shape. The guarantee lives in the data structure so a later caller cannot reach around it.
-- The list only grows, and every `todo_write` echoes all of it. So `summarize_todo_state` echoes a completed or cancelled item as its first line, cut at `FINISHED_ITEM_ECHO_CHARS`. The state keeps the full text. The post-compaction reminder already collapses finished items to counts.
-- A goal start (`create_goal_orchestration`) and a goal completion call `archive_finished_todos`. It sets `TodoItem::archived` on every finished item. That item stays in the state, but the echo shows only a count, and the todo pane and goal popup hide it (`a` shows it). A status update to open work clears the flag.
-- opencode's `todowrite` sends a whole list with no ids, so it merges by ITEM TEXT, not by position. Position is not identity. Keying on it let a reordered or shorter list write one row's text over another's, which loses work as surely as a delete.
+[docs/the-todo-list-cannot-be-discarded-or-overwritten.md](docs/the-todo-list-cannot-be-discarded-or-overwritten.md) holds this section. A todo is never deleted, every `todo_write` is a merge, and finished items are archived, not removed.
 
 ## Cost-indicator feature notes
 
@@ -232,7 +244,7 @@ CI is the source of truth and builds every pushed branch. A branch that is only 
 
 ## Thinking-replay notes
 
-[docs/thinking-replay-notes.md](docs/thinking-replay-notes.md) holds this section.
+[docs/thinking-replay-notes.md](docs/thinking-replay-notes.md) holds this section: what a model switch and a compaction do with thinking. The client-note form on Messages, and `features.compact_on_model_switch`.
 
 ## Tool-schema fallback notes
 
@@ -308,13 +320,7 @@ Every one of those is the test doing its job. Making them pass there means weake
 
 ## Retry-visibility notes
 
-- A retry says what failed and how long the wait is. `SamplingEvent::Retrying` already carried `reason`, which is the error's own `Display`. It now also carries `retry_in_ms`, the backoff the actor is about to sleep.
-- Both ride `RetryState::Retrying` to the pager. It renders `Retrying in 27s (1/5):` and drops the countdown once the wait is over. The retried request is then in flight. See `retry_label` in `views/turn_status.rs`.
-- The reason goes on the rows under that header, wrapped and never cut (`retry_reason_lines`). `turn_status::desired_height` gives the row count to the layout. The layout gives it every scrollback row above `SCROLLBACK_MIN_ROWS` and no prompt row. Only an error taller than that ends its last row in `…`.
-- `retry_in_ms` is `None` for a retry that sleeps nothing. An image strip, a reasoning strip and a message-property strip are those. A shell older than the field also sends `None`.
-- The countdown needs no tick source of its own. `tick_demand` already reports Fast for a session whose turn runs, which a retry always is.
-- A server `Retry-After` is clamped to `MAX_RETRY_BACKOFF` on the 429 path too, not just the generic one. A per-minute bucket answers `Retry-After: 60`, and one try then sat idle for the whole minute. The limit had frequently cleared sooner.
-- `RATE_LIMIT_RETRY_THRESHOLD` covers the wait the server asked for across several attempts. So the turn fails no earlier than before, and an try in between can find the limit clear.
+[docs/retry-visibility-notes.md](docs/retry-visibility-notes.md) holds this section: what a retry row shows, the countdown, and the `Retry-After` clamp.
 
 ## Stream-interruption retry notes
 

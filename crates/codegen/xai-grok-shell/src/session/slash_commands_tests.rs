@@ -595,8 +595,6 @@ fn available_commands_orders_builtins_first() {
         [
             "compact",
             "always-approve",
-            "flush",
-            "dream",
             "memory",
             "context",
             "hooks-trust",
@@ -627,22 +625,18 @@ fn advertised_names(availability: CommandAvailability) -> Vec<String> {
 
 #[test]
 fn availability_filters_memory_commands() {
-    // memory=false hides /flush and /dream but NOT /memory (gated on memory_configured instead, so the user can re-enable via toggle)
-    let names = advertised_names(CommandAvailability {
-        memory: false,
-        ..CommandAvailability::all_enabled()
-    });
+    // Memory saves and consolidates by itself, so no command exists for either.
+    let names = advertised_names(CommandAvailability::all_enabled());
     assert!(!names.iter().any(|n| n == "flush"), "got: {names:?}");
     assert!(!names.iter().any(|n| n == "dream"), "got: {names:?}");
     assert!(
         names.iter().any(|n| n == "memory"),
-        "/memory should still be available when memory_configured=true, got: {names:?}"
+        "/memory is available when memory_configured=true, got: {names:?}"
     );
     assert!(names.iter().any(|n| n == "compact"));
 
-    // memory_configured=false hides /memory too.
+    // memory_configured=false hides /memory.
     let names2 = advertised_names(CommandAvailability {
-        memory: false,
         memory_configured: false,
         ..CommandAvailability::all_enabled()
     });
@@ -868,8 +862,8 @@ fn available_commands_populates_acp_fields() {
     let builtin = commands.iter().find(|c| c.name == "compact").unwrap();
     assert!(builtin.input.is_some());
 
-    let flush = commands.iter().find(|c| c.name == "flush").unwrap();
-    assert!(flush.input.is_none()); // no argument_hint
+    let memory = commands.iter().find(|c| c.name == "memory").unwrap();
+    assert!(memory.input.is_none()); // no argument_hint
 
     let skill = commands.iter().find(|c| c.name == "commit").unwrap();
     assert_eq!(skill.description, "Short: commit");
@@ -925,93 +919,16 @@ fn plugin_skill_colliding_with_pager_builtin_is_advertised_qualified() {
     );
 }
 
-// ── /flush ─────────────────────────────────────────────────────
+// ── /flush and /dream are not commands ─────────────────────────
 
 #[test]
-fn flush_resolves_to_builtin_action() {
-    assert!(matches!(
-        resolve_builtin("flush", ""),
-        Some(BuiltinAction::FlushMemory)
-    ));
-    // Args are ignored
-    assert!(matches!(
-        resolve_builtin("flush", "some extra args"),
-        Some(BuiltinAction::FlushMemory)
-    ));
-}
-
-#[test]
-fn resolve_routes_flush_builtin() {
-    let outcome = resolve(
-        vec![text_block("/flush")],
-        &[],
-        all_gated(),
-        SkillSlashRewrite::default(),
-        &[],
-    )
-    .unwrap_err();
-    assert!(matches!(
-        outcome,
-        SlashCommandOutcome::Builtin(BuiltinAction::FlushMemory)
-    ));
-}
-
-#[test]
-fn flush_builtin_shadows_same_named_skill() {
-    let skills = vec![make_skill("flush", true)];
-    let outcome = resolve(
-        vec![text_block("/flush")],
-        &skills,
-        all_gated(),
-        SkillSlashRewrite::default(),
-        &[],
-    )
-    .unwrap_err();
-    assert!(matches!(outcome, SlashCommandOutcome::Builtin(_)));
-}
-
-// ── /dream ─────────────────────────────────────────────────────
-
-#[test]
-fn dream_resolves_to_builtin_action() {
-    assert!(matches!(
-        resolve_builtin("dream", ""),
-        Some(BuiltinAction::Dream)
-    ));
-    assert!(matches!(
-        resolve_builtin("dream", "extra args"),
-        Some(BuiltinAction::Dream)
-    ));
-}
-
-#[test]
-fn resolve_routes_dream_builtin() {
-    let outcome = resolve(
-        vec![text_block("/dream")],
-        &[],
-        all_gated(),
-        SkillSlashRewrite::default(),
-        &[],
-    )
-    .unwrap_err();
-    assert!(matches!(
-        outcome,
-        SlashCommandOutcome::Builtin(BuiltinAction::Dream)
-    ));
-}
-
-#[test]
-fn dream_builtin_shadows_same_named_skill() {
-    let skills = vec![make_skill("dream", true)];
-    let outcome = resolve(
-        vec![text_block("/dream")],
-        &skills,
-        all_gated(),
-        SkillSlashRewrite::default(),
-        &[],
-    )
-    .unwrap_err();
-    assert!(matches!(outcome, SlashCommandOutcome::Builtin(_)));
+fn flush_and_dream_are_not_builtins() {
+    for name in ["flush", "dream"] {
+        assert!(
+            resolve_builtin(name, "").is_none(),
+            "/{name} must not resolve: memory saves and consolidates by itself"
+        );
+    }
 }
 
 // ── ambiguous skill names ─────────────────────────────────────
@@ -1424,7 +1341,7 @@ fn advertised_names_with(availability: CommandAvailability) -> Vec<String> {
 
 /// `CommandAvailability::default()` must be fail-closed: every gated command is hidden, only `BuiltinGate::AlwaysOn` survives.
 /// The pre-session `MvpAgent::command_availability()` builds on this value (only flipping config-derived gates like `goal` on).
-/// A regression here would re-expose `/flush`, `/loop`, etc. on the home screen for harnesses that won't actually run them.
+/// A regression here would re-expose `/loop`, `/goal`, etc. on the home screen for harnesses that won't actually run them.
 #[test]
 fn default_availability_is_fail_closed_on_every_gate() {
     let names = advertised_names_with(CommandAvailability::default());
@@ -1455,23 +1372,19 @@ fn default_availability_is_fail_closed_on_every_gate() {
     }
 }
 
-/// `/flush` and `/dream` share the memory availability gate.
+/// `/memory` is the only memory command, and `memory_configured` gates it.
 #[test]
-fn flush_hidden_when_memory_gate_off_visible_when_on() {
+fn memory_is_the_only_memory_command() {
     let off = advertised_names_with(CommandAvailability::default());
-    assert!(!off.iter().any(|n| n == "flush"), "got: {off:?}");
-    assert!(!off.iter().any(|n| n == "dream"), "got: {off:?}");
-    // /memory is gated on memory_configured, not memory; it is hidden here because Default sets both to false
     assert!(!off.iter().any(|n| n == "memory"), "got: {off:?}");
 
     let on = advertised_names_with(CommandAvailability {
-        memory: true,
         memory_configured: true,
         ..CommandAvailability::default()
     });
-    assert!(on.iter().any(|n| n == "flush"), "got: {on:?}");
-    assert!(on.iter().any(|n| n == "dream"), "got: {on:?}");
     assert!(on.iter().any(|n| n == "memory"), "got: {on:?}");
+    assert!(!on.iter().any(|n| n == "flush"), "got: {on:?}");
+    assert!(!on.iter().any(|n| n == "dream"), "got: {on:?}");
 }
 
 // ── /memory ─────────────────────────────────────────────────────
@@ -1508,11 +1421,8 @@ fn mem_alias_resolves_to_memory_browse() {
 
 #[test]
 fn memory_resolves_when_disabled_but_configured() {
-    // memory=false but memory_configured=true: /memory must still work so the user can re-enable via the toggle
-    let availability = CommandAvailability {
-        memory: false,
-        ..CommandAvailability::all_enabled()
-    };
+    // memory_configured=true is enough: /memory must work so the user can re-enable via the toggle
+    let availability = CommandAvailability::all_enabled();
     let outcome = resolve(
         vec![text_block("/memory")],
         &[],
@@ -1529,7 +1439,6 @@ fn memory_resolves_when_disabled_but_configured() {
 #[test]
 fn memory_not_resolved_when_not_configured() {
     let availability = CommandAvailability {
-        memory: false,
         memory_configured: false,
         ..CommandAvailability::all_enabled()
     };
@@ -2134,28 +2043,36 @@ fn goal_set_malformed_budget_stays_in_objective() {
 fn goal_set_mode_flag_parses_at_either_end() {
     use crate::session::goal_tracker::GoalMode;
     for (text, objective, budget, mode) in [
-        ("--lite fix it", "fix it", None, Some(GoalMode::Lite)),
-        ("fix it --lite", "fix it", None, Some(GoalMode::Lite)),
-        ("--full fix it", "fix it", None, Some(GoalMode::Full)),
+        ("--lite fix it", "fix it", None, GoalMode::Lite),
+        ("fix it --lite", "fix it", None, GoalMode::Lite),
+        ("--full fix it", "fix it", None, GoalMode::Full),
+        ("fix it --full", "fix it", None, GoalMode::Full),
         (
             "--lite fix it --budget 9",
             "fix it",
             Some(9),
-            Some(GoalMode::Lite),
+            GoalMode::Lite,
         ),
         (
             "fix it --lite --budget 9",
             "fix it",
             Some(9),
-            Some(GoalMode::Lite),
+            GoalMode::Lite,
         ),
         (
             "fix it --budget 9 --lite",
             "fix it",
             Some(9),
-            Some(GoalMode::Lite),
+            GoalMode::Lite,
         ),
-        ("fix it", "fix it", None, None),
+        (
+            "fix it --full --budget 9",
+            "fix it",
+            Some(9),
+            GoalMode::Full,
+        ),
+        ("fix it", "fix it", None, GoalMode::Lite),
+        ("fix it --budget 9", "fix it", Some(9), GoalMode::Lite),
     ] {
         match resolve_goal(text) {
             BuiltinAction::GoalSet {
@@ -2174,10 +2091,13 @@ fn goal_set_mode_flag_parses_at_either_end() {
 
 #[test]
 fn goal_set_mode_flag_needs_its_own_token_and_an_objective() {
+    use crate::session::goal_tracker::GoalMode;
     for text in [
         "--lite",
+        "--full",
         "fix the --lite flag",
-        "fix it--lite",
+        "fix the --full flag",
+        "fix it--full",
         "--lighter fix it",
     ] {
         match resolve_goal(text) {
@@ -2185,7 +2105,11 @@ fn goal_set_mode_flag_needs_its_own_token_and_an_objective() {
                 objective, mode, ..
             } => {
                 assert_eq!(objective, text, "objective must be preserved verbatim");
-                assert_eq!(mode, None, "no mode must be parsed from {text:?}");
+                assert_eq!(
+                    mode,
+                    GoalMode::Lite,
+                    "no flag in {text:?}, so the goal is lite"
+                );
             }
             other => panic!("expected GoalSet, got {}", other.command_name()),
         }
@@ -2202,7 +2126,7 @@ fn goal_command_name_is_goal() {
         BuiltinAction::GoalSet {
             objective: "x".into(),
             token_budget: None,
-            mode: None,
+            mode: crate::session::goal_tracker::GoalMode::Lite,
         }
         .command_name(),
         "goal"
@@ -2215,7 +2139,7 @@ fn goal_args_provided() {
         BuiltinAction::GoalSet {
             objective: "x".into(),
             token_budget: None,
-            mode: None,
+            mode: crate::session::goal_tracker::GoalMode::Lite,
         }
         .args_provided()
     );

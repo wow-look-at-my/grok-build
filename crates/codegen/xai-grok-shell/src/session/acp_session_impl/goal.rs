@@ -133,6 +133,24 @@ pub(super) enum BlockedClaimReview {
     Rejected(String),
 }
 
+/// Where a started verification runs.
+#[derive(Debug, Clone, Copy, PartialEq, Eq)]
+pub(super) enum Verification {
+    /// The panel ran, or did not start, inside the call. The turn continues as before.
+    Inline,
+    /// The panel runs as a background task. The turn ends now.
+    Background,
+}
+
+/// Clears the running flag when the panel task ends, a panic included.
+struct VerificationRunning<'a>(&'a std::sync::atomic::AtomicBool);
+
+impl Drop for VerificationRunning<'_> {
+    fn drop(&mut self) {
+        self.0.store(false, std::sync::atomic::Ordering::SeqCst);
+    }
+}
+
 /// The note a full goal gets when its panel finds gaps the agent can close.
 /// The directive lists those gaps under the verifier gaps.
 pub(super) const BLOCKED_CLAIM_PANEL_REJECTION: &str = "Your claim that you cannot finish the \
@@ -363,41 +381,51 @@ impl SessionActor {
                     &format!("Give-up claim upheld: {}", verdict.evidence.trim()),
                     false,
                 );
-                self.verify_goal_candidate(Some(claim)).await;
-                let user_cancelled = self
-                    .goal_tracker
-                    .lock()
-                    .snapshot()
-                    .is_some_and(|o| o.verification_cancelled_by_user);
-                if user_cancelled {
-                    self.remember_claim_rejection(None);
-                    return BlockedClaimReview::Rejected(
-                        "The user stopped the review of your claim.".to_owned(),
-                    );
+                // In the background, the panel task sends the rejection note itself.
+                if self.verify_goal_candidate(Some(claim)).await == Verification::Background {
+                    return BlockedClaimReview::Settled;
                 }
-                let gaps = {
-                    let tracker = self.goal_tracker.lock();
-                    if tracker.status() != Some(crate::session::goal_tracker::GoalStatus::Active) {
-                        None
-                    } else {
-                        Some(
-                            tracker
-                                .snapshot()
-                                .and_then(|o| o.last_classifier_gaps.clone())
-                                .unwrap_or_default(),
-                        )
-                    }
-                };
-                match gaps {
-                    None => {
-                        self.remember_claim_rejection(None);
-                        BlockedClaimReview::Settled
-                    }
-                    Some(gaps) => {
-                        self.remember_claim_rejection(Some(gaps));
-                        BlockedClaimReview::Rejected(BLOCKED_CLAIM_PANEL_REJECTION.to_owned())
-                    }
+                match self.blocked_claim_panel_note() {
+                    None => BlockedClaimReview::Settled,
+                    Some(note) => BlockedClaimReview::Rejected(note),
                 }
+            }
+        }
+    }
+
+    /// What the agent hears after the panel judged its upheld claim. `None`
+    /// when the goal is no longer active.
+    fn blocked_claim_panel_note(&self) -> Option<String> {
+        let user_cancelled = self
+            .goal_tracker
+            .lock()
+            .snapshot()
+            .is_some_and(|o| o.verification_cancelled_by_user);
+        if user_cancelled {
+            self.remember_claim_rejection(None);
+            return Some("The user stopped the review of your claim.".to_owned());
+        }
+        let gaps = {
+            let tracker = self.goal_tracker.lock();
+            if tracker.status() != Some(crate::session::goal_tracker::GoalStatus::Active) {
+                None
+            } else {
+                Some(
+                    tracker
+                        .snapshot()
+                        .and_then(|o| o.last_classifier_gaps.clone())
+                        .unwrap_or_default(),
+                )
+            }
+        };
+        match gaps {
+            None => {
+                self.remember_claim_rejection(None);
+                None
+            }
+            Some(gaps) => {
+                self.remember_claim_rejection(Some(gaps));
+                Some(BLOCKED_CLAIM_PANEL_REJECTION.to_owned())
             }
         }
     }
@@ -440,8 +468,11 @@ impl SessionActor {
         GoalRoundDecision::Continue(format!("{note}\n\n{}", plan.directive))
     }
 
-    async fn verify_goal_candidate(&self, blocked_claim: Option<&str>) {
-        use crate::session::goal_classifier::GoalClassifierOutcome;
+    /// Starts the skeptic panel. With an `Arc` to the session the panel runs
+    /// as a background task: the turn ends, and the user can keep using the
+    /// session. The task applies the verdict and then wakes the session loop
+    /// (`SessionCommand::GoalVerificationSettled`).
+    async fn verify_goal_candidate(&self, blocked_claim: Option<&str>) -> Verification {
         let policy = self.resolve_goal_classifier_policy();
         if !policy.enabled {
             self.auto_pause_goal_if_active_with_message(
@@ -449,7 +480,7 @@ impl SessionActor {
                 "Goal verification is unavailable. Resume after enabling the verifier.".to_string(),
             )
             .await;
-            return;
+            return Verification::Inline;
         }
         let attempts = self
             .goal_tracker
@@ -458,13 +489,146 @@ impl SessionActor {
             .map_or(0, |snapshot| snapshot.classifier_runs_attempted);
         if attempts >= policy.max_runs {
             self.auto_pause_for_classifier_cap(attempts, "", "").await;
-            return;
+            return Verification::Inline;
         }
         let Some(attempt) = self.reserve_classifier_attempt_slot(&policy) else {
-            return;
+            return Verification::Inline;
         };
         let current_tokens = self.chat_state_handle.get_total_tokens().await as i64;
+        self.goal_background
+            .verification_running
+            .store(true, std::sync::atomic::Ordering::SeqCst);
         self.emit_goal_verifying(current_tokens);
+        let claim = blocked_claim.map(str::to_owned);
+        let Some(session) = self.weak_self.upgrade() else {
+            // Only a test actor has no `Arc`. Its panel runs inside the turn.
+            tracing::error!("goal verification: the actor has no Arc; the panel runs in the turn");
+            self.run_goal_verification(policy, attempt, claim).await;
+            return Verification::Inline;
+        };
+        xai_spawn::spawn_local(async move {
+            session.run_goal_verification(policy, attempt, claim).await;
+        });
+        self.send_slash_command_output(
+            "Goal verification runs in the background. You can keep using the session. \
+             The verdict comes back here when the verification ends.",
+        )
+        .await;
+        Verification::Background
+    }
+
+    /// The body of a verification: the panel, the verdict, and the report to
+    /// the session. The `/goal` commands queued meanwhile go back to the queue.
+    async fn run_goal_verification(
+        &self,
+        policy: GoalClassifierPolicy,
+        attempt: u32,
+        blocked_claim: Option<String>,
+    ) {
+        let running = VerificationRunning(&self.goal_background.verification_running);
+        self.apply_goal_verification(policy, attempt, blocked_claim.as_deref())
+            .await;
+        let note = if blocked_claim.is_some() {
+            self.blocked_claim_panel_note()
+        } else {
+            None
+        };
+        self.report_goal_verification_verdict().await;
+        drop(running);
+        self.requeue_goal_commands().await;
+        if let Some(tx) = &self.goal_background.session_cmd_tx {
+            let _ =
+                tx.send(crate::session::commands::SessionCommand::GoalVerificationSettled { note });
+        }
+    }
+
+    /// Tells the user that the panel rejected the completion and the goal
+    /// continues. A complete or paused goal reports through its own path.
+    async fn report_goal_verification_verdict(&self) {
+        let gaps = {
+            let tracker = self.goal_tracker.lock();
+            if tracker.status() != Some(crate::session::goal_tracker::GoalStatus::Active) {
+                return;
+            }
+            tracker
+                .snapshot()
+                .and_then(|o| o.last_classifier_gaps.clone())
+        };
+        let Some(gaps) = gaps.filter(|g| !g.trim().is_empty()) else {
+            return;
+        };
+        self.send_slash_command_output(&format!(
+            "Goal verification failed. The goal continues.\nGaps:\n{}",
+            gaps.trim()
+        ))
+        .await;
+    }
+
+    /// Puts the `/goal` commands that waited on the panel back in the queue,
+    /// in the order the user sent them.
+    pub(super) async fn requeue_goal_commands(&self) {
+        let commands = std::mem::take(&mut *self.goal_background.queued_goal_commands.lock());
+        for text in commands {
+            self.queue_deferred_goal_command(text).await;
+        }
+    }
+
+    async fn queue_deferred_goal_command(&self, text: String) {
+        let (respond_to, _) = tokio::sync::oneshot::channel();
+        let item = InputItem {
+            prompt_id: format!("goal-queued-{}", uuid::Uuid::now_v7()),
+            prompt_blocks: vec![acp::ContentBlock::Text(acp::TextContent::new(text))],
+            prompt_mode: crate::session::plan_mode::PromptMode::Agent,
+            trace_gcs_config: None,
+            artifact_tracker: None,
+            client_identifier: None,
+            screen_mode: None,
+            verbatim: false,
+            json_schema: None,
+            input_origin: InputOrigin::new(crate::session::PromptOrigin::User),
+            task_wake_fallback: None,
+            tool_overrides_update: None,
+            respond_to,
+            persist_ack: None,
+            parsed_prompt_tx: None,
+            initial_child_prompt_ready: None,
+            queue_meta: None,
+            queue_mutation_policy: QueueMutationPolicy::hidden(),
+            send_now: false,
+            traceparent: None,
+        };
+        self.state.lock().await.pending_inputs.push_back(item);
+    }
+
+    /// Holds a `/goal` command until the background panel ends. False when
+    /// no panel runs: the command then runs now.
+    pub(super) async fn defer_goal_command_while_verifying(&self, text: &str) -> bool {
+        if !self.goal_background.verification_running() {
+            return false;
+        }
+        self.goal_background
+            .queued_goal_commands
+            .lock()
+            .push(text.to_owned());
+        // The panel can end between the check and the push. Its drain then
+        // missed this command, so drain it here.
+        if !self
+            .goal_background
+            .verification_running
+            .load(std::sync::atomic::Ordering::SeqCst)
+        {
+            self.requeue_goal_commands().await;
+        }
+        true
+    }
+
+    async fn apply_goal_verification(
+        &self,
+        policy: GoalClassifierPolicy,
+        attempt: u32,
+        blocked_claim: Option<&str>,
+    ) {
+        use crate::session::goal_classifier::GoalClassifierOutcome;
         let outcome = {
             let _latch = TrackerDropGuard::new(&self.goal_tracker, |tracker| {
                 if let Some(snapshot) = tracker.snapshot_mut() {
@@ -859,11 +1023,6 @@ impl SessionActor {
                 details_path: String::new(),
             };
         };
-        let parent_prompt_id = self
-            .current_prompt_id
-            .lock()
-            .expect("current_prompt_id mutex poisoned")
-            .clone();
         let task_tool_name = self.resolve_goal_tool_names().await.task;
 
         // A lite goal's panel is one validator.
@@ -930,11 +1089,10 @@ impl SessionActor {
         let spawner: std::sync::Arc<dyn crate::session::goal_classifier::GoalClassifierSpawner> =
             std::sync::Arc::new(ChannelSpawner {
                 event_tx,
-                foreground_wait: Some(crate::tools::tool_context::subagent_foreground_wait(
-                    self.tool_context.blocking_wait_depth.clone(),
-                )),
+                // The panel runs in the background. It is no wait of a turn, and a turn cancel must not reach it.
+                foreground_wait: None,
                 parent_session_id: self.session_id_string(),
-                parent_prompt_id,
+                parent_prompt_id: None,
                 cwd: Some(self.tool_context.cwd.as_str().to_owned()),
                 trace_sink: Some((self.chat_state_handle.clone(), task_tool_name)),
                 skeptic_overrides,
@@ -1223,13 +1381,29 @@ impl SessionActor {
         mode: crate::session::goal_tracker::GoalMode,
     ) -> GoalSetupOutcome {
         // A goal with no planner to write its steps starts the way `/todo <objective>` does.
-        // A goal never runs without todos: the capture fails when it adds nothing.
+        // No capture failure stops the goal: the objective itself is then the todo.
         if mode == crate::session::goal_tracker::GoalMode::Lite || !self.goal_planner_enabled {
             let capture_id = format!("goal-{}", uuid::Uuid::new_v4());
-            if let Err(error) = self.run_todo_capture(objective, false, &capture_id).await {
-                return GoalSetupOutcome::Message(format!(
-                    "Goal not started: putting the objective on the todo list failed: {error}"
-                ));
+            match self.run_todo_capture(objective, false, &capture_id).await {
+                Ok(_) => {}
+                // An agent with no todo tool cannot finish an item, so its goal runs with no list. The evaluator is the check.
+                Err(super::todo_capture::TodoCaptureError::NoTodoTool) => {
+                    tracing::warn!(
+                        "goal: this agent has no todo tool; the goal starts with no todo list"
+                    );
+                }
+                Err(error) => {
+                    tracing::warn!(
+                        error = %error,
+                        "goal: the todo capture failed; the objective goes on the list as one item"
+                    );
+                    if let Err(error) = self.append_objective_todo(objective).await {
+                        tracing::warn!(
+                            error = %error,
+                            "goal: the objective did not reach the todo list; the goal starts with no item"
+                        );
+                    }
+                }
             }
         }
         self.create_goal_orchestration(objective, token_budget)
@@ -1983,8 +2157,8 @@ impl SessionActor {
                 self.record_goal_round_progress(&verdict.evidence, false);
                 if lite {
                     self.complete_lite_goal(&verdict.evidence).await;
-                } else {
-                    self.verify_goal_candidate(None).await;
+                } else if self.verify_goal_candidate(None).await == Verification::Background {
+                    return GoalRoundDecision::EndTurn;
                 }
             }
             GoalEvaluatorDecision::Blocked => {
@@ -2113,6 +2287,11 @@ impl SessionActor {
     }
 
     pub(super) async fn maybe_queue_goal_continuation(&self) {
+        self.maybe_queue_goal_continuation_with_note(None).await;
+    }
+
+    /// Queues the goal continuation with `note` in front of the directive.
+    pub(super) async fn maybe_queue_goal_continuation_with_note(&self, note: Option<String>) {
         let current_tokens = self.chat_state_handle.get_total_tokens().await as i64;
         let Some(plan) = self
             .prepare_goal_continuation(current_tokens, GoalContinuationPurpose::TurnEnd, None)
@@ -2150,9 +2329,10 @@ impl SessionActor {
             }
             state.pending_inputs.push_back(InputItem {
                 prompt_id,
-                prompt_blocks: vec![acp::ContentBlock::Text(acp::TextContent::new(
-                    plan.directive,
-                ))],
+                prompt_blocks: vec![acp::ContentBlock::Text(acp::TextContent::new(match note {
+                    Some(note) => format!("{note}\n\n{}", plan.directive),
+                    None => plan.directive,
+                }))],
                 prompt_mode: crate::session::plan_mode::PromptMode::Agent,
                 trace_gcs_config: None,
                 artifact_tracker: None,

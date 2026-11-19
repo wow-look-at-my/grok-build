@@ -303,6 +303,43 @@ async fn auxiliary_request_does_not_consume_foreground_expectation() {
     expected.wait_satisfied().await;
 }
 
+/// A response scripted for one agent's prompt is not taken by another request of the same kind.
+#[tokio::test]
+async fn a_body_text_matcher_skips_a_request_without_the_text() {
+    let server = MockInferenceServer::start().await.unwrap();
+    let mut expected = server.expect_response(
+        "planner turn",
+        InferenceRequestMatcher::foreground(InferenceEndpoint::ChatCompletions)
+            .containing("write the plan"),
+        ScriptedResponse::text(209, "planned"),
+    );
+
+    let (status, _) = read_foreground(
+        &server,
+        InferenceEndpoint::ChatCompletions,
+        "turn-1",
+        "run the task",
+    )
+    .await;
+    assert_ne!(
+        209,
+        status.as_u16(),
+        "a request without the text must not match"
+    );
+    assert!(!expected.is_satisfied());
+
+    let (status, body) = read_foreground(
+        &server,
+        InferenceEndpoint::ChatCompletions,
+        "turn-2",
+        "write the plan now",
+    )
+    .await;
+    assert_eq!(209, status.as_u16());
+    assert_eq!("planned", body);
+    expected.wait_satisfied().await;
+}
+
 #[tokio::test]
 async fn concurrent_matching_requests_claim_each_expectation_once() {
     let server = MockInferenceServer::start().await.unwrap();

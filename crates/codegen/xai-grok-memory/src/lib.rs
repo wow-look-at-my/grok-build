@@ -66,6 +66,7 @@ pub mod v2_carryover;
 mod v2_clock;
 pub mod v2_consolidation;
 mod v2_maintenance;
+pub mod v2_recall;
 mod v2_topic_reads;
 pub mod watcher;
 
@@ -99,6 +100,10 @@ pub use v2_consolidation::{
 pub use v2_maintenance::{
     DreamLeaseState, ForgetReason, ForgetRequest, ForgetResult, GcResult, MAX_FORGET_FILE_BYTES,
     RetentionPolicy, V2MaintenanceError, V2MaintenanceStore, V2ScopeStatus,
+};
+pub use v2_recall::{
+    V2Recall, V2RecallConfig, V2RecallError, V2RecallHit, V2RecallKind, V2RecallMode,
+    V2RecallOutcome, V2RecallQuery,
 };
 
 pub(crate) const MEMORY_LOG_TARGET: &str = "xai_memory";

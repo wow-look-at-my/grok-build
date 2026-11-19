@@ -8,12 +8,16 @@ mod auto_wake_cancel_preserves_queued_user_prompt;
 mod auto_wake_cancel_via_esc_preserves_queued_user_prompt;
 #[path = "pty_e2e/auto_wake_cancel_via_stop_click_preserves_queued_user_prompt.rs"]
 mod auto_wake_cancel_via_stop_click_preserves_queued_user_prompt;
+#[path = "pty_e2e/bang_at_start_of_draft_runs_bash.rs"]
+mod bang_at_start_of_draft_runs_bash;
 #[path = "pty_e2e/bash_queued_mid_turn_drains_as_bash.rs"]
 mod bash_queued_mid_turn_drains_as_bash;
 #[path = "pty_e2e/cancel_discards_buffered_interjection.rs"]
 mod cancel_discards_buffered_interjection;
 #[path = "pty_e2e/cancel_then_resend_prompt_appears_once.rs"]
 mod cancel_then_resend_prompt_appears_once;
+#[path = "pty_e2e/claude_model_switch_keeps_thinking_summary.rs"]
+mod claude_model_switch_keeps_thinking_summary;
 #[path = "pty_e2e/compact_names_the_dense_summarization_model.rs"]
 mod compact_names_the_dense_summarization_model;
 #[path = "pty_e2e/ctrl_c_cancel_during_stream_recovers_cleanly.rs"]
@@ -40,6 +44,10 @@ mod esc_idle_empty_no_messages_is_swallowed_noop;
 mod esc_mid_turn_cancels_from_prompt_preserves_draft;
 #[path = "pty_e2e/esc_mid_turn_cancels_from_scrollback.rs"]
 mod esc_mid_turn_cancels_from_scrollback;
+#[path = "pty_e2e/goal_plan_is_published_in_explore_mode.rs"]
+mod goal_plan_is_published_in_explore_mode;
+#[path = "pty_e2e/goal_starts_in_explore_mode.rs"]
+mod goal_starts_in_explore_mode;
 #[path = "pty_e2e/goal_waits_on_background_work.rs"]
 mod goal_waits_on_background_work;
 #[path = "pty_e2e/mid_turn_slash_dropdown_esc_dismisses_not_cancel.rs"]

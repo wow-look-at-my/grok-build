@@ -331,29 +331,6 @@ pub(crate) fn compact_error(err: &acp::Error) -> CompactError {
     };
     CompactError { cancelled, message }
 }
-/// Send an `example.invalid/memory/{flush,dream}` request and decode its typed response.
-pub(super) async fn memory_command_request<T: serde::de::DeserializeOwned>(
-    method: &'static str,
-    session_id: &acp::SessionId,
-    tx: &AcpAgentTx,
-) -> Result<T, String> {
-    let body = xai_grok_shell::extensions::memory::MemoryFlushRequest {
-        session_id: session_id.0.to_string(),
-    };
-    let req = acp::ExtRequest::new(
-        method,
-        serde_json::value::to_raw_value(&body)
-            .expect("serialize memory command params")
-            .into(),
-    );
-    match acp_send(req, tx).await {
-        Ok(resp) => {
-            serde_json::from_str::<T>(resp.0.get())
-                .map_err(|_| "Couldn't read the shell's reply.".to_string())
-        }
-        Err(e) => Err(sanitize_user_error(&e.to_string())),
-    }
-}
 /// Format a Duration for user-visible restore progress messages.
 pub(super) fn format_restore_elapsed(d: std::time::Duration) -> String {
     let secs = d.as_secs();

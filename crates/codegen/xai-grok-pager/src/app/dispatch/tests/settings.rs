@@ -1371,7 +1371,11 @@ fn issued_feature_override(effects: Vec<Effect>) -> Option<Option<bool>> {
         [] => None,
         [
             Effect::PersistFeatureOverride {
-                feature: Feature::SubagentModelInheritance | Feature::TwoPassCompaction,
+                feature:
+                    Feature::SubagentModelInheritance
+                    | Feature::TwoPassCompaction
+                    | Feature::CompactOnModelSwitch
+                    | Feature::SessionRecap,
                 saved,
             },
         ] => Some(*saved),
@@ -1444,6 +1448,91 @@ fn two_pass_compaction_persists_overrides_and_reads_back() {
     assert!(app.two_pass_compaction.writes.is_none());
     let effects = dispatch(Action::ClearTwoPassCompaction, &mut app);
     assert_eq!(Some(None), issued_feature_override(effects));
+    assert_eq!(Some(crate::settings::SettingValue::Bool(true)), read(&app));
+}
+
+/// The compact-on-model-switch row is off until set. It persists through its own `Feature` and settles on its own state.
+#[test]
+fn compact_on_model_switch_persists_overrides_and_reads_back() {
+    use xai_grok_shell::agent::config::Feature;
+    let feature = Feature::CompactOnModelSwitch;
+    let mut app = test_app_with_agent();
+    let read = |app: &AppView| {
+        crate::settings::current_value_for(
+            "compact_on_model_switch",
+            &app.current_ui,
+            &crate::app::dispatch::settings::ui::build_pager_snapshot(app),
+        )
+    };
+    assert_eq!(Some(crate::settings::SettingValue::Bool(false)), read(&app));
+    let effects = dispatch(Action::SetCompactOnModelSwitch(true), &mut app);
+    assert!(matches!(
+        effects.as_slice(),
+        [Effect::PersistFeatureOverride {
+            feature: Feature::CompactOnModelSwitch,
+            saved: Some(true)
+        }]
+    ));
+    assert_eq!(Some(true), app.compact_on_model_switch.config.user);
+    assert_eq!(None, app.two_pass_compaction.config.user);
+    assert_eq!(Some(crate::settings::SettingValue::Bool(true)), read(&app));
+    assert!(read_toast(&app).contains("restart to apply"));
+    let _ = handle_feature_override_persisted(&mut app, feature, Ok(Some(true)));
+    assert!(app.compact_on_model_switch.writes.is_none());
+    let effects = dispatch(Action::ClearCompactOnModelSwitch, &mut app);
+    assert_eq!(Some(None), issued_feature_override(effects));
+    assert_eq!(Some(crate::settings::SettingValue::Bool(false)), read(&app));
+}
+
+/// The session recap row persists `[features].session_recap` and applies without a restart.
+/// The recap gate follows the row, and a failed write puts the gate back on the disk value.
+#[test]
+fn session_recap_row_persists_and_applies_live() {
+    use xai_grok_shell::agent::config::Feature;
+    let feature = Feature::SessionRecap;
+    let mut app = test_app_with_agent();
+    app.session_recap_available = true;
+    let read = |app: &AppView| {
+        crate::settings::current_value_for(
+            "session_recap",
+            &app.current_ui,
+            &crate::app::dispatch::settings::ui::build_pager_snapshot(app),
+        )
+    };
+    assert_eq!(Some(crate::settings::SettingValue::Bool(true)), read(&app));
+
+    let effects = dispatch(Action::SetSessionRecap(false), &mut app);
+    assert!(matches!(
+        effects.as_slice(),
+        [Effect::PersistFeatureOverride {
+            feature: Feature::SessionRecap,
+            saved: Some(false)
+        }]
+    ));
+    assert_eq!(Some(crate::settings::SettingValue::Bool(false)), read(&app));
+    assert!(
+        !app.session_recap_available,
+        "turning the row off must stop recaps now"
+    );
+    assert!(
+        !read_toast(&app).contains("restart to apply"),
+        "the row applies live"
+    );
+    let _ = handle_feature_override_persisted(&mut app, feature, Ok(Some(false)));
+    assert!(!app.session_recap_available);
+
+    let effects = dispatch(Action::SetSessionRecap(true), &mut app);
+    assert_eq!(Some(Some(true)), issued_feature_override(effects));
+    assert!(app.session_recap_available);
+    let _ = handle_feature_override_persisted(&mut app, feature, Err("disk".to_owned()));
+    assert!(
+        !app.session_recap_available,
+        "a failed write must put the gate back on the disk value"
+    );
+
+    let effects = dispatch(Action::ClearSessionRecap, &mut app);
+    assert_eq!(Some(None), issued_feature_override(effects));
+    assert!(app.session_recap_available, "a reset restores the default");
     assert_eq!(Some(crate::settings::SettingValue::Bool(true)), read(&app));
 }
 
@@ -1638,6 +1727,12 @@ fn move_setting_away_from_default(app: &mut AppView, key: crate::settings::Setti
         }
         "two_pass_compaction" => {
             let _ = dispatch(Action::SetTwoPassCompaction(false), app);
+        }
+        "compact_on_model_switch" => {
+            let _ = dispatch(Action::SetCompactOnModelSwitch(true), app);
+        }
+        "session_recap" => {
+            let _ = dispatch(Action::SetSessionRecap(false), app);
         }
         "keep_text_selection" => {
             let _ = dispatch(

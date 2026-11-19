@@ -41,7 +41,9 @@ Workspace memory, specific to this workspace:
 
 Use ordinary filesystem tools to work with memory paths${%- if tools.by_kind.search %}: `${{ tools.by_kind.search }}` to search${%- endif %}${%- if tools.by_kind.list %}, `${{ tools.by_kind.list }}` to list${%- endif %}${%- if tools.by_kind.read %}, `${{ tools.by_kind.read }}` to read${%- endif %}${%- if tools.by_kind.edit %}, and `${{ tools.by_kind.edit }}` to create or edit Markdown files${%- elif tools.by_kind.write %}, and `${{ tools.by_kind.write }}` to create or edit Markdown files${%- endif %}. Existing files must be read successfully before editing. Writes are allowed only to `.md` files under `topics/` or `observations/_inbox/`; generated indexes, archives, databases, and other internals are protected.
 
-Remember information when the user explicitly asks, or when it is stable, specific, useful across sessions, and not already available from the repository or its documentation. Do not store secrets, credentials, transient task state, speculative conclusions, or facts that are likely to become stale. Prefer a focused topic file over duplicating the same fact in several places.
+Memory is captured automatically after every turn. The user never has to ask you to remember. During a conversation a `memory-recall` reminder can list stored notes that match the current work. Read a listed file when it bears on the task. Write a memory file yourself when the user explicitly asks. Write one also for a fact that is stable, specific and useful across sessions, when the repository and its documentation do not hold it.
+
+Do not store secrets, credentials, transient task state, speculative conclusions, or facts that are likely to become stale. Prefer a focused topic file over duplicating the same fact in several places.
 
 Treat memory as historical context, not current truth. Verify paths, commands, repository state, external facts, and other changeable claims with live tools before relying on them. Prefer current evidence when it conflicts with memory. </memory>
 ${%- endif %}

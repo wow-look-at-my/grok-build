@@ -122,6 +122,39 @@ impl Drop for V2DreamWorkers {
     }
 }
 
+/// Where recall stands in the live conversation.
+#[derive(Default)]
+pub(crate) struct RecallState {
+    /// Conversation items a recall has read.
+    pub cursor: usize,
+    /// Keys of the notes this conversation was shown.
+    pub seen: std::collections::HashSet<String>,
+    /// `seen` holds the keys of the reminders the conversation carries.
+    pub seeded: bool,
+    pub embedding_failure_reported: bool,
+}
+
+impl RecallState {
+    /// A replaced conversation lost its reminders, so every note can be shown again.
+    pub(crate) fn reset(&mut self) {
+        self.cursor = 0;
+        self.seen.clear();
+        self.seeded = false;
+    }
+}
+
+/// Recall over the v2 scopes for one session.
+#[derive(Default)]
+pub(crate) struct SessionRecall {
+    /// Built on first use.
+    pub engine: RefCell<Option<xai_grok_memory::V2Recall>>,
+    pub state: RefCell<RecallState>,
+    /// Builds the provider that adds vectors to recall. `None` leaves recall on word matching.
+    pub embedding: Option<xai_grok_memory::backend::EmbeddingProviderParams>,
+    /// Notes shown to the model.
+    pub shown: AtomicU64,
+}
+
 pub(crate) struct SessionMemory {
     /// Mode resolved when the session was spawned. Kept even while memory is
     /// disabled so toggles, telemetry, and trace uploads cannot switch roots.
@@ -166,7 +199,7 @@ pub(crate) struct SessionMemory {
     /// Owns every capture-triggered Dream task until session teardown.
     pub dream_workers: V2DreamWorkers,
     /// Class of the most recent capture failure reported by this process, so
-    /// `/flush` can attribute a still-failing queue correctly. The durable
+    /// a forced flush can attribute a still-failing queue correctly. The durable
     /// queue only keeps the sanitized error text, so a failure inherited from
     /// an earlier process has no class here.
     pub last_capture_failure:
@@ -197,17 +230,35 @@ pub(crate) struct SessionMemory {
     pub dream_success_count: AtomicU64,
     pub dream_error_count: AtomicU64,
     pub token_totals: MemoryV2TokenTotals,
+    pub recall: SessionRecall,
 }
 
+/// Each cost total is fed by the usage sink of that kind of call (`memory_usage_sink`). It
+/// holds what the session ledger was billed, not what one response reported.
 #[derive(Default)]
 pub(crate) struct MemoryV2TokenTotals {
     pub capture_prompt_tokens: AtomicU64,
     pub capture_completion_tokens: AtomicU64,
-    pub capture_cost_usd_ticks: AtomicU64,
+    pub capture_cost_usd_ticks: Arc<AtomicU64>,
     pub dream_prompt_tokens: AtomicU64,
     pub dream_completion_tokens: AtomicU64,
-    pub dream_cost_usd_ticks: AtomicU64,
+    pub dream_cost_usd_ticks: Arc<AtomicU64>,
+    pub recall_cost_usd_ticks: Arc<AtomicU64>,
+    /// The memory total the client was last told, so an unchanged total sends no update.
+    pub reported_cost_usd_ticks: AtomicU64,
     pub injected_bytes: AtomicU64,
+}
+
+impl MemoryV2TokenTotals {
+    pub(crate) fn cost_totals(&self) -> crate::extensions::notification::MemoryCostTotals {
+        use std::sync::atomic::Ordering::Relaxed;
+        let ticks = |total: &AtomicU64| i64::try_from(total.load(Relaxed)).unwrap_or(i64::MAX);
+        crate::extensions::notification::MemoryCostTotals {
+            capture_usd_ticks: ticks(&self.capture_cost_usd_ticks),
+            consolidation_usd_ticks: ticks(&self.dream_cost_usd_ticks),
+            recall_usd_ticks: ticks(&self.recall_cost_usd_ticks),
+        }
+    }
 }
 
 impl SessionMemory {
@@ -237,6 +288,10 @@ impl SessionMemory {
         self.is_enabled()
             && self.mode().is_some_and(crate::config::MemoryMode::is_v2)
             && self.v2_config.can_expose_memory()
+    }
+
+    pub(crate) fn can_recall_v2(&self) -> bool {
+        self.can_expose_v2() && self.v2_config.can_recall()
     }
 
     /// Why memory is off, or `None` while it is on. `/memory on` refuses unless this is
@@ -381,7 +436,6 @@ impl SessionMemory {
             usage,
             &self.token_totals.capture_prompt_tokens,
             &self.token_totals.capture_completion_tokens,
-            &self.token_totals.capture_cost_usd_ticks,
         );
     }
 
@@ -393,7 +447,6 @@ impl SessionMemory {
             usage,
             &self.token_totals.dream_prompt_tokens,
             &self.token_totals.dream_completion_tokens,
-            &self.token_totals.dream_cost_usd_ticks,
         );
     }
 
@@ -518,7 +571,6 @@ fn add_model_usage(
     usage: &xai_grok_telemetry::memory_telemetry::MemoryV2ModelUsage,
     prompt_tokens: &AtomicU64,
     completion_tokens: &AtomicU64,
-    cost_usd_ticks: &AtomicU64,
 ) {
     use std::sync::atomic::Ordering::Relaxed;
     if let Some(tokens) = usage.prompt_tokens {
@@ -526,12 +578,6 @@ fn add_model_usage(
     }
     if let Some(tokens) = usage.completion_tokens {
         completion_tokens.fetch_add(u64::from(tokens), Relaxed);
-    }
-    if let Some(ticks) = usage
-        .cost_usd_ticks
-        .and_then(|ticks| u64::try_from(ticks).ok())
-    {
-        cost_usd_ticks.fetch_add(ticks, Relaxed);
     }
 }
 

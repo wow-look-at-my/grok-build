@@ -2795,40 +2795,6 @@ pub(crate) fn execute(
                     }
                 });
         }
-        Effect::MemoryFlush { agent_id, session_id } => {
-            use xai_grok_shell::extensions::memory::{
-                MEMORY_FLUSH_METHOD, MemoryFlushResponse,
-            };
-            let tx = acp_tx.clone();
-            tasks
-                .spawn(async move {
-                    let result = memory_command_request::<
-                        MemoryFlushResponse,
-                    >(MEMORY_FLUSH_METHOD, &session_id, &tx)
-                        .await;
-                    TaskResult::MemoryFlushComplete {
-                        agent_id,
-                        result,
-                    }
-                });
-        }
-        Effect::MemoryDream { agent_id, session_id } => {
-            use xai_grok_shell::extensions::memory::{
-                MEMORY_DREAM_METHOD, MemoryDreamResponse,
-            };
-            let tx = acp_tx.clone();
-            tasks
-                .spawn(async move {
-                    let result = memory_command_request::<
-                        MemoryDreamResponse,
-                    >(MEMORY_DREAM_METHOD, &session_id, &tx)
-                        .await;
-                    TaskResult::MemoryDreamComplete {
-                        agent_id,
-                        result,
-                    }
-                });
-        }
         Effect::MemoryForget { agent_id, session_id, path, expected_content_hash } => {
             use xai_grok_shell::extensions::memory::{
                 MEMORY_FORGET_METHOD, MemoryForgetRequest, MemoryForgetResponse,

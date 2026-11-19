@@ -207,6 +207,12 @@ fn test_app() -> AppView {
         two_pass_compaction: crate::settings::FeatureOverrideState::new(
             xai_grok_shell::agent::config::Feature::TwoPassCompaction,
         ),
+        compact_on_model_switch: crate::settings::FeatureOverrideState::new(
+            xai_grok_shell::agent::config::Feature::CompactOnModelSwitch,
+        ),
+        session_recap: crate::settings::FeatureOverrideState::new(
+            xai_grok_shell::agent::config::Feature::SessionRecap,
+        ),
         model_context_limits: std::collections::BTreeMap::new(),
         zdr_access_enabled: false,
         usage_billing_redirect_url: None,

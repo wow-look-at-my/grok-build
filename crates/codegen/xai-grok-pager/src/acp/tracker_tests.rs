@@ -6114,3 +6114,23 @@ fn a_rate_that_jumps_or_collapses_keeps_being_reported() {
     );
     assert_eq!(tracker.output_rate(), None);
 }
+
+#[test]
+fn memory_cost_reports_a_change_only_when_the_totals_differ() {
+    use xai_grok_shell::extensions::notification::MemoryCostTotals;
+    let mut tracker = AcpUpdateTracker::new();
+    assert_eq!(tracker.memory_cost(), None);
+    let first = MemoryCostTotals {
+        capture_usd_ticks: 100,
+        ..MemoryCostTotals::default()
+    };
+    assert!(tracker.set_memory_cost(first));
+    assert_eq!(tracker.memory_cost(), Some(first));
+    assert!(!tracker.set_memory_cost(first), "same totals, no repaint");
+    let second = MemoryCostTotals {
+        recall_usd_ticks: 7,
+        ..first
+    };
+    assert!(tracker.set_memory_cost(second));
+    assert_eq!(tracker.memory_cost(), Some(second));
+}

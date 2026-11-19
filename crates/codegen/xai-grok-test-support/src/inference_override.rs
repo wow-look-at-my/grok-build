@@ -27,9 +27,8 @@ use crate::scripted::{BodyHold, BoxWait, ScriptedResponse, TerminalWait};
 pub struct InferenceRequestMatcher {
     endpoint: InferenceEndpoint,
     kind: InferenceRequestKind,
-    /// When set, the request body must contain this text. A compaction summary is an auxiliary
-    /// request like any side query, so the hold has to name it.
-    body_contains: Option<&'static str>,
+    /// Text the serialized request body must hold.
+    containing: Option<&'static str>,
 }
 
 impl InferenceRequestMatcher {
@@ -38,16 +37,12 @@ impl InferenceRequestMatcher {
         InferenceRequestMatcher {
             endpoint,
             kind: InferenceRequestKind::Foreground,
-            body_contains: None,
+            containing: None,
         }
     }
 
     pub fn foreground_containing(endpoint: InferenceEndpoint, fragment: &'static str) -> Self {
-        InferenceRequestMatcher {
-            endpoint,
-            kind: InferenceRequestKind::Foreground,
-            body_contains: Some(fragment),
-        }
+        Self::foreground(endpoint).containing(fragment)
     }
 
     /// Match title, classifier, prompt-suggestion, or other side-channel work.
@@ -55,27 +50,28 @@ impl InferenceRequestMatcher {
         InferenceRequestMatcher {
             endpoint,
             kind: InferenceRequestKind::Auxiliary,
-            body_contains: None,
+            containing: None,
         }
     }
 
     /// An auxiliary request whose body contains `fragment`, such as the compaction summary prompt.
     pub fn auxiliary_containing(endpoint: InferenceEndpoint, fragment: &'static str) -> Self {
-        InferenceRequestMatcher {
-            endpoint,
-            kind: InferenceRequestKind::Auxiliary,
-            body_contains: Some(fragment),
-        }
+        Self::auxiliary(endpoint).containing(fragment)
+    }
+
+    /// Match only a request whose serialized body holds `needle`. A script
+    /// for one agent then cannot be taken by another agent's request.
+    pub fn containing(mut self, needle: &'static str) -> Self {
+        self.containing = Some(needle);
+        self
     }
 
     fn matches(self, request: &InferenceRequest<'_>) -> bool {
         self.endpoint == request.endpoint()
             && self.kind == request.kind()
-            && self.body_contains.is_none_or(|fragment| {
-                serde_json::to_string(request.body())
-                    .unwrap_or_default()
-                    .contains(fragment)
-            })
+            && self
+                .containing
+                .is_none_or(|needle| request.body().to_string().contains(needle))
     }
 }
 

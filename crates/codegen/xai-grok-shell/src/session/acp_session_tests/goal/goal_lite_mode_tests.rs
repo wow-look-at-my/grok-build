@@ -180,9 +180,45 @@ async fn a_lite_goal_starts_with_the_objective_captured_on_the_todo_list() {
         .await;
 }
 
-/// A capture that adds nothing leaves no goal behind: the goal never starts with an empty list.
+/// A capture model that will not call the todo tool cannot stop a goal. The
+/// objective itself goes on the list, and the goal starts.
 #[tokio::test(flavor = "current_thread")]
-async fn a_lite_goal_does_not_start_when_the_capture_fails() {
+async fn a_lite_goal_starts_on_its_objective_when_the_capture_adds_nothing() {
+    let local = tokio::task::LocalSet::new();
+    local
+        .run_until(async {
+            let server = MockInferenceServer::start()
+                .await
+                .expect("mock inference server");
+            // The capture model answers in prose on every turn, so it adds nothing.
+            for _ in 0..4 {
+                server.enqueue_response(
+                    "/v1/responses",
+                    ScriptedResponse::sse(responses_api_script_exact("I will get to it.", "test")),
+                );
+            }
+            let actor = goal_actor(&server).await;
+
+            let outcome = actor
+                .setup_goal("make the tests pass", None, GoalMode::Lite)
+                .await;
+            assert!(
+                matches!(outcome, GoalSetupOutcome::Inference { .. }),
+                "a failed capture must not stop the goal"
+            );
+            assert_eq!(actor.goal_tracker.lock().status(), Some(GoalStatus::Active));
+            let list = todo_list(&actor).await;
+            assert_eq!(list.len(), 1, "{list:?}");
+            assert_eq!(list[0].1, "make the tests pass");
+            assert_eq!(list[0].2, crate::tools::todo::TodoStatus::Pending);
+        })
+        .await;
+}
+
+/// An agent with no todo tool cannot hold the objective on a list. Its goal
+/// starts all the same, with no capture call.
+#[tokio::test(flavor = "current_thread")]
+async fn a_lite_goal_starts_when_the_agent_has_no_todo_tool() {
     let local = tokio::task::LocalSet::new();
     local
         .run_until(async {
@@ -191,24 +227,59 @@ async fn a_lite_goal_does_not_start_when_the_capture_fails() {
                 .expect("mock inference server");
             let actor = goal_actor_without_todo_tool(&server).await;
 
-            let GoalSetupOutcome::Message(message) = actor
+            let outcome = actor
                 .setup_goal("make the tests pass", None, GoalMode::Lite)
-                .await
-            else {
-                panic!("a failed capture must not start the goal");
-            };
+                .await;
             assert!(
-                message.starts_with(
-                    "Goal not started: putting the objective on the todo list failed:"
-                ),
-                "{message}"
+                matches!(outcome, GoalSetupOutcome::Inference { .. }),
+                "a missing todo tool must not stop the goal"
             );
             assert_eq!(
                 actor.goal_tracker.lock().status(),
-                None,
-                "no goal was created"
+                Some(crate::session::goal_tracker::GoalStatus::Active)
             );
-            assert_eq!(server.request_count(), 0);
+            assert_eq!(
+                server.request_count(),
+                0,
+                "there is no list to capture onto"
+            );
+        })
+        .await;
+}
+
+/// Explore mode is read-only over the workspace, and it keeps a todo list.
+/// A lite goal there starts with its objective captured on that list.
+#[tokio::test(flavor = "current_thread")]
+async fn a_lite_goal_starts_under_the_explore_toolset() {
+    let local = tokio::task::LocalSet::new();
+    local
+        .run_until(async {
+            let server = MockInferenceServer::start()
+                .await
+                .expect("mock inference server");
+            server.enqueue_response("/v1/responses", lite_capture());
+            let mut actor = goal_actor_without_todo_tool(&server).await;
+            arm_tools(
+                &mut actor,
+                xai_grok_agent::config::AgentDefinition::explore()
+                    .tool_config
+                    .tools,
+            )
+            .await;
+
+            let outcome = actor
+                .setup_goal("make the tests pass", None, GoalMode::Lite)
+                .await;
+            assert!(
+                matches!(outcome, GoalSetupOutcome::Inference { .. }),
+                "a goal must start in explore mode"
+            );
+            let contents: Vec<String> = todo_list(&actor)
+                .await
+                .into_iter()
+                .map(|(_, content, _)| content)
+                .collect();
+            assert_eq!(contents, vec![CAPTURED_STEP.to_string()]);
         })
         .await;
 }
@@ -726,6 +797,164 @@ async fn lite_and_full_goals_run_the_panel_on_an_upheld_claim() {
                     }
                 }
             }
+        })
+        .await;
+}
+
+/// A panel coordinator that holds each spawn until `gate` is notified.
+fn gated_panel_coordinator(
+    verdict: serde_json::Value,
+    gate: std::sync::Arc<tokio::sync::Notify>,
+) -> tokio::sync::mpsc::UnboundedSender<
+    xai_grok_tools::implementations::grok_build::task::types::SubagentEvent,
+> {
+    use xai_grok_tools::implementations::grok_build::task::types::{SubagentEvent, SubagentResult};
+    let (tx, mut rx) = tokio::sync::mpsc::unbounded_channel::<SubagentEvent>();
+    xai_spawn::spawn_local(async move {
+        while let Some(event) = rx.recv().await {
+            let SubagentEvent::Spawn(req) = event else {
+                continue;
+            };
+            gate.notified().await;
+            if let Some(path) =
+                crate::session::goal_classifier::parse_verdict_path_from_prompt(&req.prompt)
+            {
+                std::fs::write(&path, verdict.to_string()).expect("write the verdict");
+            }
+            let id = req.id.clone();
+            let _ = req.result_tx.send(SubagentResult {
+                success: true,
+                output: std::sync::Arc::from(verdict.to_string().as_str()),
+                subagent_id: id.clone(),
+                child_session_id: id,
+                ..Default::default()
+            });
+        }
+    });
+    tx
+}
+
+#[tokio::test(flavor = "current_thread")]
+async fn the_panel_runs_in_the_background_and_queues_goal_commands() {
+    use super::goal_hold::{GoalBackground, GoalCheckHold};
+    let fixable = serde_json::json!({
+        "refuted": true,
+        "confidence": "high",
+        "blocking": "none",
+        "evidence": "src/ViewBuffer.cpp:146",
+        "findings": [{"kind": "gap", "location": "src/ViewBuffer.cpp:146", "detail": "Grep src/ for every lock of the ViewBuffer recursive mutex"}],
+    });
+    let local = tokio::task::LocalSet::new();
+    local
+        .run_until(async {
+            let server = MockInferenceServer::start()
+                .await
+                .expect("mock inference server");
+            server.enqueue_response("/v1/responses", lite_capture());
+            server.enqueue_response(
+                "/v1/responses",
+                claim_verdict("upheld", &[], "Capture a Tracy trace of updateColor()"),
+            );
+            let gate = std::sync::Arc::new(tokio::sync::Notify::new());
+            let (cmd_tx, mut cmd_rx) = tokio::sync::mpsc::unbounded_channel();
+            let mut actor = goal_actor(&server).await;
+            actor.goal_classifier_enabled = true;
+            actor.goal_verifier_skeptic_count = 1;
+            actor.tool_context.subagent_event_tx =
+                Some(gated_panel_coordinator(fixable, gate.clone()));
+            actor.goal_background = GoalBackground::new(cmd_tx);
+            let actor = std::sync::Arc::new_cyclic(|weak: &std::sync::Weak<SessionActor>| {
+                actor.weak_self = weak.clone();
+                actor
+            });
+            let GoalSetupOutcome::Inference { .. } = actor
+                .setup_goal("find the stall", None, GoalMode::Full)
+                .await
+            else {
+                panic!("the goal must flow through to inference");
+            };
+
+            claim_round(&actor);
+            let decision = tokio::time::timeout(
+                std::time::Duration::from_secs(10),
+                actor.run_goal_round_end(),
+            )
+            .await
+            .expect("the round end must not wait for the panel");
+            assert!(
+                matches!(decision, GoalRoundDecision::EndTurn),
+                "the turn ends while the panel runs"
+            );
+            assert_eq!(
+                actor.goal_check_hold().await,
+                Some(GoalCheckHold::Verification),
+                "a running panel holds the goal checker"
+            );
+            assert!(
+                actor
+                    .defer_goal_command_while_verifying("/goal clear")
+                    .await,
+                "a /goal command waits for the panel"
+            );
+
+            gate.notify_one();
+            let settled = tokio::time::timeout(std::time::Duration::from_secs(10), cmd_rx.recv())
+                .await
+                .expect("the panel task reports its end");
+            let Some(crate::session::commands::SessionCommand::GoalVerificationSettled {
+                note: Some(note),
+            }) = settled
+            else {
+                panic!("the panel task must send the claim note");
+            };
+            assert!(note.starts_with("Your claim that you cannot finish the goal was REJECTED"));
+            assert!(!actor.goal_background.verification_running());
+            assert_eq!(actor.goal_check_hold().await, None);
+            assert_eq!(
+                actor.goal_tracker.lock().status(),
+                Some(GoalStatus::Active),
+                "a rejected completion reactivates the goal"
+            );
+
+            let queued: Vec<String> = actor
+                .state
+                .lock()
+                .await
+                .pending_inputs
+                .iter()
+                .filter(|item| item.prompt_id.starts_with("goal-queued-"))
+                .map(|item| match item.prompt_blocks.first() {
+                    Some(acp::ContentBlock::Text(t)) => t.text.clone(),
+                    _ => String::new(),
+                })
+                .collect();
+            assert_eq!(queued, vec!["/goal clear".to_string()]);
+            assert!(
+                !actor
+                    .defer_goal_command_while_verifying("/goal clear")
+                    .await,
+                "with no panel a /goal command runs now"
+            );
+
+            actor
+                .maybe_queue_goal_continuation_with_note(Some(note))
+                .await;
+            let directive = actor
+                .state
+                .lock()
+                .await
+                .pending_inputs
+                .iter()
+                .find(|item| item.prompt_id.starts_with("goal-summary-"))
+                .and_then(|item| match item.prompt_blocks.first() {
+                    Some(acp::ContentBlock::Text(t)) => Some(t.text.clone()),
+                    _ => None,
+                })
+                .expect("the goal continues");
+            assert!(
+                directive.starts_with("Your claim that you cannot finish the goal was REJECTED"),
+                "the panel note leads the continuation: {directive}"
+            );
         })
         .await;
 }

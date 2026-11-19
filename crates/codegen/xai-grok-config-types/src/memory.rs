@@ -64,6 +64,7 @@ pub struct MemoryV2Config {
     pub batch_dream_max_calls_per_batch: usize,
     pub batch_dream_max_batch_note_bytes: usize,
     pub compact_index_enabled: bool,
+    pub recall_enabled: bool,
     pub file_writes_enabled: bool,
     pub archived_retention_days: u64,
     pub job_retention_days: u64,
@@ -82,6 +83,7 @@ impl Default for MemoryV2Config {
             batch_dream_max_calls_per_batch: 6,
             batch_dream_max_batch_note_bytes: 96 * 1024,
             compact_index_enabled: false,
+            recall_enabled: true,
             file_writes_enabled: true,
             archived_retention_days: 30,
             job_retention_days: 14,
@@ -116,6 +118,10 @@ impl MemoryV2Config {
 
     pub fn can_expose_memory(self) -> bool {
         self.rollout.exposes_memory()
+    }
+
+    pub fn can_recall(self) -> bool {
+        self.rollout.exposes_memory() && self.recall_enabled
     }
 }
 
@@ -454,7 +460,7 @@ pub struct MemoryDreamConfig {
     /// Seconds before a stale dream lock is reclaimed.
     pub stale_lock_secs: u64,
     /// Periodic dream check interval in seconds.
-    /// `None` disables it (dream only at launch or via /dream).
+    /// `None` disables it (dream only at launch or when forced).
     /// When set, the session actor checks dream gates on this interval.
     pub check_interval_secs: Option<u64>,
 }
@@ -911,6 +917,11 @@ impl MemoryConfig {
                         .compact_index_enabled
                         .or_else(|| remote_v2.and_then(|settings| settings.compact_index_enabled))
                         .unwrap_or(defaults.v2.compact_index_enabled),
+                    recall_enabled: restrict_flag(
+                        memory_v2.recall_enabled,
+                        remote_v2.and_then(|settings| settings.recall_enabled),
+                        defaults.v2.recall_enabled,
+                    ),
                     file_writes_enabled: restrict_flag(
                         memory_v2.file_writes_enabled,
                         remote_v2.and_then(|settings| settings.file_writes_enabled),

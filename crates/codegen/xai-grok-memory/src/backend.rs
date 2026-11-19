@@ -157,6 +157,31 @@ impl MemoryBackendParams {
     }
 }
 
+/// What an embedding provider is built from, for a caller that holds no [`MemoryBackendParams`].
+#[derive(Clone)]
+pub struct EmbeddingProviderParams {
+    pub config: xai_grok_config_types::MemoryEmbeddingConfig,
+    /// Must be the endpoint `credentials` was scoped to; a mismatch fails closed.
+    pub base_url: String,
+    pub api_key: Option<String>,
+    pub credentials: EndpointScopedCredentials,
+    pub usage_sink: xai_grok_sampler::SharedUsageSink,
+}
+
+impl EmbeddingProviderParams {
+    /// `None` when no embedding model is configured or no credential reaches the endpoint.
+    pub async fn make(&self) -> Option<super::embedding::ApiEmbeddingProvider> {
+        build_embedding_provider(
+            Some(&self.config),
+            &self.credentials,
+            self.api_key.as_deref(),
+            &self.base_url,
+            &self.usage_sink,
+        )
+        .await
+    }
+}
+
 async fn build_embedding_provider(
     config: Option<&xai_grok_config_types::MemoryEmbeddingConfig>,
     credentials: &EndpointScopedCredentials,

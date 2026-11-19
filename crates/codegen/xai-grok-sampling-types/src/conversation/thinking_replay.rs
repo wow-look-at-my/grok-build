@@ -7,10 +7,10 @@ use super::*;
 #[derive(Debug, Clone, Copy, Default, PartialEq, Eq, PartialOrd, Ord, Serialize, Deserialize)]
 #[serde(rename_all = "snake_case")]
 pub enum ThinkingReplay {
-    /// Blobs ride as typed thinking where the table above allows it.
+    /// Blobs ride as typed thinking where the plan allows it.
     #[default]
     Native,
-    /// Every block rides as plain assistant text. No blob reaches the wire.
+    /// Every block rides as its words in plain text. No blob reaches the wire.
     TextOnly,
     /// No thinking reaches the model at all.
     Scrubbed,
@@ -145,6 +145,16 @@ impl ThinkingReplayPlan {
         }
     }
 
+    /// The disposition of an item that cannot go out as a typed block. Its
+    /// words always go. Only an item with no words is dropped.
+    pub fn without_block(r: &rs::ReasoningItem) -> ThinkingDisposition {
+        if has_text(r) {
+            ThinkingDisposition::Text
+        } else {
+            ThinkingDisposition::Drop
+        }
+    }
+
     pub fn level(&self) -> ThinkingReplay {
         self.level
     }
@@ -156,17 +166,9 @@ impl ThinkingReplayPlan {
         idx: usize,
         r: &rs::ReasoningItem,
     ) -> ThinkingDisposition {
-        let words = has_text(r);
-        let text_or_drop = || {
-            if words {
-                ThinkingDisposition::Text
-            } else {
-                ThinkingDisposition::Drop
-            }
-        };
         match self.level {
             ThinkingReplay::Scrubbed => return ThinkingDisposition::Drop,
-            ThinkingReplay::TextOnly => return text_or_drop(),
+            ThinkingReplay::TextOnly => return Self::without_block(r),
             ThinkingReplay::Native => {}
         }
         let (Some(target), Some(origin)) =
@@ -177,11 +179,10 @@ impl ThinkingReplayPlan {
         if same_model(origin, target) {
             return ThinkingDisposition::Native;
         }
-        if is_signed(r) {
-            return text_or_drop();
-        }
-        if self.target_signs {
-            ThinkingDisposition::Drop
+        // Another model's thinking: a target that signs takes no block it did
+        // not sign, so the words go as text. A switch never drops the words.
+        if is_signed(r) || self.target_signs {
+            Self::without_block(r)
         } else {
             ThinkingDisposition::Native
         }
@@ -201,6 +202,19 @@ impl ThinkingReplayPlan {
 /// The plain-text form of a reasoning item's words.
 pub fn thinking_as_text(r: &rs::ReasoningItem) -> String {
     format!("<thinking>\n{}\n</thinking>", reasoning_item_text(r))
+}
+
+/// The words of a reasoning item as a client note for a user-role message.
+/// A provider refuses a request whose assistant text shows reasoning, so this
+/// form carries the words where the assistant role must not.
+pub fn thinking_as_note(r: &rs::ReasoningItem, origin: Option<&str>) -> String {
+    let model = origin
+        .map(|model| format!(" (model: {model})"))
+        .unwrap_or_default();
+    format!(
+        "[Client note, not from the user. Summary of the thinking behind the assistant turn above{model}, kept for context only.]\n{}",
+        reasoning_item_text(r)
+    )
 }
 
 /// Rewrite a conversation to one replay level, for a caller that sends items
@@ -335,7 +349,7 @@ mod tests {
                 D::Native,
             ),
             (
-                "raw -> encrypted model: scrub",
+                "raw -> encrypted model: the words as text",
                 disposition_for(
                     Some("grok-4"),
                     words_only(),
@@ -343,7 +357,7 @@ mod tests {
                     true,
                     Native,
                 ),
-                D::Drop,
+                D::Text,
             ),
             (
                 "encrypted with summary -> raw model: the summary replaces the blob",
@@ -456,8 +470,32 @@ mod tests {
         }
     }
 
+    /// A switch never drops words. Every other model's thinking that carries
+    /// words reaches the target, as the block or as text.
+    #[test]
+    fn a_model_switch_never_drops_words() {
+        for (origin, target, signs) in [
+            ("claude-opus-5-5", "claude-fable-5-2", true),
+            ("claude-fable-5-2", "claude-opus-5-5", true),
+            ("grok-4", "claude-opus-5-5", true),
+            ("claude-opus-5-5", "grok-4", false),
+            ("grok-4", "grok-3", false),
+        ] {
+            for item in [signed_with_words(), words_only()] {
+                let got = disposition_for(
+                    Some(origin),
+                    item,
+                    Some(target),
+                    signs,
+                    ThinkingReplay::Native,
+                );
+                assert_ne!(got, ThinkingDisposition::Drop, "{origin} -> {target}");
+            }
+        }
+    }
+
     /// The conversation's own evidence makes a target a signing one: a block
-    /// this model signed earlier means an unsigned block is refused later.
+    /// this model signed earlier means an unsigned block goes as text later.
     #[test]
     fn a_signed_block_earlier_in_the_conversation_is_evidence_the_target_signs() {
         let items = vec![
@@ -483,7 +521,7 @@ mod tests {
         );
         assert_eq!(
             plan.disposition(&req.items, 4, foreign),
-            ThinkingDisposition::Drop
+            ThinkingDisposition::Text
         );
     }
 

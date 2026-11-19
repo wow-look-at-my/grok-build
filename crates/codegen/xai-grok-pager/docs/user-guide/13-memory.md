@@ -21,13 +21,24 @@ Memory has two scopes. Global memory holds facts that apply across all your
 projects; workspace memory holds facts about one repository. Clones and
 worktrees of the same repository share one workspace scope.
 
-Each scope keeps its knowledge as ordinary Markdown files. `topics/` holds
-curated notes, one file per subject, and is what Grok reads at the start of a
-session. New facts captured after each turn, including a turn you stop before it
-finishes, land as small observations that a later consolidation pass (`/dream`)
-folds into topics. A bounded generated
-index of both scopes is injected into the model's context once per session so
-it can decide which topics to open.
+Each scope keeps its knowledge as ordinary Markdown files. `topics/` holds curated notes, one file per subject, and is what Grok reads at the start of a session. New facts captured after each turn, including a turn you stop before it finishes, land as small observations. Those observations are ones that a later consolidation pass folds into topics. A bounded generated index of both scopes is injected into the model's context once per session so it can decide which topics to open.
+
+### Memory runs by itself
+
+You do not tell Grok to remember. You do not run a command to save.
+
+- **Capture.** After every turn, a background call reads the turn and records what a later session needs. Where things are (files, commands, URLs, config keys), your preferences, your corrections, and project facts with their reasons. It does not record a fact the memory index already lists.
+- **Scope.** A fact that holds in every repository, such as how you like to work, goes to global memory and follows you to other projects. A fact about this repository goes to workspace memory.
+- **Consolidation.** Observations become topics when enough of them wait, or when the oldest one waited a while. Grok checks this after each capture and when a session starts, so notes from yesterday are topics today.
+- **Recall.** As the conversation moves, Grok searches stored memory with the new text: your prompt, its own replies and the arguments of its tool calls. A note that matches is shown to the model with its file path, and the scrollback shows a `Recalled from memory` line. Each note is shown one time for each conversation. A compaction removes the reminders. A note can be shown again after it.
+
+Recall matches on words by default. Set `memory.embedding.model` to an embedding model your provider serves to add meaning-based matches. Recall then also finds a note that shares no word with what you typed. It compares your prompt, not the whole conversation, with each note, and it adjusts to the model you chose, so no similarity threshold needs tuning. If the embedding call fails, recall keeps the word matches and logs the error.
+
+There is no command for saving or consolidating: both run by themselves. To turn recall off, set `memory.v2.recall_enabled` to `false`.
+
+### What memory costs
+
+Capture, consolidation and recall each call a model, and each call is billed to the session. These calls are part of the session total in the status bar. When memory spent anything, the status bar adds the memory share after the total, for example `$0.52 · mem $0.04`. The `/memory` modal shows the same share split into capture, consolidation and recall.
 
 Notes you recorded with earlier versions of Grok Build are carried over
 automatically the first time a workspace is opened after updating: each section
@@ -111,24 +122,7 @@ When a session ends, Grok saves a structured metadata summary to that session's 
 
 Grok builds the summary from conversation metadata without an LLM call, without added latency. Grok skips the save for trivial sessions -- those with fewer than three substantive prompts, or fewer than 50 bytes of user text.
 
-The summary does not record tool usage, file paths, or shell commands. The session ID forms part of the log filename. To turn automatic saves off, set `session.save_on_end = false`. For richer capture of decisions, patterns, and reasoning, use `/flush`.
-
----
-
-## Saving Rich Knowledge with /flush
-
-For richer capture -- decisions, patterns, debugging workflows, API discoveries -- use `/flush` in the TUI:
-
-```
-/flush
-```
-
-This triggers an LLM-generated summary of the current session's most important content and writes it to a dated session log. The summary is indexed and searchable in future sessions.
-
-Use `/flush` when you want to preserve important context:
-- Before compaction (which discards old conversation turns)
-- At the end of a productive debugging session
-- After discovering important patterns or conventions
+The summary does not record tool usage, file paths, or shell commands. The session ID forms part of the log filename. To turn automatic saves off, set `session.save_on_end = false`. Decisions, patterns, and reasoning are captured after every turn, with no command.
 
 ---
 
@@ -174,7 +168,7 @@ Grok searches across all memory files and summarizes what it knows, grouped by s
 
 ### Direct Editing
 
-You can edit memory files directly under `~/.grok/memory/`. The file watcher reindexes your changes on the next memory search. Use `/flush` to save the current session now, and `/dream` to consolidate session logs into organized topics.
+You can edit memory files directly under `~/.grok/memory/`. The file watcher reindexes your changes on the next memory search.
 
 ---
 
@@ -225,23 +219,17 @@ When you save a note with `/remember`, Grok confirms in the scrollback:
 Memory saved to ~/.grok/memory/MEMORY.md
 ```
 
-Background saves — automatic flush, automatic Dream, and session-end — run silently and do not post a scrollback message. `/flush` and `/dream` report their outcome in scrollback when you run them yourself. Use `/memory` at any time to browse what Grok has stored.
+Background saves (capture, consolidation, and session-end) run silently. A failed consolidation posts one scrollback line. The captured notes stay pending, and consolidation runs again after the next capture or at the next session start. Use `/memory` at any time to browse what Grok stored.
 
 ---
 
-## Dream Consolidation with /dream
+## Consolidation
 
-The `/dream` command consolidates scattered memory fragments into organized topics:
-
-```
-/dream
-```
-
-Dream reorganizes individual session logs and memory entries into a coherent, deduplicated knowledge base, which reduces noise and improves search quality over time. `/dream` requires memory to be enabled.
+Consolidation (Dream) folds captured notes into a deduplicated set of topics, which reduces noise and improves search quality over time. It runs by itself. There is no command for it.
 
 ### Auto-Dream
 
-Dream also runs automatically. By default, Grok checks the consolidation gates at launch and periodically during a session, and runs Dream once enough time has passed and enough sessions have accumulated:
+By default, Grok checks the consolidation gates at launch and periodically during a session. It runs Dream once enough time passes and enough sessions collect:
 
 ```json
 {

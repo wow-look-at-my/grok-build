@@ -163,6 +163,7 @@ async fn create_test_actor(
             dream_success_count: std::sync::atomic::AtomicU64::new(0),
             dream_error_count: std::sync::atomic::AtomicU64::new(0),
             token_totals: Default::default(),
+            recall: Default::default(),
         },
         session_start: std::time::Instant::now(),
         inference_idle_timeout: std::time::Duration::from_secs(300),
@@ -1316,6 +1317,161 @@ async fn e2e_compact_steps_the_thinking_replay_down_on_a_signature_rejection() {
                 actor.compaction.auto_compact_suppressed.load(Relaxed),
                 SUPPRESS_NONE,
                 "a rejection the ladder answered must not suppress AUTO"
+            );
+        })
+        .await;
+}
+/// A compaction on the Messages API feeds every thinking summary to the summarizer as a client note.
+/// No thinking block rides, and no assistant text shows a summary.
+#[tokio::test(flavor = "current_thread")]
+async fn compaction_on_messages_feeds_the_thinking_summaries_to_the_summarizer() {
+    let local = tokio::task::LocalSet::new();
+    local
+        .run_until(async {
+            let (gateway_tx, _gateway_rx) = mpsc::unbounded_channel();
+            let (persistence_tx, _persistence_rx) = mpsc::unbounded_channel();
+            let actor =
+                Arc::new(create_test_actor(180_000, 200_000, 85, gateway_tx, persistence_tx).await);
+            let server = xai_grok_test_support::MockInferenceServer::start()
+                .await
+                .unwrap();
+            server.set_response("Summary of the work so far. ".repeat(20));
+            let mut cfg = actor.chat_state_handle.get_sampling_config().await.unwrap();
+            cfg.base_url = server.url();
+            cfg.api_backend = crate::sampling::ApiBackend::Messages;
+            cfg.model = "claude-opus-5-5".into();
+            actor.chat_state_handle.update_sampling_config(cfg);
+            actor.chat_state_handle.replace_conversation(vec![
+                ConversationItem::system("sys"),
+                ConversationItem::user("hello"),
+                ConversationItem::Reasoning(xai_grok_sampling_types::rs::ReasoningItem {
+                    id: "r1".into(),
+                    summary: vec![xai_grok_sampling_types::rs::SummaryPart::SummaryText(
+                        xai_grok_sampling_types::rs::SummaryTextContent {
+                            text: "weighing the options".into(),
+                        },
+                    )],
+                    content: None,
+                    encrypted_content: Some("sig-from-opus".into()),
+                    status: None,
+                }),
+                ConversationItem::assistant_with_model("hi", "claude-opus-5-5"),
+                ConversationItem::user("compact me"),
+            ]);
+            actor
+                .run_compact_only(
+                    AutoCompactTriggerInfo {
+                        tokens_used: 180_000,
+                        context_window: 200_000,
+                        percentage: 90,
+                        reason_override: None,
+                    },
+                    false,
+                )
+                .await
+                .expect("the compaction must succeed");
+
+            let bodies = server.request_bodies();
+            let body = at(&bodies, 0);
+            let text_of = |role: &str| -> String {
+                body["messages"]
+                    .as_array()
+                    .into_iter()
+                    .flatten()
+                    .filter(|m| m["role"] == role)
+                    .filter_map(|m| m["content"].as_array())
+                    .flatten()
+                    .filter_map(|b| b["text"].as_str())
+                    .collect::<Vec<_>>()
+                    .join("\n")
+            };
+            let user = text_of("user");
+            assert!(
+                user.contains("Client note") && user.contains("weighing the options"),
+                "the summarizer must get the thinking summary in a user-role note: {body:#}"
+            );
+            assert!(
+                !text_of("assistant").contains("weighing the options"),
+                "assistant text must not show the summary: {body:#}"
+            );
+            let wire = body.to_string();
+            assert!(
+                !wire.contains("<thinking>") && !wire.contains("sig-from-opus"),
+                "no thinking tag and no block may ride: {body:#}"
+            );
+        })
+        .await;
+}
+/// The `compact_on_model_switch` setting compacts at the first turn after any model change.
+/// With the setting off, a switch to a window of the same size does not compact.
+#[tokio::test(flavor = "current_thread")]
+async fn the_compact_on_model_switch_setting_compacts_after_every_switch() {
+    use crate::session::compaction_config::PreviousModelInfo;
+    let local = tokio::task::LocalSet::new();
+    local
+        .run_until(async {
+            let (gateway_tx, _gateway_rx) = mpsc::unbounded_channel();
+            let (persistence_tx, _persistence_rx) = mpsc::unbounded_channel();
+            let actor =
+                Arc::new(create_test_actor(10_000, 200_000, 85, gateway_tx, persistence_tx).await);
+            let server = xai_grok_test_support::MockInferenceServer::start()
+                .await
+                .unwrap();
+            server.set_response("Summary of the work so far. ".repeat(20));
+            let mut cfg = actor.chat_state_handle.get_sampling_config().await.unwrap();
+            cfg.base_url = server.url();
+            actor.chat_state_handle.update_sampling_config(cfg);
+            actor.chat_state_handle.replace_conversation(vec![
+                ConversationItem::system("sys"),
+                ConversationItem::user("hello"),
+                ConversationItem::assistant("hi"),
+                ConversationItem::user("next"),
+            ]);
+            let switched_from_another_model = || {
+                actor.compaction.previous_model.set(Some(PreviousModelInfo {
+                    model_slug: "the-model-before-the-switch".to_string(),
+                    context_window: 200_000,
+                }));
+            };
+
+            switched_from_another_model();
+            actor.maybe_compact_on_model_switch().await.unwrap();
+            assert!(
+                server.requests().is_empty(),
+                "with the setting off, this switch must not compact"
+            );
+
+            {
+                let mut agent_slot = actor.agent.borrow_mut();
+                let agent = &*agent_slot;
+                let mut policy = agent.compaction_policy().clone();
+                policy.compact_on_model_switch = true;
+                *agent_slot = xai_grok_agent::Agent::new(
+                    agent.definition().clone(),
+                    agent.prompt_context().clone(),
+                    agent.system_prompt().to_string(),
+                    std::sync::Arc::clone(agent.tool_bridge()),
+                    agent.reminder_policy().clone(),
+                    policy,
+                    vec![],
+                    false,
+                );
+            }
+            switched_from_another_model();
+            actor.maybe_compact_on_model_switch().await.unwrap();
+            assert_eq!(
+                server.requests().len(),
+                1,
+                "with the setting on, the switch must compact once"
+            );
+
+            // The history is now a summary. A second switch has no model output to compact.
+            switched_from_another_model();
+            actor.maybe_compact_on_model_switch().await.unwrap();
+            assert_eq!(
+                server.requests().len(),
+                1,
+                "a switch with nothing new from a model must not compact again"
             );
         })
         .await;

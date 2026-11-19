@@ -61,6 +61,10 @@ fn registered_settings() {
                 ("GROK_COMPACTION_VERBATIM_INPUT", true),
             ),
             ("two_pass_compaction", ("GROK_TWO_PASS_COMPACTION", true)),
+            (
+                "compact_on_model_switch",
+                ("GROK_COMPACT_ON_MODEL_SWITCH", false),
+            ),
             ("backend_tools", ("GROK_BACKEND_SEARCH", true)),
             ("auto_wake", ("GROK_AUTO_WAKE", true)),
             (
@@ -113,8 +117,8 @@ fn every_registered_feature_reads_its_own_remote_setting() {
             Feature::Dock => settings.dock_enabled = Some(value),
             Feature::TerminalTheme => settings.terminal_theme_enabled = Some(value),
             Feature::FileAcceleration => settings.file_acceleration_enabled = Some(value),
-            // The one row with no remote tier, stated as such rather than as a projection that reads nothing
-            Feature::BackendTools => {
+            // The rows with no remote tier, stated as such rather than as a projection that reads nothing
+            Feature::BackendTools | Feature::CompactOnModelSwitch => {
                 assert!(spec.remote.is_none(), "{} grew a remote tier", spec.key);
                 continue;
             }

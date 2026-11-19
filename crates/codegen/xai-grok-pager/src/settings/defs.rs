@@ -1577,6 +1577,39 @@ pub(crate) fn default_settings_with_subagent_rows(
             },
             restart_required: true,
         },
+        // SHELL-owned `[features].compact_on_model_switch`. Each agent latches the flag when it is built.
+        SettingMeta {
+            key: "compact_on_model_switch",
+            category: SettingCategory::Agent,
+            owner: SettingOwner::Shell,
+            label: "Compact on model switch",
+            description: "Compacts the conversation at the first turn after every model change, so the new model starts from a summary. Off keeps the full history across a switch.",
+            keywords: &[
+                "compaction",
+                "compact",
+                "model",
+                "switch",
+                "summary",
+                "context",
+            ],
+            kind: SettingKind::Bool {
+                default: Feature::CompactOnModelSwitch.default_enabled(),
+            },
+            restart_required: true,
+        },
+        // SHELL-owned `[features].session_recap`. The shell re-reads it on each recap request, so it applies live.
+        SettingMeta {
+            key: "session_recap",
+            category: SettingCategory::Agent,
+            owner: SettingOwner::Shell,
+            label: "Session recaps",
+            description: "Writes a short \"where was I\" recap when you come back to the terminal, and enables `/recap`. Turn off to stop every recap.",
+            keywords: &["recap", "where was i", "away", "resume", "summary", "return"],
+            kind: SettingKind::Bool {
+                default: Feature::SessionRecap.default_enabled(),
+            },
+            restart_required: false,
+        },
         // SHELL-owned startup-time settings (restart_required: true).
         // The running pager doesn't re-read these mid-session.
         SettingMeta {

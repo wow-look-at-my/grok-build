@@ -140,6 +140,7 @@ User-level configuration lives in `$GROK_HOME/config.json` (default `~/.grok/con
 | `features.campaigns` | `boolean` | `yes` | `user` | Enable remote campaign patches. `GROK_CAMPAIGNS=0` still disables even when requirements set this true. |
 | `features.cancel_rewind` | `boolean` | `pin` | `user` | Enable or disable `cancel_rewind`. Default true. Also `GROK_CANCEL_REWIND`. |
 | `features.codebase_indexing` | `boolean / string[]` | `pin` | `user` | Codebase graph indexing; true indexes git repos, or pass include/exclude globs. |
+| `features.compact_on_model_switch` | `boolean` | `pin` | `user` | Compact the conversation at the first turn after every model change. Default false. Also `GROK_COMPACT_ON_MODEL_SWITCH`. |
 | `features.compaction_detail` | `none / minimal / balanced / verbose` | `yes` | `user` | Verbatim detail level for `segments` compaction. Also GROK_COMPACTION_DETAIL. |
 | `features.compaction_mode` | `summary / transcript / segments` | `yes` | `user` | Compaction strategy. Also GROK_COMPACTION_MODE. |
 | `features.compaction_tool_choice` | `string` | `yes` | `user` | Tool-choice hint used during compaction. |
@@ -160,7 +161,7 @@ User-level configuration lives in `$GROK_HOME/config.json` (default `~/.grok/con
 | `features.non_git_warning` | `boolean` | `yes` | `user` | Show a blocking warning when Grok starts outside a Git repository. |
 | `features.remember_mode` | `boolean` | `—` | `—` | Remember the last permission mode across sessions. Read from user `config.toml` only. |
 | `features.remote_fetch` | `boolean` | `pin` | `fleet` | Pin remote model-catalog and asset fetch. Managed wins over the user file when both set. |
-| `features.session_recap` | `boolean` | `pin` | `user` | Enable or disable `session_recap`. Default true. Also `GROK_SESSION_RECAP`. |
+| `features.session_recap` | `boolean` | `pin` | `user` | Enable or disable `session_recap`: `/recap` and the automatic recap when you return. Default true. Also `GROK_SESSION_RECAP`. Also a `/settings` → Agent row ("Session recaps"); a change applies without a restart. Recaps use the `dense_summarization` model group. |
 | `features.session_search` | `boolean` | `pin` | `user` | Enable or disable `session_search`. Default true. Also `GROK_SESSION_SEARCH`. |
 | `features.subagent_model_inheritance` | `boolean` | `pin` | `user` | Hide the subagent `model` argument when every model you can pick is an xAI model, so subagents inherit the parent's model. Default false. Also `GROK_SUBAGENT_MODEL_INHERITANCE`. Read when a session starts; changing it requires a restart. |
 | `features.subagent_worktree_snapshot` | `boolean` | `pin` | `user` | Enable or disable `subagent_worktree_snapshot`. Default false. Also `GROK_SUBAGENT_WORKTREE_SNAPSHOT`. |
@@ -265,6 +266,7 @@ User-level configuration lives in `$GROK_HOME/config.json` (default `~/.grok/con
 | `memory.v2.file_writes_enabled` | `boolean` | — | `user` | Enables all memory-v2 file mutation; `false` fails closed before scaffold creation. Default: `true`. |
 | `memory.v2.job_retention_days` | `number` | — | `user` | Retains terminal memory-v2 capture-job metadata for this many days. Default: `14`. |
 | `memory.v2.manual_dream_enabled` | `boolean` | — | `user` | Enables explicitly requested memory-v2 Dream. Default: `true`. |
+| `memory.v2.recall_enabled` | `boolean` | — | `user` | Searches stored memory with each new stretch of conversation and shows the model the notes that match, each note one time. Uses word matching, plus vectors when `memory.embedding.model` is set. Default: `true`. |
 
 ### `models`
 

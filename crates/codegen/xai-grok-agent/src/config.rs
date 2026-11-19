@@ -354,7 +354,8 @@ pub fn grok_build_hashline_toolset(
 /// Read-only toolset for the **explore** subagent. Genuinely read-only over
 /// the workspace. `run_terminal_command` (Bash) is intentionally omitted so
 /// exploration cannot mutate the workspace - the read-only guarantee is
-/// enforced by the toolset, not merely by the prompt.
+/// enforced by the toolset, not merely by the prompt. The todo list is
+/// session state, not the workspace. `/goal` and `/todo` need it.
 fn explore_toolset() -> ToolServerConfig {
     ToolServerConfig {
         tools: vec![
@@ -362,6 +363,7 @@ fn explore_toolset() -> ToolServerConfig {
             (&grok_build::ListDirTool).into(),
             (&grok_build::GrepTool).into(),
             (&grok_build::GitTool).into(),
+            (&grok_build::TodoWriteTool).into(),
             (&grok_build::SendMessageTool).into(),
             task_tool_config(),
             task_output_tool_config(),
@@ -1706,6 +1708,22 @@ mod tests {
             AgentDefinition::explore().allowed_subagent_types,
             Some(vec!["explore".to_string(), "plan".to_string()])
         );
+    }
+    /// `/goal` and `/todo` put items on the session's todo list. A primary
+    /// agent with no todo tool can neither receive them nor finish them.
+    #[test]
+    fn every_shift_tab_agent_keeps_a_todo_list() {
+        let todo_id = ToolConfig::from(&grok_build::TodoWriteTool).id;
+        for name in BuiltinAgentName::shift_tab_variants() {
+            let ids: Vec<String> = name
+                .definition()
+                .tool_config
+                .tools
+                .into_iter()
+                .map(|t| t.id)
+                .collect();
+            assert!(ids.contains(&todo_id), "{name:?} lacks {todo_id}");
+        }
     }
     /// The orchestrator reaches the codebase only through subagents: no read, list, search,
     /// or execute tool is reachable, and the delegation tools are all present.

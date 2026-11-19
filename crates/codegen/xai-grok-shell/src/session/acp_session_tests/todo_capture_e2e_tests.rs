@@ -389,11 +389,97 @@ async fn an_urgent_capture_lands_at_the_top_without_disturbing_the_list() {
         .await;
 }
 
-/// A session whose task-list tool cannot address the item a capture adds is
-/// refused before any model call. It is not written through with semantics
-/// that cannot express the append.
+/// opencode's `todowrite` names an item by its text and takes no position.
+/// A capture in such a session still lands, at the top for `/TODO`, and
+/// leaves the item that was there alone.
 #[tokio::test(flavor = "current_thread")]
-async fn a_task_list_tool_without_item_ids_is_refused() {
+async fn a_capture_lands_through_a_todo_tool_that_carries_no_ids() {
+    const SEEDED: &str = "ship the release";
+    const CAPTURED: &str = "Add a second remote to ci/push.sh";
+    let local = tokio::task::LocalSet::new();
+    local
+        .run_until(async {
+            let server = MockInferenceServer::start()
+                .await
+                .expect("mock inference server");
+            let capture_args = serde_json::json!({
+                "todos": [{"content": CAPTURED, "status": "completed", "priority": "high"}]
+            })
+            .to_string();
+            server.enqueue_response(
+                "/v1/responses",
+                ScriptedResponse::sse(responses_api_reasoning_then_tool_call_events(
+                    "the push script is ci/push.sh",
+                    "call_capture_1",
+                    "todowrite",
+                    &capture_args,
+                    "test",
+                )),
+            );
+
+            let (gateway_tx, gateway_rx) =
+                tokio::sync::mpsc::unbounded_channel::<xai_acp_lib::AcpClientMessage>();
+            drain_gateway(gateway_rx);
+            let (persistence_tx, persistence_rx) =
+                tokio::sync::mpsc::unbounded_channel::<PersistenceMsg>();
+            drain_persistence(persistence_rx);
+
+            let mut actor = create_test_actor(0, 256_000, 85, gateway_tx, persistence_tx).await;
+            arm_tools(
+                &mut actor,
+                vec![
+                    xai_grok_tools::registry::types::ToolConfig::for_tool::<
+                        xai_grok_tools::implementations::opencode::todowrite::TodoWriteTool,
+                    >(),
+                ],
+            )
+            .await;
+            point_model_at(&actor, &server).await;
+
+            // The main agent's own item, written the way this session writes one.
+            actor
+                .workspace_ops
+                .call_tool(
+                    "todowrite",
+                    serde_json::json!({
+                        "todos": [{"content": SEEDED, "status": "in_progress", "priority": "medium"}]
+                    }),
+                    "seed",
+                    Some(&actor.session_info.id.0),
+                )
+                .await
+                .expect("seed the list");
+
+            let outcome = actor
+                .handle_todo_capture("add a second remote", true, "cap-3")
+                .await
+                .expect("a todo tool without item ids must not stop a capture");
+            assert_eq!(outcome.added, vec![CAPTURED.to_string()]);
+
+            let list = todo_list(&actor).await;
+            assert_eq!(list.len(), 2, "{list:?}");
+            let (id, content, status) = &list[0];
+            assert_eq!(content, CAPTURED, "an urgent capture goes first: {list:?}");
+            assert!(id.starts_with("capture-"), "the harness mints the id: {id}");
+            assert_eq!(
+                *status,
+                crate::tools::todo::TodoStatus::Pending,
+                "the status the model asked for is dropped"
+            );
+            assert_eq!(list[1].1, SEEDED);
+            assert_eq!(
+                list[1].2,
+                crate::tools::todo::TodoStatus::InProgress,
+                "the item that was there is untouched"
+            );
+        })
+        .await;
+}
+
+/// A session whose agent has no task-list tool cannot hold a todo. `/todo`
+/// says so before any model call.
+#[tokio::test(flavor = "current_thread")]
+async fn a_session_with_no_task_list_tool_is_refused() {
     let local = tokio::task::LocalSet::new();
     local
         .run_until(async {
@@ -405,30 +491,14 @@ async fn a_task_list_tool_without_item_ids_is_refused() {
             drain_persistence(persistence_rx);
 
             let mut actor = create_test_actor(0, 256_000, 85, gateway_tx, persistence_tx).await;
-            // opencode's `todowrite` is `ToolKind::Plan` too, and gives its
-            // items no ids — the case the namespace check exists for.
-            *actor.agent.borrow_mut() = test_agent_with_tools(vec![
-                xai_grok_tools::registry::types::ToolConfig::for_tool::<
-                    xai_grok_tools::implementations::opencode::todowrite::TodoWriteTool,
-                >(),
-            ])
-            .await;
+            *actor.agent.borrow_mut() = test_agent_with_tools(vec![]).await;
 
+            // No model is configured. A run that reached one fails with another error.
             let err = actor
-                .handle_todo_capture("add something", false, "cap-3")
+                .handle_todo_capture("add something", false, "cap-4")
                 .await
-                .expect_err("a task-list tool without item ids must be refused");
-            assert!(
-                matches!(err, TodoCaptureError::UnsupportedTodoTool(_)),
-                "got {err:?}"
-            );
-            // No model was configured, so reaching one would have failed differently — the refusal has to come first.
-            let msg = err.to_string();
-            assert!(
-                msg.contains("items carry ids") && msg.contains("todowrite"),
-                "the message must say what is missing, and name the tool that \
-                 is missing it: {err}"
-            );
+                .expect_err("no task-list tool means no capture");
+            assert!(matches!(err, TodoCaptureError::NoTodoTool), "got {err:?}");
         })
         .await;
 }

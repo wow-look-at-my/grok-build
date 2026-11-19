@@ -778,6 +778,10 @@ pub enum SessionCommand {
     },
     /// A background task, subagent or workflow of this session ended.
     BackgroundWorkSettled,
+    /// The background goal verification ended. `note` goes in front of the goal continuation, if the goal continues.
+    GoalVerificationSettled {
+        note: Option<String>,
+    },
     /// Put a `CurrentModeUpdate` on the ordered event pipeline, behind the
     /// text chunks the turn already queued.
     EnqueueCurrentModeUpdate {

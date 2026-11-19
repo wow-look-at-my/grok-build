@@ -69,7 +69,11 @@ pub(crate) fn memory_v2_model_usage(
             .usage
             .as_ref()
             .map(|usage| usage.cache_creation_prompt_tokens),
-        cost_usd_ticks: response.cost_usd_ticks,
+        cost_usd_ticks: crate::session::billed_client::price_model_call(
+            model,
+            response.usage.as_ref(),
+            response.cost_usd_ticks,
+        ),
     }
 }
 

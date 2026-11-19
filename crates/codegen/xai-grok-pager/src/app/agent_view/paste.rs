@@ -41,7 +41,7 @@ impl AgentView {
         }
         let paste_text = if activate_bash
             && self.prompt_input_mode == super::PromptInputMode::Normal
-            && self.prompt.text().is_empty()
+            && self.prompt.insertion_at_start()
         {
             if let Some(command) = text.strip_prefix("! ") {
                 self.prompt_input_mode = super::PromptInputMode::Bash;

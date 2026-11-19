@@ -262,6 +262,7 @@ pub(super) async fn create_test_actor_with_memory(
             dream_success_count: std::sync::atomic::AtomicU64::new(0),
             dream_error_count: std::sync::atomic::AtomicU64::new(0),
             token_totals: Default::default(),
+            recall: Default::default(),
         },
         session_start: std::time::Instant::now(),
         inference_idle_timeout: Duration::from_secs(300),
@@ -627,8 +628,8 @@ async fn v2_session_is_pinned_to_isolated_storage_and_disables_legacy_pipeline()
                     .memory
                     .dream_count
                     .load(std::sync::atomic::Ordering::Relaxed),
-                1,
-                "the v2 Dream route should report a neutral no-work outcome"
+                2,
+                "the v2 Dream route should record one neutral pass for each scope"
             );
             assert!(!actor.memory.flush_config.enabled);
             assert_eq!(actor.idle_flush_timeout, None);

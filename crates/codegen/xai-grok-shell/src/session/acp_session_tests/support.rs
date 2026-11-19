@@ -91,7 +91,17 @@ pub(crate) async fn test_grok_build_agent_with_todo() -> xai_grok_agent::Agent {
 /// Give `actor` the real `todo_write` tool, bound to its live todo list.
 #[cfg(test)]
 pub(crate) async fn arm_todo_writes(actor: &mut SessionActor) {
-    *actor.agent.borrow_mut() = test_grok_build_agent_with_todo().await;
+    use xai_grok_tools::implementations::grok_build::todo::TodoWriteTool;
+    use xai_grok_tools::registry::types::ToolConfig;
+    arm_tools(actor, vec![ToolConfig::for_tool::<TodoWriteTool>()]).await;
+}
+/// Give `actor` an agent that has exactly `tools`, bound to its live session.
+#[cfg(test)]
+pub(crate) async fn arm_tools(
+    actor: &mut SessionActor,
+    tools: Vec<xai_grok_tools::registry::types::ToolConfig>,
+) {
+    *actor.agent.borrow_mut() = test_agent_with_tools(tools).await;
     actor
         .workspace_ops
         .bind_local_session(
@@ -125,7 +135,7 @@ pub(crate) async fn point_model_at(
 /// The item [`lite_goal_capture`] puts on the list.
 #[cfg(test)]
 pub(crate) const LITE_GOAL_CAPTURED_STEP: &str = "Run the test suite and fix each failure";
-/// The capture run `/goal --lite` starts with: one `todo_write` call. Queue it before any other response.
+/// The capture run a lite `/goal` starts with: one `todo_write` call. Queue it before any other response.
 #[cfg(test)]
 pub(crate) fn lite_goal_capture() -> xai_grok_test_support::ScriptedResponse {
     let args = serde_json::json!({
@@ -483,6 +493,7 @@ async fn create_test_actor_inner(
             dream_success_count: std::sync::atomic::AtomicU64::new(0),
             dream_error_count: std::sync::atomic::AtomicU64::new(0),
             token_totals: Default::default(),
+            recall: Default::default(),
         },
         session_start: std::time::Instant::now(),
         inference_idle_timeout: Duration::from_secs(300),

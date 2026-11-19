@@ -13,6 +13,7 @@ mod external_auth_expired_credential;
 mod external_otel_pin_strip;
 mod external_otel_prompt_text;
 mod mcp_toggle_gateway_persist;
+mod memory_recall_e2e;
 mod plugin_install_lock_order;
 mod plugins_action_policy_gate;
 mod plugins_action_uninstall_data;

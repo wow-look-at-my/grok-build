@@ -22,7 +22,7 @@ use crate::app::app_view::{ActiveView, AppView};
 use crate::app::cancel_latency::TurnEnd;
 use crate::notifications::{NotificationEvent, NotificationEventKind};
 use crate::scrollback::block::RenderBlock;
-use crate::scrollback::blocks::{MemoryCommandKind, SessionEvent};
+use crate::scrollback::blocks::SessionEvent;
 use crate::slash::command::DoctorRequest;
 use agent_client_protocol as acp;
 use xai_grok_telemetry::session_ctx::log_event;
@@ -714,6 +714,8 @@ pub(super) fn dispatch_send_prompt_submission(
     let voice_stt_language_from_app = app.voice_config.language.clone();
     let subagent_model_inheritance_from_app = app.subagent_model_inheritance;
     let two_pass_compaction_from_app = app.two_pass_compaction;
+    let compact_on_model_switch_from_app = app.compact_on_model_switch;
+    let session_recap_from_app = app.session_recap;
     let keep_awake_from_app = app.notification_service.sleep_inhibitor.mode();
     let context_limits_from_app = app.model_context_limits.clone();
     let login_method_id_from_app = app.login_method_id.as_ref().map(|id| id.0.to_string());
@@ -849,6 +851,8 @@ pub(super) fn dispatch_send_prompt_submission(
                     voice_stt_language: voice_stt_language_from_app,
                     subagent_model_inheritance: subagent_model_inheritance_from_app,
                     two_pass_compaction: two_pass_compaction_from_app,
+                    compact_on_model_switch: compact_on_model_switch_from_app,
+                    session_recap: session_recap_from_app,
                     model_windows: crate::settings::context_limits::catalog_windows(
                         &agent.session.models.available,
                     ),
@@ -1954,57 +1958,6 @@ pub(super) fn handle_prompt_response(
         return effects;
     }
     vec![]
-}
-
-/// `/flush` or `/dream` finished: close the command state and post its outcome line.
-pub(super) fn handle_memory_command_complete(
-    app: &mut AppView,
-    agent_id: AgentId,
-    kind: MemoryCommandKind,
-    result: Result<(String, bool), String>,
-) -> Vec<Effect> {
-    let Some(agent) = app.agents.get_mut(&agent_id) else {
-        return vec![];
-    };
-    let command = match kind {
-        MemoryCommandKind::Flush => AgentCommand::MemoryFlush,
-        MemoryCommandKind::Dream => AgentCommand::MemoryDream,
-    };
-    if agent.session.state.command_in_flight() != Some(&command) {
-        tracing::debug!(
-            ?command,
-            "Ignoring memory command result (not in its command state)"
-        );
-        return vec![];
-    }
-    let elapsed = agent.turn_elapsed().unwrap_or_default();
-    agent.session.finish_command();
-
-    let (summary, succeeded) = match result {
-        Ok(outcome) => outcome,
-        Err(error) => {
-            tracing::error!(agent = ?agent_id, ?command, %error, "Memory command failed");
-            (error, false)
-        }
-    };
-    agent.scrollback.push_block(RenderBlock::session_event(
-        SessionEvent::MemoryCommandCompleted {
-            summary,
-            succeeded,
-            elapsed,
-        },
-    ));
-
-    agent.mark_turn_finished(TurnEnd::Completed);
-    agent.activity_started_at = None;
-    agent.last_activity = None;
-
-    if app.reconnect_pending {
-        return vec![];
-    }
-    let drain = maybe_drain_queue(agent, &mut app.pending_image_notices);
-    note_peek_page_flip(app, agent_id, drain.page_flip_entry);
-    drain.effects
 }
 
 pub(super) fn handle_compact_complete(

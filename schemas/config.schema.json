@@ -3972,6 +3972,10 @@
 					"type": "boolean",
 					"description": "Default on. Environment: `GROK_TWO_PASS_COMPACTION`."
 				},
+				"compact_on_model_switch": {
+					"type": "boolean",
+					"description": "Default off. Environment: `GROK_COMPACT_ON_MODEL_SWITCH`."
+				},
 				"backend_tools": {
 					"type": "boolean",
 					"description": "Default on. Environment: `GROK_BACKEND_SEARCH`."
@@ -5032,6 +5036,14 @@
 						"boolean",
 						"null"
 					],
+					"default": null
+				},
+				"recall_enabled": {
+					"type": [
+						"boolean",
+						"null"
+					],
+					"description": "Search stored memory with each new stretch of conversation and show the model the notes that match.",
 					"default": null
 				},
 				"batch_dream_enabled": {

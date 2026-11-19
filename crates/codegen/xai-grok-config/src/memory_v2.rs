@@ -75,6 +75,8 @@ pub struct MemoryV2Settings {
     pub capture_enabled: Option<bool>,
     pub automatic_dream_enabled: Option<bool>,
     pub manual_dream_enabled: Option<bool>,
+    /// Search stored memory with each new stretch of conversation and show the model the notes that match.
+    pub recall_enabled: Option<bool>,
     /// Local value wins over remote `memory_v2.batch_dream_enabled`; unset on both sides means off.
     /// The Dream kill switches still apply.
     pub batch_dream_enabled: Option<bool>,

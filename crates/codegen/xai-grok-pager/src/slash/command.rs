@@ -186,7 +186,7 @@ pub struct CommandExecCtx<'a> {
 #[derive(Debug, Clone, PartialEq, Eq)]
 pub enum CommandProvenance {
     Builtin,
-    /// Non-skill ACP command (e.g. `/flush`).
+    /// Non-skill ACP command.
     Shell,
     /// Skill; `source` is the plugin install name or scope.
     Skill {

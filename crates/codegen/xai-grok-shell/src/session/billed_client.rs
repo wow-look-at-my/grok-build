@@ -55,6 +55,35 @@ impl UsageSink for SessionUsageSink {
     }
 }
 
+/// Bills a memory call to its session and adds the price to one memory total.
+#[derive(Debug)]
+pub(crate) struct MemoryUsageSink {
+    session: SharedUsageSink,
+    spent_usd_ticks: Arc<std::sync::atomic::AtomicU64>,
+}
+
+impl UsageSink for MemoryUsageSink {
+    fn record_call(&self, call: BilledCall) {
+        let price = price_model_call(&call.model, call.usage.as_ref(), call.cost_usd_ticks);
+        if let Some(ticks) = price.and_then(|ticks| u64::try_from(ticks).ok()) {
+            self.spent_usd_ticks
+                .fetch_add(ticks, std::sync::atomic::Ordering::Relaxed);
+        }
+        self.session.record_call(call);
+    }
+}
+
+/// `session`, with every call it bills also added to `spent_usd_ticks`.
+pub(crate) fn memory_usage_sink(
+    session: SharedUsageSink,
+    spent_usd_ticks: Arc<std::sync::atomic::AtomicU64>,
+) -> SharedUsageSink {
+    Arc::new(MemoryUsageSink {
+        session,
+        spent_usd_ticks,
+    })
+}
+
 /// The sink of the session that owns `chat_state`.
 pub(crate) fn session_usage_sink(chat_state: &xai_chat_state::ChatStateHandle) -> SharedUsageSink {
     Arc::new(SessionUsageSink {

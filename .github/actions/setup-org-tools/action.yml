@@ -21,9 +21,11 @@ runs:
           *) echo "::error::no org tool build for $(uname -m)"; exit 1 ;;
         esac
         branch=$(jq -rn --arg b "$BRANCH" '$b|@uri')
+        # A dropped connection must not fail the job.
+        retry=(--retry 20 --retry-delay 30 --retry-max-time 600 --retry-all-errors)
         for tool in $TOOLS; do
           url="https://dl.pazer.build/${tool}?branch=${branch}&os=${os}&arch=${arch}"
-          code=$(curl -sS -o /dev/null -w '%{http_code}' "$url")
+          code=$(curl -sS "${retry[@]}" -o /dev/null -w '%{http_code}' "$url")
           case "$code" in
             302) echo "::notice::${tool} follows its branch ${BRANCH}" ;;
             404)
@@ -34,7 +36,7 @@ runs:
           esac
           # Each build is an APE. A Linux runner's binfmt reads its MZ header as a Windows program, and execve on macOS refuses it. An APE is also a shell script, so sh starts it on both.
           sudo mkdir -p "/usr/local/lib/${tool}"
-          sudo curl -fsSL -o "/usr/local/lib/${tool}/${tool}" "$url"
+          sudo curl -fsSL "${retry[@]}" -o "/usr/local/lib/${tool}/${tool}" "$url"
           printf '#!/bin/sh\nexec sh /usr/local/lib/%s/%s "$@"\n' "$tool" "$tool" | sudo tee "/usr/local/bin/${tool}" > /dev/null
           sudo chmod +x "/usr/local/bin/${tool}"
           # Each build boots through a separate loader, apeld-<os>-<arch>. Its header takes APE_LOADER, then /usr/local/lib/ape, /usr/lib/ape and PATH. It unpacks the copy it carries only into a writable directory, and a jailed process gets none. The header names that copy and the dd line that unpacks it, so unpack it here and install it where the header searches.

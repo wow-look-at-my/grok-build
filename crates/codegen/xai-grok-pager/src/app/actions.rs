@@ -474,6 +474,14 @@ pub enum Action {
     SetTwoPassCompaction(bool),
     /// Delete the saved `[features].two_pass_compaction` key so the remote setting or the default applies again.
     ClearTwoPassCompaction,
+    /// Save `[features].compact_on_model_switch` as an explicit override. SHELL-owned; agents latch it when built, so it applies on restart.
+    SetCompactOnModelSwitch(bool),
+    /// Delete the saved `[features].compact_on_model_switch` key so the default applies again.
+    ClearCompactOnModelSwitch,
+    /// Save `[features].session_recap` as an explicit override. SHELL-owned; the shell re-reads it per request, so it applies live.
+    SetSessionRecap(bool),
+    /// Delete the saved `[features].session_recap` key so the remote setting or the default applies again.
+    ClearSessionRecap,
     /// SHELL-owned `keep_text_selection` (`flash` | `hold`); cache and persist.
     SetKeepTextSelection(crate::appearance::TextSelection),
     /// Set the mouse-wheel scroll speed multiplier (1-100).
@@ -1893,16 +1901,6 @@ pub enum Effect {
         path: String,
         expected_content_hash: String,
     },
-    /// Run `/flush` (example.invalid/memory/flush) as a tracked agent command.
-    MemoryFlush {
-        agent_id: AgentId,
-        session_id: acp::SessionId,
-    },
-    /// Run `/dream` (example.invalid/memory/dream) as a tracked agent command.
-    MemoryDream {
-        agent_id: AgentId,
-        session_id: acp::SessionId,
-    },
     /// Execute a hooks management action via ACP.
     HooksAction {
         agent_id: AgentId,
@@ -2848,16 +2846,6 @@ pub enum TaskResult {
         agent_id: AgentId,
         path: String,
         result: Result<xai_grok_shell::extensions::memory::MemoryForgetResponse, String>,
-    },
-    /// `/flush` finished.
-    MemoryFlushComplete {
-        agent_id: AgentId,
-        result: Result<xai_grok_shell::extensions::memory::MemoryFlushResponse, String>,
-    },
-    /// `/dream` finished.
-    MemoryDreamComplete {
-        agent_id: AgentId,
-        result: Result<xai_grok_shell::extensions::memory::MemoryDreamResponse, String>,
     },
     /// Hooks action completed.
     HooksActionResult {

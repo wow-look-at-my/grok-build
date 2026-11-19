@@ -1148,6 +1148,16 @@ pub(crate) async fn run(
         config_layers.as_ref(),
         remote_settings.as_ref(),
     );
+    app.compact_on_model_switch = crate::settings::FeatureOverrideState::from_layers(
+        xai_grok_shell::agent::config::Feature::CompactOnModelSwitch,
+        config_layers.as_ref(),
+        remote_settings.as_ref(),
+    );
+    app.session_recap = crate::settings::FeatureOverrideState::from_layers(
+        xai_grok_shell::agent::config::Feature::SessionRecap,
+        config_layers.as_ref(),
+        remote_settings.as_ref(),
+    );
     app.subscription_watch_interval_secs = remote_settings
         .as_ref()
         .and_then(|rs| rs.subscription_watch_interval_secs);
@@ -2781,7 +2791,7 @@ fn load_initial_config_session_bools() -> InitialConfigSessionBools {
 }
 /// Sync shell `sessionRecap` into the execution gate and every place that offers `/recap`.
 /// A dashboard created later is seeded in `dispatch_open_dashboard`.
-fn apply_session_recap_available(app: &mut AppView, available: bool) {
+pub(crate) fn apply_session_recap_available(app: &mut AppView, available: bool) {
     app.session_recap_available = available;
     for agent in app.agents.values_mut() {
         agent.set_session_recap_available(available);

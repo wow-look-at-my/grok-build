@@ -493,6 +493,8 @@ pub struct AcpUpdateTracker {
     priced_response_prompts: Vec<String>,
     /// Session-cumulative cost (USD ticks) as last reported by the agent's own session ledger — every model call and subagent fold.
     reported_session_cost_usd_ticks: Option<i64>,
+    /// The memory share of this run's spend, as last reported by the agent. Part of the session total.
+    memory_cost: Option<xai_grok_shell::extensions::notification::MemoryCostTotals>,
     /// A reload replayed at least one message that carries a cost from an earlier run.
     replayed_cost_seen: bool,
     /// The model's live output rate, as last reported by the agent's own meter.
@@ -1441,6 +1443,21 @@ impl AcpUpdateTracker {
         let changed = self.reported_session_cost_usd_ticks != Some(cost);
         self.reported_session_cost_usd_ticks = Some(cost);
         changed
+    }
+    /// Record this run's memory spend. Returns whether it changed.
+    pub fn set_memory_cost(
+        &mut self,
+        totals: xai_grok_shell::extensions::notification::MemoryCostTotals,
+    ) -> bool {
+        let changed = self.memory_cost != Some(totals);
+        self.memory_cost = Some(totals);
+        changed
+    }
+    /// This run's memory spend, or `None` before the agent reports any.
+    pub fn memory_cost(
+        &self,
+    ) -> Option<xai_grok_shell::extensions::notification::MemoryCostTotals> {
+        self.memory_cost
     }
     /// Record the model's live output rate. Returns whether the rendered
     /// number changed, so the caller repaints only when it did.

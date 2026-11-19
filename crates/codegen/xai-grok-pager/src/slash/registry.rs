@@ -106,7 +106,7 @@ impl CommandTrigger {
 /// Pager builtins that shadow a shell builtin of the same name and stay hidden until the shell's
 /// catalog advertises it. Any backend advertising one must implement the matching `example.invalid/memory/*`
 /// extension method.
-const SHELL_GATED_COMMANDS: &[&str] = &["memory", "flush", "dream"];
+const SHELL_GATED_COMMANDS: &[&str] = &["memory"];
 
 /// Owns the command objects and provides lookup by name/alias.
 /// Supports dynamic mutation via `set_acp_commands()` for runtime ACP command catalog updates.

@@ -35,7 +35,6 @@ enum WorkflowProjection {
 pub(crate) enum BuiltinGate {
     AlwaysOn,
     Feedback,
-    Memory,
     MemoryConfigured,
     /// Checks `scheduler_create` only.
     Scheduler,
@@ -80,26 +79,6 @@ pub(super) const BUILTIN_COMMANDS: &[BuiltinCommand] = &[
                 "off" | "false" | "0" | "no" | "disable"
             ),
         },
-    },
-    BuiltinCommand {
-        name: "flush",
-        description: "Flush conversation memory to disk now",
-        argument_hint: None,
-        aliases: &[],
-        model_authored_eligibility: ModelAuthoredEligibility::Denied,
-        gate: BuiltinGate::Memory,
-        workflow_projection: WorkflowProjection::None,
-        resolve: |_args| BuiltinAction::FlushMemory,
-    },
-    BuiltinCommand {
-        name: "dream",
-        description: "Run memory consolidation (merge session logs into organized topics)",
-        argument_hint: None,
-        aliases: &[],
-        model_authored_eligibility: ModelAuthoredEligibility::Denied,
-        gate: BuiltinGate::Memory,
-        workflow_projection: WorkflowProjection::None,
-        resolve: |_args| BuiltinAction::Dream,
     },
     BuiltinCommand {
         name: "memory",
@@ -353,14 +332,8 @@ pub(super) const BUILTIN_COMMANDS: &[BuiltinCommand] = &[
 ];
 /// Split the `/goal` flags off an objective: a `--lite` or `--full` token
 /// at either end, and a trailing `--budget <tokens>`. A mode flag must be
-/// its own token, and text must remain after it.
-fn parse_goal_args(
-    trimmed: &str,
-) -> (
-    String,
-    Option<i64>,
-    Option<crate::session::goal_tracker::GoalMode>,
-) {
+/// its own token, and text must remain after it. With no flag, the goal is lite.
+fn parse_goal_args(trimmed: &str) -> (String, Option<i64>, crate::session::goal_tracker::GoalMode) {
     let (leading, rest) = take_goal_mode_flag(trimmed, true);
     let (trailing, rest) = take_goal_mode_flag(rest, false);
     let (objective, budget) = parse_goal_budget(rest);
@@ -372,7 +345,11 @@ fn parse_goal_args(
         }
         _ => (None, objective),
     };
-    (objective, budget, leading.or(trailing).or(before_budget))
+    let mode = leading
+        .or(trailing)
+        .or(before_budget)
+        .unwrap_or(crate::session::goal_tracker::GoalMode::Lite);
+    (objective, budget, mode)
 }
 
 fn take_goal_mode_flag(
@@ -438,9 +415,6 @@ const PROMPT_COMMANDS: &[BuiltinCommand] = &[BuiltinCommand {
 #[derive(Debug, Clone, Copy, Default)]
 pub(crate) struct CommandAvailability {
     pub feedback: bool,
-    /// Memory is enabled with v2 filesystem access or legacy `memory_search`/`memory_get` tools.
-    /// `/flush` and `/dream` only make sense when the model can later read back what they wrote.
-    pub memory: bool,
     /// A legacy backend or v2 storage layout is configured, but not necessarily currently enabled.
     /// Gates `/memory` (browse and toggle) so the user can re-enable memory after toggling it off.
     pub memory_configured: bool,
@@ -457,7 +431,6 @@ impl CommandAvailability {
         match gate {
             BuiltinGate::AlwaysOn => true,
             BuiltinGate::Feedback => self.feedback,
-            BuiltinGate::Memory => self.memory,
             BuiltinGate::MemoryConfigured => self.memory_configured,
             BuiltinGate::Scheduler => self.scheduler,
             BuiltinGate::Hooks => self.hooks,
@@ -471,7 +444,6 @@ impl CommandAvailability {
     pub(crate) fn all_enabled() -> Self {
         Self {
             feedback: true,
-            memory: true,
             memory_configured: true,
             scheduler: true,
             hooks: true,
@@ -519,7 +491,6 @@ pub const PAGER_COMMAND_KEYS: &[&str] = &[
     "delete",
     "docs",
     "doctor",
-    "dream",
     "edit-prompt",
     "effort",
     "exit",
@@ -527,7 +498,6 @@ pub const PAGER_COMMAND_KEYS: &[&str] = &[
     "export",
     "feedback",
     "find",
-    "flush",
     "fork",
     "full",
     "fullscreen",
@@ -1274,8 +1244,6 @@ pub(super) enum BuiltinAction {
     SetYolo {
         enabled: bool,
     },
-    FlushMemory,
-    Dream,
     ContextInfo,
     HooksTrust,
     HooksList,
@@ -1314,7 +1282,7 @@ pub(super) enum BuiltinAction {
     GoalSet {
         objective: String,
         token_budget: Option<i64>,
-        mode: Option<crate::session::goal_tracker::GoalMode>,
+        mode: crate::session::goal_tracker::GoalMode,
     },
     GoalStatus,
     GoalPause,
@@ -1337,8 +1305,6 @@ impl BuiltinAction {
         match self {
             BuiltinAction::Compact { .. } => "compact",
             BuiltinAction::SetYolo { .. } => "yolo",
-            BuiltinAction::FlushMemory => "flush",
-            BuiltinAction::Dream => "dream",
             BuiltinAction::ContextInfo => "context",
             BuiltinAction::HooksTrust => "hooks-trust",
             BuiltinAction::HooksList => "hooks-list",
@@ -1370,8 +1336,6 @@ impl BuiltinAction {
         match self {
             BuiltinAction::Compact { user_context } => user_context.is_some(),
             BuiltinAction::SetYolo { .. } => true,
-            BuiltinAction::FlushMemory => false,
-            BuiltinAction::Dream => false,
             BuiltinAction::ContextInfo => false,
             BuiltinAction::HooksTrust => false,
             BuiltinAction::HooksList => false,

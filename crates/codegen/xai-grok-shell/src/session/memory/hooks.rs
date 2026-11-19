@@ -10,7 +10,7 @@
 //! - the first few real user topics from the session (never synthetic prefixes)
 //! - session date
 //!
-//! For richer content capture (decisions, patterns, reasoning) use `/flush`, which is user-initiated and produces an LLM-generated summary.
+//! Richer content (decisions, patterns, reasoning) comes from the memory flush, which produces an LLM-generated summary.
 //!
 //! ## Reliability
 //!

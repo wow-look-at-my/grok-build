@@ -66,6 +66,8 @@ pub(super) fn handle_settings_update(notif: &acp::ExtNotification, app: &mut App
             Ok(loaded) => {
                 app.subagent_model_inheritance.reseed_config_layers(&loaded);
                 app.two_pass_compaction.reseed_config_layers(&loaded);
+                app.compact_on_model_switch.reseed_config_layers(&loaded);
+                app.session_recap.reseed_config_layers(&loaded);
                 crate::app::dispatch::refresh_open_settings_modals(app);
             }
             Err(e) => {

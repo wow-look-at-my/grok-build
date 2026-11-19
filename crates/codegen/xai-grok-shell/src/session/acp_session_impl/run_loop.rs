@@ -663,6 +663,7 @@ pub(super) async fn run_session(
                             // Reset the first-turn injection check after compaction; it re-searches only if no block persisted
                             session.memory.context_injected
                                 .store(false, std::sync::atomic::Ordering::Relaxed);
+                            session.memory.recall.state.borrow_mut().reset();
                         }
                         Some(xai_chat_state::ChatStateEvent::ImageBudget {
                             body_bytes,
@@ -1185,6 +1186,14 @@ pub(super) async fn run_session(
                             SessionActor::resume_goal_after_background_settled(
                                 session.clone(),
                                 completion_tx.clone(),
+                            )
+                            .await;
+                        }
+                        SessionCommand::GoalVerificationSettled { note } => {
+                            SessionActor::resume_goal_after_verification(
+                                session.clone(),
+                                completion_tx.clone(),
+                                note,
                             )
                             .await;
                         }

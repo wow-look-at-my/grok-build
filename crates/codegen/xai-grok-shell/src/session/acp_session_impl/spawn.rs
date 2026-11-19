@@ -247,6 +247,7 @@ pub(crate) async fn spawn_session_actor(
     long_reasoning_reminder: crate::session::long_reasoning_reminder::LongReasoningReminder,
     compaction_tool_choice: crate::util::config::CompactionToolChoice,
     two_pass_enabled: bool,
+    compact_on_model_switch: bool,
     buffering_settings: Option<BufferingSettings>,
     origin_client: Option<crate::http::OriginClientInfo>,
     codebase_indexes: std::sync::Arc<parking_lot::Mutex<CodebaseIndexManager>>,
@@ -861,6 +862,7 @@ pub(crate) async fn spawn_session_actor(
                 .and_then(|r| r.compaction_wall_clock_budget_secs),
         ),
         two_pass_enabled,
+        compact_on_model_switch,
     };
     // The persisted `[ui].stop_gate_unfinished_todos` toggle (default ON, written by the pager's settings modal) is the master switch for the built-in todo-stop gate.
     let mut reminder_policy = resolve_reminder_policy(remote_settings.as_ref(), todo_gate);
@@ -948,6 +950,25 @@ pub(crate) async fn spawn_session_actor(
         .as_ref()
         .is_some_and(|mc| mc.root_dir_override.is_none() && mc.v2.can_run_maintenance());
     let mut memory_v2_access = None;
+    // Recall adds vectors only when an embedding model is configured. Without one it matches words.
+    let recall_embedding = memory_config
+        .as_ref()
+        .filter(|config| config.mode.is_v2() && config.v2.can_recall())
+        .map(|config| config.embedding.clone())
+        .filter(|embedding| embedding.model.as_ref().is_some_and(|m| !m.is_empty()))
+        .map(
+            |embedding| xai_grok_memory::backend::EmbeddingProviderParams {
+                config: embedding,
+                base_url: embed_base_url.clone(),
+                api_key: embed_api_key.clone(),
+                credentials: xai_grok_login::credential_provider::embedding_session_credentials(
+                    &embed_base_url,
+                    auth_manager.as_ref(),
+                    api_key_provider.clone(),
+                ),
+                usage_sink: crate::session::billed_client::session_usage_sink(&chat_state_handle),
+            },
+        );
     if let Some(storage) = memory_storage_for_session.clone() {
         if storage.mode().is_v2() {
             match memory_control::initialize_v2_memory(&storage, memory_v2_legacy_carryover)
@@ -1959,6 +1980,10 @@ pub(crate) async fn spawn_session_actor(
             dream_success_count: std::sync::atomic::AtomicU64::new(0),
             dream_error_count: std::sync::atomic::AtomicU64::new(0),
             token_totals: Default::default(),
+            recall: crate::session::memory_state::SessionRecall {
+                embedding: recall_embedding,
+                ..Default::default()
+            },
         },
         session_start: std::time::Instant::now(),
         inference_idle_timeout: Duration::from_secs(inference_idle_timeout_secs),
@@ -2021,7 +2046,7 @@ pub(crate) async fn spawn_session_actor(
         goal_harness_enabled: std::sync::atomic::AtomicBool::new(goal_enabled),
         goal_tracker,
         goal_turn_task_ids: parking_lot::Mutex::new(std::collections::HashSet::new()),
-        goal_background: Default::default(),
+        goal_background: super::goal_hold::GoalBackground::new(cmd_tx.clone()),
         goal_continuation_streak: std::sync::atomic::AtomicU32::new(0),
         workflow_manager: workflow_manager.clone(),
         workflow_launch_tx: workflow_launch_tx.clone(),
@@ -2581,6 +2606,7 @@ pub(crate) async fn spawn_session_on_thread(
     long_reasoning_reminder: crate::session::long_reasoning_reminder::LongReasoningReminder,
     compaction_tool_choice: crate::util::config::CompactionToolChoice,
     two_pass_enabled: bool,
+    compact_on_model_switch: bool,
     buffering_settings: Option<BufferingSettings>,
     origin_client: Option<crate::http::OriginClientInfo>,
     codebase_indexes: std::sync::Arc<parking_lot::Mutex<CodebaseIndexManager>>,
@@ -2797,6 +2823,7 @@ pub(crate) async fn spawn_session_on_thread(
                     long_reasoning_reminder,
                     compaction_tool_choice,
                     two_pass_enabled,
+                    compact_on_model_switch,
                     buffering_settings,
                     origin_client,
                     codebase_indexes,
