@@ -304,6 +304,7 @@ pub(super) fn handle_session_notification_with_origin(
         | XaiSessionUpdate::MemoryCaptureActivity { .. }
         | XaiSessionUpdate::MemoryDreamCompleted { .. }
         | XaiSessionUpdate::MemoryRecalled { .. }
+        | XaiSessionUpdate::MemoryRecallDegraded { .. }
         | XaiSessionUpdate::MemoryCost { .. }
         | XaiSessionUpdate::MemorySessionSaved { .. }) => {
             apply_compaction_or_retry_update(agent, update, is_api_key_auth)
@@ -1691,6 +1692,7 @@ pub(super) fn handle_child_session_notification(
         | XaiSessionUpdate::MemoryFlushCompleted { .. }
         | XaiSessionUpdate::MemoryDreamCompleted { .. }
         | XaiSessionUpdate::MemoryRecalled { .. }
+        | XaiSessionUpdate::MemoryRecallDegraded { .. }
         | XaiSessionUpdate::MemoryCost { .. }
         | XaiSessionUpdate::MemorySessionSaved { .. }
         | XaiSessionUpdate::HookAnnotation { .. } => {
@@ -2211,6 +2213,10 @@ pub(super) fn apply_session_event(
             }
             None => false,
         },
+        XaiSessionUpdate::MemoryRecallDegraded { reason } => {
+            scrollback.push_block(RenderBlock::system(memory_recall_degraded_message(reason)));
+            true
+        }
         XaiSessionUpdate::MemoryCost {
             totals,
             session_cost_usd_ticks,
@@ -2227,6 +2233,19 @@ pub(super) fn apply_session_event(
         _ => false,
     }
 }
+/// Says that recall lost its embedding lookup, and why, in one line.
+fn memory_recall_degraded_message(reason: &str) -> String {
+    const MAX_REASON_CHARS: usize = 240;
+    let reason: String = reason.split_whitespace().collect::<Vec<_>>().join(" ");
+    let mut shown: String = reason.chars().take(MAX_REASON_CHARS).collect();
+    if reason.chars().count() > MAX_REASON_CHARS {
+        shown.push('…');
+    }
+    format!(
+        "Memory recall matches on words only in this session: the embedding lookup cannot run ({shown})."
+    )
+}
+
 /// One line that names the stored notes recall showed the model.
 fn memory_recalled_message(
     notes: &[xai_grok_shell::extensions::notification::MemoryRecalledNote],
@@ -2540,6 +2559,28 @@ mod memory_capture_privacy_tests {
         let long = super::memory_recalled_message(&[note(&"x".repeat(200))]).unwrap();
         assert!(long.ends_with('…'), "{long}");
         assert!(long.chars().count() < 120, "{long}");
+    }
+
+    #[test]
+    fn a_degraded_recall_is_named_on_screen_with_its_reason() {
+        use crate::app::agent_view::test_fixtures::make_agent;
+        use xai_grok_shell::extensions::notification::SessionUpdate as XaiSessionUpdate;
+        let update = XaiSessionUpdate::MemoryRecallDegraded {
+            reason: "embedding API error 404:\n  not found".into(),
+        };
+        let mut agent = make_agent();
+        assert!(super::apply_session_event_for_test(
+            &update,
+            &mut agent.session,
+            &mut agent.scrollback,
+        ));
+        assert_eq!(
+            super::memory_recall_degraded_message("embedding API error 404:\n  not found"),
+            "Memory recall matches on words only in this session: the embedding lookup cannot run (embedding API error 404: not found)."
+        );
+        let long = super::memory_recall_degraded_message(&"x".repeat(900));
+        assert!(long.ends_with("…)."), "{long}");
+        assert!(long.chars().count() < 360, "{long}");
     }
 
     #[test]

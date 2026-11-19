@@ -138,6 +138,10 @@ pub struct MemoryEmbeddingSettings {
     pub provider: Option<String>,
     pub model: Option<String>,
     pub dimensions: Option<usize>,
+    /// OpenAI-style base URL for embedding calls. Unset sends them to the chat model's endpoint.
+    pub base_url: Option<String>,
+    /// Name of the environment variable that holds the key for `base_url`.
+    pub api_key_env: Option<String>,
 }
 
 #[derive(Debug, Clone, Default, PartialEq, Serialize, Deserialize, schemars::JsonSchema)]
@@ -256,6 +260,12 @@ pub struct MemoryEmbeddingConfig {
     pub model: Option<String>,
     /// Embedding vector dimensions.
     pub dimensions: usize,
+    /// OpenAI-style base URL for embedding calls.
+    pub base_url: Option<String>,
+    /// Name of the environment variable that holds the key for `base_url`.
+    pub api_key_env: Option<String>,
+    /// Send `dimensions` with each request.
+    pub request_dimensions: bool,
 }
 
 impl Default for MemoryEmbeddingConfig {
@@ -264,6 +274,9 @@ impl Default for MemoryEmbeddingConfig {
             provider: "api".to_string(),
             model: None,
             dimensions: 1024,
+            base_url: None,
+            api_key_env: None,
+            request_dimensions: true,
         }
     }
 }
@@ -744,6 +757,23 @@ impl MemoryConfig {
                             .map(|value| value as usize)
                     })
                     .unwrap_or(defaults.embedding.dimensions),
+                base_url: embedding
+                    .and_then(|settings| settings.base_url.as_deref())
+                    .map(str::trim)
+                    .filter(|url| !url.is_empty())
+                    .map(|url| url.trim_end_matches('/').to_owned()),
+                api_key_env: embedding
+                    .and_then(|settings| settings.api_key_env.as_deref())
+                    .map(str::trim)
+                    .filter(|name| !name.is_empty())
+                    .map(str::to_owned),
+                request_dimensions: embedding.is_none_or(|settings| {
+                    let has_own_endpoint = settings
+                        .base_url
+                        .as_deref()
+                        .is_some_and(|url| !url.trim().is_empty());
+                    !has_own_endpoint || settings.dimensions.is_some()
+                }),
             },
             search: MemorySearchConfig {
                 max_results: search

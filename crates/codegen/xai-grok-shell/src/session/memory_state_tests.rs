@@ -1,7 +1,31 @@
 use std::sync::Arc;
 use std::sync::atomic::{AtomicBool, Ordering};
 
-use super::{CaptureWorker, FlushLockGuard, V2DreamWorkers, run_v2_initialization_blocking};
+use super::{
+    CaptureWorker, EmbeddingFailures, FlushLockGuard, V2DreamWorkers,
+    run_v2_initialization_blocking,
+};
+
+#[test]
+fn one_missed_embedding_call_is_not_reported_and_a_second_in_a_row_is_reported_once() {
+    let mut failures = EmbeddingFailures::default();
+
+    assert!(!failures.failed(), "a cold local model misses one deadline");
+    failures.succeeded();
+    assert!(!failures.failed(), "a success ends the run of failures");
+    assert!(failures.failed());
+    assert!(!failures.failed(), "the user hears it one time");
+}
+
+#[test]
+fn a_call_that_can_never_run_is_reported_at_once_and_only_once() {
+    let mut failures = EmbeddingFailures::default();
+
+    assert!(failures.cannot_run());
+    assert!(!failures.cannot_run());
+    assert!(!failures.failed());
+    assert!(!failures.failed());
+}
 
 #[tokio::test(flavor = "current_thread")]
 async fn v2_initialization_crosses_the_blocking_boundary() {

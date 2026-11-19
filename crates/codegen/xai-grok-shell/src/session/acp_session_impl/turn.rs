@@ -2950,7 +2950,7 @@ impl SessionActor {
                 );
             }
             if !salvage.awaiting_continuation() {
-                self.inject_memory_recall(loop_index == 1).await;
+                self.inject_memory_recall().await;
                 self.maybe_inject_mcp_reminder().await;
             }
             let turn_parked = if self.uncharged_401_park_enabled && auth_retry_schedule.is_parked()
