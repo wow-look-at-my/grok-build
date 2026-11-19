@@ -121,7 +121,7 @@ pub struct MemoryV2Settings {
     pub capture_enabled: Option<bool>,
     pub automatic_dream_enabled: Option<bool>,
     pub manual_dream_enabled: Option<bool>,
-    /// Search stored memory with each new stretch of conversation and show the model the notes that match.
+    /// Search stored memory with each prompt the user sends and show the model the notes that match it.
     pub recall_enabled: Option<bool>,
     pub file_writes_enabled: Option<bool>,
     pub archived_retention_days: Option<u64>,

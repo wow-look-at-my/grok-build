@@ -4994,7 +4994,7 @@
 						"boolean",
 						"null"
 					],
-					"description": "Search stored memory with each new stretch of conversation and show the model the notes that match.",
+					"description": "Search stored memory with each prompt the user sends and show the model the notes that match it.",
 					"default": null
 				},
 				"file_writes_enabled": {

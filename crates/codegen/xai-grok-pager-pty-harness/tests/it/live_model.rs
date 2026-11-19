@@ -496,3 +496,221 @@ fn live_goal_runs_in_explore_mode() {
     harness.inject_keys(b"\x11").expect("ctrl-q confirm");
     let _ = harness.quit();
 }
+
+/// Opening tag of a memory recall reminder in the history.
+const RECALL_OPEN_TAG: &str = "<memory-recall>";
+/// The stored one prompt of the session asks about.
+const RELEASE_NOTE: &str = "release.md";
+
+/// The prompts of the memory session, in order. Only the third one is about a stored note.
+/// The second states a preference, so capture has something to write from this conversation.
+const MEMORY_PROMPTS: [&str; 5] = [
+    "Create a file named notes.txt that holds the single line hello. Then tell me its size in bytes.",
+    "From now on I want every text file in this project to end with a trailing newline, always. Add a second line that says goodbye to notes.txt.",
+    "How do I run the zebrafish deploy pipeline? Answer from what you know and run nothing.",
+    "Add a third line that says thanks to notes.txt, and keep my trailing newline rule.",
+    "Read notes.txt back to me and tell me how many lines it has.",
+];
+
+/// Every observation file under the memory directories of `grok_home`.
+fn observation_files(grok_home: &Path) -> Vec<PathBuf> {
+    let mut found = Vec::new();
+    let mut pending = vec![grok_home.join("memory-v2")];
+    while let Some(dir) = pending.pop() {
+        for entry in std::fs::read_dir(&dir).into_iter().flatten().flatten() {
+            let path = entry.path();
+            if path.is_dir() {
+                pending.push(path);
+            } else if path.to_string_lossy().contains("observations/_inbox/") {
+                found.push(path);
+            }
+        }
+    }
+    found
+}
+
+/// The note lines of every recall reminder, grouped by the prompt they followed.
+fn recalled_notes_by_prompt(history: &[Value]) -> Vec<Vec<String>> {
+    let mut by_prompt: Vec<Vec<String>> = vec![Vec::new(); MEMORY_PROMPTS.len()];
+    let mut current = None;
+    for item in history.iter().filter(|item| item["type"] == "user") {
+        let text = item.to_string();
+        if text.contains(RECALL_OPEN_TAG) {
+            let slot = current.expect("a recall reminder follows a prompt");
+            let notes = text
+                .split("\\n")
+                .filter(|line| line.trim_start().starts_with("- ") && line.contains("ref "))
+                .map(|line| line.trim().to_owned());
+            by_prompt[slot] = notes.collect();
+        } else if let Some(index) = MEMORY_PROMPTS
+            .iter()
+            .position(|prompt| text.contains(prompt))
+        {
+            current = Some(index);
+        }
+    }
+    by_prompt
+}
+
+/// A live model works through prompts with tools while capture writes notes from the same conversation. One prompt
+/// asks about a stored note. That note is recalled for it, and nothing is recalled for any other prompt.
+#[cfg(unix)]
+#[test]
+#[ignore = "live model; needs GROK_LIVE_BASE_URL, GROK_LIVE_MODEL and GROK_LIVE_KEY_ENV"]
+fn live_session_recalls_a_note_only_for_the_prompt_that_asks_about_it() {
+    let base_url = required_env("GROK_LIVE_BASE_URL");
+    let model = required_env("GROK_LIVE_MODEL");
+    let key_env = required_env("GROK_LIVE_KEY_ENV");
+    let key = required_env(&key_env);
+
+    let sandbox = TestSandbox::new();
+    let grok_home = sandbox.grok_home().to_path_buf();
+    // Memory is off for a workspace in the system temp directory.
+    let workspace =
+        Path::new(env!("CARGO_TARGET_TMPDIR")).join(format!("live-memory-{}", std::process::id()));
+    std::fs::create_dir_all(&workspace).expect("create the workspace");
+    let config = json!({
+        "models": {
+            "default": "live",
+            "providers": {
+                "live": { "base_url": base_url, "env_key": key_env, "models_autodetect": false }
+            },
+            "definitions": {
+                "live": { "model_provider": "live", "model": model, "context_window": 200_000 }
+            }
+        }
+    });
+    std::fs::write(grok_home.join("config.json"), config.to_string()).expect("write config");
+    let topics = grok_home.join("memory-v2").join("global").join("topics");
+    std::fs::create_dir_all(&topics).expect("create the topics directory");
+    std::fs::write(
+        topics.join(RELEASE_NOTE),
+        "# Release steps\nHow a release is cut.\n\n## Zebrafish deploy pipeline\n\
+         - The zebrafish deploy pipeline starts with `make quokka-release`.\n",
+    )
+    .expect("write the release note");
+    std::fs::write(
+        topics.join("files.md"),
+        "# Editor setup\nHow the editor is set up.\n\n## Formatting\n\
+         - The formatter rewrites a text file on save and keeps every line under a fixed length.\n",
+    )
+    .expect("write the editor note");
+
+    let mut env: Vec<(String, String)> = vec![
+        (key_env.clone(), key),
+        ("TERM".into(), "xterm-256color".into()),
+        ("COLORTERM".into(), "truecolor".into()),
+    ];
+    for name in NETWORK_ENV {
+        if let Ok(value) = std::env::var(name) {
+            env.push((name.to_owned(), value));
+        }
+    }
+    let env_refs: Vec<(&str, &str)> = env.iter().map(|(k, v)| (k.as_str(), v.as_str())).collect();
+
+    let binary = pager_binary().expect("resolve pager binary");
+    let mut harness = PtyHarness::new_in_sandbox(
+        &binary,
+        160,
+        140,
+        &["--yolo", "--trust"],
+        &sandbox,
+        &env_refs,
+        Some(&workspace),
+    )
+    .expect("spawn pager");
+    harness
+        .wait_for_text(WELCOME, Duration::from_secs(30))
+        .unwrap_or_else(|e| panic!("welcome: {e:#}\nscreen:\n{}", harness.screen_contents()));
+
+    for (index, prompt) in MEMORY_PROMPTS.iter().enumerate() {
+        let notes_before = observation_files(&grok_home).len();
+        harness.inject_keys(prompt.as_bytes()).expect("type prompt");
+        harness.update(Duration::from_millis(500));
+        harness.inject_keys(b"\r").expect("submit prompt");
+
+        // The turn is over when its last item is an answer with no tool call, and nothing follows it.
+        let mut stable_since: Option<(usize, std::time::Instant)> = None;
+        let answered = wait_until(Duration::from_secs(600), || {
+            harness.update(Duration::from_millis(500));
+            let history = chat_history_if_any(&grok_home);
+            let asked = history
+                .iter()
+                .rposition(|item| item["type"] == "user" && item.to_string().contains(prompt));
+            let ended = asked.is_some()
+                && history.last().is_some_and(|item| {
+                    item["type"] == "assistant"
+                        && tool_call_names(item).is_empty()
+                        && !item["content"]
+                            .as_str()
+                            .unwrap_or_default()
+                            .trim()
+                            .is_empty()
+                });
+            if !ended {
+                stable_since = None;
+                return false;
+            }
+            match stable_since {
+                Some((len, since)) if len == history.len() => {
+                    since.elapsed() >= Duration::from_secs(4)
+                }
+                _ => {
+                    stable_since = Some((history.len(), std::time::Instant::now()));
+                    false
+                }
+            }
+        });
+        assert!(
+            answered,
+            "the live model must finish prompt {}\nscreen:\n{}",
+            index + 1,
+            harness.screen_contents()
+        );
+        // Capture runs after the turn. The next prompt must find its note on disk.
+        wait_until(Duration::from_secs(90), || {
+            harness.update(Duration::from_millis(500));
+            observation_files(&grok_home).len() > notes_before
+        });
+    }
+
+    let history = chat_history(&grok_home);
+    let recalled = recalled_notes_by_prompt(&history);
+    let captured = observation_files(&grok_home);
+    println!(
+        "LIVE memory session, notes captured from it: {}",
+        captured.len()
+    );
+    for (index, notes) in recalled.iter().enumerate() {
+        println!(
+            "LIVE prompt {}: {} recalled {notes:?}",
+            index + 1,
+            notes.len()
+        );
+    }
+
+    harness.inject_keys(b"\x11").expect("ctrl-q once");
+    harness.update(Duration::from_millis(300));
+    harness.inject_keys(b"\x11").expect("ctrl-q confirm");
+    let _ = harness.quit();
+    let _ = std::fs::remove_dir_all(&workspace);
+
+    assert!(
+        !captured.is_empty(),
+        "capture must write a note from this conversation, or the session proves nothing about them"
+    );
+    for (index, notes) in recalled.iter().enumerate() {
+        if index == 2 {
+            assert!(
+                notes.len() == 1 && notes.iter().all(|note| note.contains(RELEASE_NOTE)),
+                "the prompt about the deploy pipeline must recall the release note and nothing else: {notes:?}"
+            );
+        } else {
+            assert!(
+                notes.is_empty(),
+                "prompt {} is about no stored note, and recalled {notes:?}",
+                index + 1
+            );
+        }
+    }
+}
