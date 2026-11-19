@@ -1,6 +1,6 @@
 //! Voice pipeline: mic capture goes to STT and transcripts come back as pager events.
 //!
-//! Two STT routes share one capture path, chosen per session by [`SttRoutes`]: streaming when `api.example.invalid` accepts
+//! STT routes share one capture path, chosen per session by [`SttRoutes`]: streaming when `api.example.invalid` accepts
 //! the bearer, else the host's clip transcriber. The pager sees the same commands and events either way, plus
 //! [`VoiceEvent::Transcribing`] after a clip stops.
 //!

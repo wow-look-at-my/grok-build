@@ -163,7 +163,6 @@ pub trait TraceUploadEndpoints {
         auth_token: Option<String>,
     ) -> Option<crate::session::repo_changes::UploadMethod>;
     /// Whether `auth`'s privacy flags block trace uploads.
-    /// Every upload goes through the proxy, so the coding-data opt-out always applies.
     fn is_trace_upload_blocked_for(&self, auth: &xai_grok_login::GrokAuth) -> bool;
 }
 impl TraceUploadEndpoints for EndpointsConfig {

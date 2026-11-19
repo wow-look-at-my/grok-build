@@ -1,3 +1,5 @@
+// claude_import.rs holds is_claude_import_marked.
+
 use std::path::Path;
 
 #[derive(Debug, Clone, Copy, PartialEq, Eq)]

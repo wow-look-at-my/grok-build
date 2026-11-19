@@ -170,7 +170,6 @@ pub fn is_xai_oauth2_issuer(issuer: &str) -> bool {
     issuer == XAI_OAUTH2_ISSUER || issuer == XAI_OAUTH2_LOCAL_ISSUER
 }
 /// auth.json scope key used by the pre-OIDC `grok login --legacy` flow.
-/// Matches the key format produced by the original `accounts.example.invalid` relay auth.
 pub const LEGACY_AUTH_SCOPE: &str = "https://accounts.example.invalid/sign-in";
 /// `[grok_com_config]` as a config writes it. A field it omits keeps the value it is merged over,
 /// down to a single field of a provider table: the provider fields' serde default is `None`, so
