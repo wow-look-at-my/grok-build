@@ -2184,6 +2184,7 @@ impl SessionActor {
         self.memory
             .context_injected
             .store(false, std::sync::atomic::Ordering::Relaxed);
+        self.memory.recall.state.borrow_mut().reset();
         if self.memory.is_enabled() {
             tracing::info!(target: xai_grok_telemetry::memory_log::TARGET, "MEMORY_COMPACT: post-compaction reset, next turn re-checks injection (search only if no block persisted)");
         }

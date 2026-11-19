@@ -303,6 +303,8 @@ pub(super) fn handle_session_notification_with_origin(
         | XaiSessionUpdate::MemoryFlushCompleted { .. }
         | XaiSessionUpdate::MemoryCaptureActivity { .. }
         | XaiSessionUpdate::MemoryDreamCompleted { .. }
+        | XaiSessionUpdate::MemoryRecalled { .. }
+        | XaiSessionUpdate::MemoryCost { .. }
         | XaiSessionUpdate::MemorySessionSaved { .. }) => {
             apply_compaction_or_retry_update(agent, update, is_api_key_auth)
         }
@@ -1285,9 +1287,10 @@ pub(super) fn handle_session_notification_with_origin(
                 dream_enabled,
             };
             agent.active_modal = Some(crate::views::modal::ActiveModal::MemoryBrowser {
-                state: Box::new(crate::views::memory_modal::MemoryModalState::from_listing(
-                    listing,
-                )),
+                state: Box::new(
+                    crate::views::memory_modal::MemoryModalState::from_listing(listing)
+                        .with_memory_cost(agent.session.tracker.memory_cost()),
+                ),
             });
             true
         }
@@ -1664,6 +1667,8 @@ pub(super) fn handle_child_session_notification(
         | XaiSessionUpdate::RetryState(_)
         | XaiSessionUpdate::MemoryFlushCompleted { .. }
         | XaiSessionUpdate::MemoryDreamCompleted { .. }
+        | XaiSessionUpdate::MemoryRecalled { .. }
+        | XaiSessionUpdate::MemoryCost { .. }
         | XaiSessionUpdate::MemorySessionSaved { .. } => {
             let mut changed = false;
             if let Some(child_view) = agent.child_view_for_live_update_mut(child_sid) {
@@ -1989,10 +1994,10 @@ fn memory_capture_failure_message(
 fn automatic_dream_failure_message(result: &str) -> Option<&'static str> {
     match result {
         "failed" => Some(
-            "Automatic memory consolidation (Dream) failed. Captured observations stay pending. Run /dream to retry and see the error.",
+            "Automatic memory consolidation (Dream) failed. Captured notes stay pending. Consolidation runs again after the next capture or at the next session start.",
         ),
         "retry required" => Some(
-            "Automatic memory consolidation (Dream) did not finish and will retry. Run /dream to retry now and see the error.",
+            "Automatic memory consolidation (Dream) did not finish. Captured notes stay pending. Consolidation runs again after the next capture or at the next session start.",
         ),
         _ => None,
     }
@@ -2137,8 +2142,48 @@ pub(super) fn apply_session_event(
             }
             None => false,
         },
+        XaiSessionUpdate::MemoryRecalled { notes } => match memory_recalled_message(notes) {
+            Some(message) => {
+                scrollback.push_block(RenderBlock::system(message));
+                true
+            }
+            None => false,
+        },
+        XaiSessionUpdate::MemoryCost {
+            totals,
+            session_cost_usd_ticks,
+        } => {
+            // A REPLAYED total belongs to the run that wrote it.
+            if session.loading_replay {
+                return false;
+            }
+            let total_changed = session
+                .tracker
+                .set_reported_session_cost(*session_cost_usd_ticks);
+            session.tracker.set_memory_cost(*totals) || total_changed
+        }
         _ => false,
     }
+}
+/// One line that names the stored notes recall showed the model.
+fn memory_recalled_message(
+    notes: &[xai_grok_shell::extensions::notification::MemoryRecalledNote],
+) -> Option<String> {
+    const MAX_TITLE_CHARS: usize = 72;
+    if notes.is_empty() {
+        return None;
+    }
+    let titles: Vec<String> = notes
+        .iter()
+        .map(|note| {
+            let mut title: String = note.title.chars().take(MAX_TITLE_CHARS).collect();
+            if note.title.chars().count() > MAX_TITLE_CHARS {
+                title.push('…');
+            }
+            title
+        })
+        .collect();
+    Some(format!("Recalled from memory: {}", titles.join(" · ")))
 }
 /// True if the trailing run of session/system blocks contains a [`SessionEvent::CompactionFailed`].
 /// Used so we don't stack a [`SessionEvent::ContextTooLarge`] prompt on top of the compaction handler's "too large to compact" message.
@@ -2415,5 +2460,73 @@ mod memory_capture_privacy_tests {
         assert!(super::automatic_dream_failure_message("retry required").is_some());
         assert!(super::automatic_dream_failure_message("completed").is_none());
         assert!(super::automatic_dream_failure_message("no work").is_none());
+    }
+
+    #[test]
+    fn a_recall_names_its_notes_on_one_line() {
+        use xai_grok_shell::extensions::notification::MemoryRecalledNote;
+        let note = |title: &str| MemoryRecalledNote {
+            title: title.to_owned(),
+            path: "/memory/topics/note.md".to_owned(),
+        };
+        assert_eq!(super::memory_recalled_message(&[]), None);
+        assert_eq!(
+            super::memory_recalled_message(&[note("Sandbox jail"), note("Prefers tabs")])
+                .as_deref(),
+            Some("Recalled from memory: Sandbox jail · Prefers tabs")
+        );
+        let long = super::memory_recalled_message(&[note(&"x".repeat(200))]).unwrap();
+        assert!(long.ends_with('…'), "{long}");
+        assert!(long.chars().count() < 120, "{long}");
+    }
+
+    #[test]
+    fn a_memory_cost_update_stores_the_totals_and_adopts_the_session_cost() {
+        use crate::app::agent_view::test_fixtures::make_agent;
+        use xai_grok_shell::extensions::notification::{
+            MemoryCostTotals, SessionUpdate as XaiSessionUpdate,
+        };
+        let totals = MemoryCostTotals {
+            capture_usd_ticks: 300_000_000,
+            consolidation_usd_ticks: 0,
+            recall_usd_ticks: 11_000_000,
+        };
+        let update = XaiSessionUpdate::MemoryCost {
+            totals,
+            session_cost_usd_ticks: Some(5_000_000_000),
+        };
+        let mut agent = make_agent();
+        assert!(super::apply_session_event_for_test(
+            &update,
+            &mut agent.session,
+            &mut agent.scrollback,
+        ));
+        assert_eq!(agent.session.tracker.memory_cost(), Some(totals));
+        assert_eq!(
+            agent.session.tracker.reported_session_cost_usd_ticks(),
+            Some(5_000_000_000)
+        );
+        assert!(
+            !super::apply_session_event_for_test(
+                &update,
+                &mut agent.session,
+                &mut agent.scrollback,
+            ),
+            "the same update changes nothing"
+        );
+
+        // A replayed update belongs to the run that wrote it.
+        let mut replayed = make_agent();
+        replayed.session.loading_replay = true;
+        assert!(!super::apply_session_event_for_test(
+            &update,
+            &mut replayed.session,
+            &mut replayed.scrollback,
+        ));
+        assert_eq!(replayed.session.tracker.memory_cost(), None);
+        assert_eq!(
+            replayed.session.tracker.reported_session_cost_usd_ticks(),
+            None
+        );
     }
 }

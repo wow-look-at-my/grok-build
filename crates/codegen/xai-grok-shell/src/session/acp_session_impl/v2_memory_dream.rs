@@ -4,8 +4,9 @@ use super::*;
 
 const V2_DREAM_MODEL_TIMEOUT: std::time::Duration = std::time::Duration::from_secs(30 * 60);
 const V2_DREAM_MODEL_IDLE_TIMEOUT: std::time::Duration = std::time::Duration::from_secs(15 * 60);
-const V2_DREAM_MIN_PENDING_COUNT: usize = 20;
-const V2_DREAM_MAX_PENDING_AGE: std::time::Duration = std::time::Duration::from_secs(24 * 60 * 60);
+const V2_DREAM_MIN_PENDING_COUNT: usize = 12;
+/// Short enough that the notes of one working session are topics before the next one starts.
+const V2_DREAM_MAX_PENDING_AGE: std::time::Duration = std::time::Duration::from_secs(2 * 60 * 60);
 const V2_PROMOTION_RETRY_INTERVAL: std::time::Duration = std::time::Duration::from_secs(30);
 const V2_PROMOTION_MAX_RETRIES: usize = 120;
 
@@ -312,6 +313,39 @@ enum V2DreamInvocation {
     Manual,
 }
 
+/// Capture feeds both scopes, so promotion, garbage collection and Dream cover both.
+const V2_DREAM_SCOPES: [xai_grok_memory::V2MemoryScope; 2] = [
+    xai_grok_memory::V2MemoryScope::Workspace,
+    xai_grok_memory::V2MemoryScope::Global,
+];
+
+/// One answer for a forced Dream over both scopes. A scope with nothing to do never hides what
+/// the other scope did, and the first failure is the one reported.
+fn combine_scope_outcomes(
+    first: MemoryDreamResponse,
+    second: MemoryDreamResponse,
+) -> MemoryDreamResponse {
+    if second.disposition == MemoryDreamDisposition::NoWork {
+        first
+    } else if first.disposition == MemoryDreamDisposition::NoWork {
+        second
+    } else if !first.succeeded() {
+        first
+    } else {
+        first.then(second)
+    }
+}
+
+fn v2_scope_dir(
+    storage: &crate::session::memory::MemoryStorage,
+    scope: xai_grok_memory::V2MemoryScope,
+) -> std::path::PathBuf {
+    match scope {
+        xai_grok_memory::V2MemoryScope::Global => storage.global_dir().to_path_buf(),
+        xai_grok_memory::V2MemoryScope::Workspace => storage.workspace_dir().to_path_buf(),
+    }
+}
+
 fn v2_dream_invocation_enabled(
     config: crate::config::MemoryV2Config,
     invocation: V2DreamInvocation,
@@ -467,18 +501,35 @@ impl SessionActor {
         let Some(storage) = self.memory.storage() else {
             return;
         };
-        let workspace = storage.workspace_dir().to_path_buf();
+        for scope in V2_DREAM_SCOPES {
+            self.promote_v2_hidden_observations_in(
+                v2_scope_dir(&storage, scope),
+                scope,
+                retry_deferred,
+                clock.clone(),
+            )
+            .await;
+        }
+    }
+
+    async fn promote_v2_hidden_observations_in(
+        &self,
+        scope_dir: std::path::PathBuf,
+        scope: xai_grok_memory::V2MemoryScope,
+        retry_deferred: bool,
+        clock: xai_grok_memory::SharedV2Clock,
+    ) {
         let cancel = self.memory.dream_workers.cancellation_token();
         for attempt in 0..=V2_PROMOTION_MAX_RETRIES {
             if cancel.is_cancelled() {
                 return;
             }
-            let attempt_workspace = workspace.clone();
+            let attempt_scope_dir = scope_dir.clone();
             let attempt_clock = clock.clone();
             match xai_spawn::spawn_blocking(move || {
                 xai_grok_memory::V2CaptureStore::open_with_clock(
-                    &attempt_workspace,
-                    xai_grok_memory::V2MemoryScope::Workspace,
+                    &attempt_scope_dir,
+                    scope,
                     attempt_clock,
                 )?
                 .promote_hidden_observations_now()
@@ -528,18 +579,22 @@ impl SessionActor {
         };
         let global = storage.global_dir().to_path_buf();
         let workspace = storage.workspace_dir().to_path_buf();
-        if followups.run_maintenance {
+        for scope in V2_DREAM_SCOPES {
+            if !followups.run_maintenance {
+                break;
+            }
             let retention = xai_grok_memory::RetentionPolicy {
                 archived_observation_days: self.memory.v2_config.archived_retention_days,
                 terminal_job_days: self.memory.v2_config.job_retention_days,
             };
+            let maintenance_scope_dir = v2_scope_dir(&storage, scope);
             let maintenance_global = global.clone();
             let maintenance_workspace = workspace.clone();
             let maintenance_clock = clock.clone();
             match xai_spawn::spawn_blocking(move || {
                 let maintenance = xai_grok_memory::V2MaintenanceStore::open_with_clock(
-                    &maintenance_workspace,
-                    xai_grok_memory::V2MemoryScope::Workspace,
+                    &maintenance_scope_dir,
+                    scope,
                     &maintenance_global,
                     &maintenance_workspace,
                     maintenance_clock,
@@ -585,16 +640,49 @@ impl SessionActor {
                 }
             }
         }
-        if !followups.evaluate_automatic_dream {
+        if followups.evaluate_automatic_dream {
+            self.evaluate_automatic_v2_dream(cancel, clock).await;
+        }
+    }
+
+    /// Run Dream when the pending observations meet the count or age gate. Nothing polls it:
+    /// a finished capture and a session start call it, so no backlog waits for a command.
+    pub(super) async fn evaluate_automatic_v2_dream(
+        self: &Arc<Self>,
+        cancel: tokio_util::sync::CancellationToken,
+        clock: xai_grok_memory::SharedV2Clock,
+    ) {
+        for scope in V2_DREAM_SCOPES {
+            if cancel.is_cancelled() {
+                return;
+            }
+            self.evaluate_automatic_v2_dream_in(scope, cancel.clone(), clock.clone())
+                .await;
+        }
+    }
+
+    async fn evaluate_automatic_v2_dream_in(
+        self: &Arc<Self>,
+        scope: xai_grok_memory::V2MemoryScope,
+        cancel: tokio_util::sync::CancellationToken,
+        clock: xai_grok_memory::SharedV2Clock,
+    ) {
+        if !self.memory.v2_config.can_run_automatic_dream() {
             return;
         }
+        let Some(storage) = self.memory.storage() else {
+            return;
+        };
+        let scope_dir = v2_scope_dir(&storage, scope);
+        let global = storage.global_dir().to_path_buf();
+        let workspace = storage.workspace_dir().to_path_buf();
         let is_shadow = self.memory.v2_config.rollout == crate::config::MemoryV2Rollout::Shadow;
         let started_at = std::time::Instant::now();
         let eligibility_clock = clock.clone();
         let eligibility = xai_spawn::spawn_blocking(move || {
             let store = xai_grok_memory::V2ConsolidationStore::open_with_clock(
-                &workspace,
-                xai_grok_memory::V2MemoryScope::Workspace,
+                &scope_dir,
+                scope,
                 &global,
                 &workspace,
                 eligibility_clock.clone(),
@@ -626,7 +714,7 @@ impl SessionActor {
                     started_at,
                     None,
                 );
-                self.run_v2_dream_with_cancel(V2DreamInvocation::Automatic, cancel, clock)
+                self.run_v2_dream_with_cancel(V2DreamInvocation::Automatic, scope, cancel, clock)
                     .await;
             }
             Ok(Ok(eligibility)) => {
@@ -659,18 +747,29 @@ impl SessionActor {
     }
 
     pub(super) async fn run_v2_dream_slash_command(self: &Arc<Self>) -> MemoryDreamResponse {
-        self.run_v2_dream_with_cancel(
-            V2DreamInvocation::Manual,
-            self.memory.dream_workers.cancellation_token(),
-            xai_grok_memory::system_v2_clock(),
-        )
-        .await
+        let mut outcome: Option<MemoryDreamResponse> = None;
+        for scope in V2_DREAM_SCOPES {
+            let pass = self
+                .run_v2_dream_with_cancel(
+                    V2DreamInvocation::Manual,
+                    scope,
+                    self.memory.dream_workers.cancellation_token(),
+                    xai_grok_memory::system_v2_clock(),
+                )
+                .await;
+            outcome = Some(match outcome {
+                Some(earlier) => combine_scope_outcomes(earlier, pass),
+                None => pass,
+            });
+        }
+        outcome.unwrap_or(MemoryDreamResponse::new(MemoryDreamDisposition::Disabled))
     }
 
     /// Runs Dream passes until no coalesced trigger remains; the last pass's outcome is returned.
     async fn run_v2_dream_with_cancel(
         self: &Arc<Self>,
         invocation: V2DreamInvocation,
+        scope: xai_grok_memory::V2MemoryScope,
         cancel: tokio_util::sync::CancellationToken,
         clock: xai_grok_memory::SharedV2Clock,
     ) -> MemoryDreamResponse {
@@ -697,7 +796,10 @@ impl SessionActor {
                 if cancel.is_cancelled() {
                     break;
                 }
-                let pass = session.execute_v2_dream(&cancel, clock.clone()).await;
+                let pass = session
+                    .execute_v2_dream(scope, &cancel, clock.clone())
+                    .await;
+                session.report_memory_cost().await;
                 if pass.notify {
                     session
                         .send_xai_notification(XaiSessionUpdate::MemoryDreamCompleted {
@@ -766,6 +868,7 @@ impl SessionActor {
     /// the pass requires another iteration in the same tracked caller task.
     async fn execute_v2_dream(
         &self,
+        scope: xai_grok_memory::V2MemoryScope,
         cancel: &tokio_util::sync::CancellationToken,
         clock: xai_grok_memory::SharedV2Clock,
     ) -> V2DreamPass {
@@ -796,13 +899,14 @@ impl SessionActor {
         let workspace = storage.workspace_dir().to_path_buf();
         let is_shadow = self.memory.v2_config.rollout == crate::config::MemoryV2Rollout::Shadow;
         let claimed = xai_spawn::spawn_blocking({
+            let scope_dir = v2_scope_dir(&storage, scope);
             let global = global.clone();
             let workspace = workspace.clone();
             let store_clock = clock.clone();
             move || {
                 let store = xai_grok_memory::V2ConsolidationStore::open_with_clock(
-                    &workspace,
-                    xai_grok_memory::V2MemoryScope::Workspace,
+                    &scope_dir,
+                    scope,
                     &global,
                     &workspace,
                     store_clock.clone(),
@@ -1159,6 +1263,10 @@ impl SessionActor {
                     detail: error.to_string(),
                     usage: xai_grok_telemetry::memory_telemetry::MemoryV2ModelUsage::default(),
                 })?;
+        let sampling_client = self.memory_billed_client(
+            sampling_client,
+            &self.memory.token_totals.dream_cost_usd_ticks,
+        );
         let model = self
             .chat_state_handle
             .get_sampling_config()

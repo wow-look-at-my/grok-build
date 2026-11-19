@@ -93,6 +93,10 @@ CI is the source of truth and builds every pushed branch. A branch that is only 
 
 [docs/harness-model-slot-notes.md](docs/harness-model-slot-notes.md) holds this section.
 
+## Memory notes
+
+[docs/memory-notes.md](docs/memory-notes.md) holds this section: capture after every turn, the global and workspace split, and automatic Dream on both scopes. It also covers recall of stored notes from the conversation.
+
 ## Keep-awake notes
 
 - `[ui.notifications].keep_awake` is `never` | `while_running` (default) | `always`. The old `sleep_prevention` bool still reads as an alias. A child process holds the lock: `caffeinate -i -w <pid>` on macOS, `systemd-inhibit --what=idle` on Linux (`notifications/sleep.rs`).
@@ -211,13 +215,7 @@ CI is the source of truth and builds every pushed branch. A branch that is only 
 
 ## The todo list cannot be discarded or overwritten
 
-- A todo is the user's. Nothing can delete one: an item leaves the actionable set only by becoming `Completed` or `Cancelled`, both of which name it by id. Sending that id with new content changes text.
-- Every `todo_write` is a merge, and an item the call omits survives with its status untouched. `merge: false` used to clear the list and keep only what the call resent. This is how a status update that forgot the flag erased the user's list.
-- `merge` is still accepted on the wire and ignored. It is `#[schemars(skip)]` now that both values behave the same — advertising it will describe a choice the tool no longer offers.
-- `TodoState` has no `clear` and no remove of any shape. The guarantee lives in the data structure so a later caller cannot reach around it.
-- The list only grows, and every `todo_write` echoes all of it. So `summarize_todo_state` echoes a completed or cancelled item as its first line, cut at `FINISHED_ITEM_ECHO_CHARS`. The state keeps the full text. The post-compaction reminder already collapses finished items to counts.
-- A goal start (`create_goal_orchestration`) and a goal completion call `archive_finished_todos`. It sets `TodoItem::archived` on every finished item. That item stays in the state, but the echo shows only a count, and the todo pane and goal popup hide it (`a` shows it). A status update to open work clears the flag.
-- opencode's `todowrite` sends a whole list with no ids, so it merges by ITEM TEXT, not by position. Position is not identity. Keying on it let a reordered or shorter list write one row's text over another's, which loses work as surely as a delete.
+[docs/the-todo-list-cannot-be-discarded-or-overwritten.md](docs/the-todo-list-cannot-be-discarded-or-overwritten.md) holds this section. A todo is never deleted, every `todo_write` is a merge, and finished items are archived, not removed.
 
 ## Cost-indicator feature notes
 
@@ -327,13 +325,7 @@ Every one of those is the test doing its job. Making them pass there means weake
 
 ## Retry-visibility notes
 
-- A retry says what failed and how long the wait is. `SamplingEvent::Retrying` already carried `reason`, which is the error's own `Display`. It now also carries `retry_in_ms`, the backoff the actor is about to sleep.
-- Both ride `RetryState::Retrying` to the pager. It renders `Retrying in 27s (1/5):` and drops the countdown once the wait is over. The retried request is then in flight. See `retry_label` in `views/turn_status.rs`.
-- The reason goes on the rows under that header, wrapped and never cut (`retry_reason_lines`). `turn_status::desired_height` gives the row count to the layout. The layout gives it every scrollback row above `SCROLLBACK_MIN_ROWS` and no prompt row. Only an error taller than that ends its last row in `…`.
-- `retry_in_ms` is `None` for a retry that sleeps nothing. An image strip, a reasoning strip and a message-property strip are those. A shell older than the field also sends `None`.
-- The countdown needs no tick source of its own. `tick_demand` already reports Fast for a session whose turn runs, which a retry always is.
-- A server `Retry-After` is clamped to `MAX_RETRY_BACKOFF` on the 429 path too, not just the generic one. A per-minute bucket answers `Retry-After: 60`, and one try then sat idle for the whole minute. The limit had frequently cleared sooner.
-- `RATE_LIMIT_RETRY_THRESHOLD` covers the wait the server asked for across several attempts. So the turn fails no earlier than before, and an try in between can find the limit clear.
+[docs/retry-visibility-notes.md](docs/retry-visibility-notes.md) holds this section: what a retry row shows, the countdown, and the `Retry-After` clamp.
 
 ## Stream-interruption retry notes
 

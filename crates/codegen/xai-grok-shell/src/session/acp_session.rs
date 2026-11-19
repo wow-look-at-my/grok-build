@@ -233,6 +233,8 @@ mod memory_carryover;
 mod memory_control;
 #[path = "acp_session_impl/memory_forget.rs"]
 mod memory_forget;
+#[path = "acp_session_impl/memory_recall.rs"]
+mod memory_recall;
 #[path = "acp_session_impl/v2_memory_dream.rs"]
 mod v2_memory_dream;
 pub(crate) use goal_support::*;
@@ -1304,19 +1306,8 @@ impl SessionActor {
         &self,
         tool_names: &[String],
     ) -> slash_commands::CommandAvailability {
-        use xai_grok_tools::implementations::memory::{
-            MEMORY_GET_TOOL_NAME, MEMORY_SEARCH_TOOL_NAME,
-        };
-        let can_read_memory = self
-            .memory
-            .mode()
-            .is_some_and(crate::config::MemoryMode::is_v2)
-            || tool_names
-                .iter()
-                .any(|n| n == MEMORY_SEARCH_TOOL_NAME || n == MEMORY_GET_TOOL_NAME);
         slash_commands::CommandAvailability {
             feedback: self.feedback_manager.is_enabled(),
-            memory: self.memory.is_enabled() && can_read_memory,
             memory_configured: !self.memory.process_disabled
                 && (self.memory.backend_params.is_some()
                     || self.memory.configured_storage.is_some()),

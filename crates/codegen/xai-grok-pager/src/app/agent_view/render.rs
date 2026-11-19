@@ -1370,7 +1370,7 @@ impl AgentView {
             let style = Style::default().fg(theme.warning).bg(theme.bg_base);
             status.push("cost", Line::from(Span::styled(label, style)));
         } else if let Some(cost_display) =
-            crate::scrollback::wrappers::cost_ticks_to_display(session_cost_ticks)
+            status_cost_label(session_cost_ticks, self.session.tracker.memory_cost())
         {
             let cost_style = Style::default().fg(theme.gray_dim).bg(theme.bg_base);
             status.push("cost", Line::from(Span::styled(cost_display, cost_style)));
@@ -4489,6 +4489,54 @@ fn fit_toast_text(msg: &str, avail_width: u16) -> Option<String> {
     }
     let truncated: String = msg.chars().take(max_msg_chars.saturating_sub(1)).collect();
     Some(format!(" {}… ", truncated.trim_end()))
+}
+/// The status-bar cost item: the session total, then the memory share when memory spent anything.
+fn status_cost_label(
+    session_cost_ticks: Option<i64>,
+    memory: Option<xai_grok_shell::extensions::notification::MemoryCostTotals>,
+) -> Option<String> {
+    let session = crate::scrollback::wrappers::cost_ticks_to_display(session_cost_ticks)?;
+    let memory_ticks = memory.map(|totals| totals.total_usd_ticks());
+    match crate::scrollback::wrappers::cost_ticks_to_display(memory_ticks) {
+        Some(memory) => Some(format!("{session} · mem {memory}")),
+        None => Some(session),
+    }
+}
+#[cfg(test)]
+mod status_cost_label_tests {
+    use super::status_cost_label;
+    use xai_grok_shell::extensions::notification::MemoryCostTotals;
+    #[test]
+    fn no_memory_cost_leaves_the_session_total_alone() {
+        assert_eq!(
+            status_cost_label(Some(5_000_000_000), None).as_deref(),
+            Some("$0.5")
+        );
+        assert_eq!(
+            status_cost_label(Some(5_000_000_000), Some(MemoryCostTotals::default())).as_deref(),
+            Some("$0.5")
+        );
+    }
+    #[test]
+    fn memory_cost_follows_the_session_total() {
+        let totals = MemoryCostTotals {
+            capture_usd_ticks: 300_000_000,
+            consolidation_usd_ticks: 100_000_000,
+            recall_usd_ticks: 0,
+        };
+        assert_eq!(
+            status_cost_label(Some(5_000_000_000), Some(totals)).as_deref(),
+            Some("$0.5 · mem $0.04")
+        );
+    }
+    #[test]
+    fn no_session_total_draws_nothing() {
+        let totals = MemoryCostTotals {
+            capture_usd_ticks: 300_000_000,
+            ..MemoryCostTotals::default()
+        };
+        assert_eq!(status_cost_label(None, Some(totals)), None);
+    }
 }
 #[cfg(test)]
 mod toast_fit_tests {
