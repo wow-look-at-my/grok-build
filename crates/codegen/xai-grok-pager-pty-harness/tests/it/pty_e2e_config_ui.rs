@@ -24,6 +24,8 @@ mod extensions_modal_workflows_tab_pty;
 mod force_reasoning_effort_models_enables_effort;
 #[path = "pty_e2e/iterm_readline_editing.rs"]
 mod iterm_readline_editing;
+#[path = "pty_e2e/memory_settings_pty.rs"]
+mod memory_settings_pty;
 #[path = "pty_e2e/model_picker_shows_long_model_names.rs"]
 mod model_picker_shows_long_model_names;
 #[path = "pty_e2e/prompt_suggestion_ghost_tab_accepts.rs"]

@@ -45,6 +45,12 @@ Memory-v2 needs no command. It has none for saving or consolidating. There is no
 - `report_memory_cost` sends `MemoryCost` with the totals and the new session total after each capture, each Dream pass and each recall that used a provider. An unchanged total sends nothing. The pager adopts the session total and shows the memory share in the status bar and in the `/memory` modal.
 - A new kind of memory model call must go through `memory_billed_client` or `memory_usage_sink`. Otherwise it is billed but missing from the memory share.
 
+## Settings
+
+- `/settings` → Memory is a group row (`MEMORY_CHILDREN` in the pager's `settings/defs.rs`). Its rows edit `memory.v2.recall_enabled` and the `memory.embedding` keys.
+- One action carries every row: `Action::SetMemorySetting { key, value }`. The shell's `MemorySetting` maps a key to its internal table path, and `apply_memory_setting` writes it. An empty text or a size of 0 removes the key.
+- The agent reads the memory config at startup (`set_memory_config`). A change needs a restart. The toast says so.
+
 ## Tests
 
 - `xai-grok-memory`: `v2_recall_tests.rs` drives the engine on real scope directories.
@@ -74,4 +80,5 @@ On the last models a true match and a false one score the same (3.7 against 3.6)
 - `xai-grok-pager-pty-harness`: `live_model::live_session_recalls_a_note_only_for_the_prompt_that_asks_about_it` runs the real pager through a session of several prompts against a live model, with tools and capture on. It prints the notes recalled for each prompt. Run it when a recall rule changes. It needs the `GROK_LIVE_*` variables that [background-waits-and-the-goal-check.md](background-waits-and-the-goal-check.md) names.
 - `xai-grok-shell`: `tests/it/memory_recall_e2e.rs` drives a real agent against the mock model. It needs a workspace outside the system temp directory, because memory is off for a temp workspace.
 - `xai-grok-pager-pty-harness`: `pty_e2e/memory_cost_is_visible.rs` runs the pager against a mock that reports a price. It asserts the `mem` figure in the status bar and the cost line in `/memory`.
+- `xai-grok-pager-pty-harness`: `pty_e2e/memory_settings_pty.rs` edits the Memory rows in the real pager. It reads `config.json` after each edit and opens the rows again after a restart.
 - `MvpAgent::new` does not read `Config::memory_config`. The binary's startup calls `set_memory_config` after it. The test harness does the same only through `connect_and_auth_with_memory`, so every other harness session runs with no memory.
