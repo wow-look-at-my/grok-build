@@ -200,6 +200,7 @@ fn test_app() -> AppView {
         show_tips: None,
         ask_user_question_timeout_enabled: None,
         memory_settings: Default::default(),
+        memory_recall_line: "".into(),
         subagent_model_inheritance: crate::settings::FeatureOverrideState::new(
             xai_grok_shell::agent::config::Feature::SubagentModelInheritance,
         ),

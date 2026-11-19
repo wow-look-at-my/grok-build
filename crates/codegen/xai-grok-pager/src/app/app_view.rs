@@ -1036,6 +1036,8 @@ pub struct AppView {
     pub ask_user_question_timeout_enabled: Option<bool>,
     /// The memory options of the effective config, seeded at startup; settings writes update it.
     pub memory_settings: xai_grok_shell::util::config::MemorySettingsMirror,
+    /// What recall matches with, from the memory options at startup. The memory browser shows it.
+    pub memory_recall_line: std::sync::Arc<str>,
     /// `[features].subagent_model_inheritance` as the settings modal shows it: the saved user key plus the tiers seeded at startup.
     pub subagent_model_inheritance: crate::settings::FeatureOverrideState,
     /// `[features].two_pass_compaction` as the settings modal shows it.
@@ -1562,6 +1564,7 @@ impl AppView {
             show_tips: None,
             ask_user_question_timeout_enabled: None,
             memory_settings: Default::default(),
+            memory_recall_line: "".into(),
             subagent_model_inheritance: crate::settings::FeatureOverrideState::new(
                 xai_grok_shell::agent::config::Feature::SubagentModelInheritance,
             ),

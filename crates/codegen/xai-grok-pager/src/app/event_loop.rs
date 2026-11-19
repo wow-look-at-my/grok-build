@@ -1388,6 +1388,8 @@ pub(crate) async fn run(
     app.show_tips = config_session_bools.show_tips;
     app.ask_user_question_timeout_enabled = config_session_bools.ask_user_question_timeout_enabled;
     app.memory_settings = config_session_bools.memory_settings;
+    app.memory_recall_line =
+        crate::views::memory_modal::recall_status_line(&app.memory_settings).into();
     crate::appearance::cache::prime(&app.current_ui);
     crate::appearance::cache::apply_remote_keep_text_selection_default(
         remote_settings

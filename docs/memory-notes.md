@@ -50,6 +50,7 @@ Memory-v2 needs no command. It has none for saving or consolidating. There is no
 - `/settings` → Memory is a group row (`MEMORY_CHILDREN` in the pager's `settings/defs.rs`). Its rows edit `memory.v2.recall_enabled` and the `memory.embedding` keys.
 - One action carries every row: `Action::SetMemorySetting { key, value }`. The shell's `MemorySetting` maps a key to its internal table path, and `apply_memory_setting` writes it. An empty text or a size of 0 removes the key.
 - The agent reads the memory config at startup (`set_memory_config`). A change needs a restart. The toast says so.
+- The memory browser draws `recall_status_line` above the cost line: word matching alone, or the embedding model with its endpoint. It reads the options the pager started with (`AppView::memory_recall_line`), because the agent runs with those. A row edited since then does not change it.
 
 ## Tests
 

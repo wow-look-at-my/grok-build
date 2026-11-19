@@ -104,6 +104,12 @@ async fn memory_cost_shows_in_the_status_bar_and_in_the_memory_browser() {
                 harness.screen_contents()
             )
         });
+    // No embedding model is set, so the browser says what recall matches with and where to change it.
+    assert!(
+        harness.contains_text("Recall: word matching. Set an embedding model in /settings"),
+        "the memory browser must say what recall matches with\nscreen:\n{}",
+        harness.screen_contents()
+    );
     assert!(
         !harness.contains_text("panicked"),
         "pager panicked\nscreen:\n{}",

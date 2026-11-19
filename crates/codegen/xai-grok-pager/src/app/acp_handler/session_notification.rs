@@ -206,6 +206,7 @@ pub(super) fn handle_session_notification_with_origin(
         _ => {}
     }
     let is_api_key_auth = app.is_api_key_auth;
+    let recall_line = app.memory_recall_line.clone();
     let matched = match find_session_match(app, &session_notif.session_id) {
         Some(m) => m,
         None => {
@@ -1290,7 +1291,8 @@ pub(super) fn handle_session_notification_with_origin(
             agent.active_modal = Some(crate::views::modal::ActiveModal::MemoryBrowser {
                 state: Box::new(
                     crate::views::memory_modal::MemoryModalState::from_listing(listing)
-                        .with_memory_cost(agent.session.tracker.memory_cost()),
+                        .with_memory_cost(agent.session.tracker.memory_cost())
+                        .with_recall_line(recall_line),
                 ),
             });
             true
