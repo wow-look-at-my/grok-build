@@ -387,7 +387,16 @@ fn a_dead_embedding_endpoint_is_reported_one_time_and_word_recall_goes_on() {
         let early = recorder.of_kind("memory_recall_degraded");
         assert!(
             early.is_empty(),
-            "one failed lookup can be a model that still loads, and is not reported: {early:?}"
+            "one failed lookup can be a model that still loads, and is not reported: {early:?} turn requests {} all requests {:?}",
+            bodies.len(),
+            server
+                .requests()
+                .iter()
+                .map(|request| request
+                    .header("x-grok-req-id")
+                    .unwrap_or_default()
+                    .to_owned())
+                .collect::<Vec<_>>()
         );
 
         prompt_turn(&conn, &session_id, "Now tell me about the weather.").await;
