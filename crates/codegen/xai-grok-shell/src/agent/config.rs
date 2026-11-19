@@ -1878,7 +1878,7 @@ impl Config {
     /// pin keep their usual rank. A failed load answers the value this config holds.
     pub(crate) fn feature_from_disk(&self, feature: Feature) -> Resolved<bool> {
         match crate::config::load_effective_config_with_layers() {
-            Ok((layers, _)) => self.feature_from_layers(feature, &layers),
+            Ok(loaded) => self.feature_from_layers(feature, &loaded),
             Err(e) => {
                 tracing::warn!(
                     error = %e,
