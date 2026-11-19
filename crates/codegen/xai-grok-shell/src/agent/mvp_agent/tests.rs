@@ -351,13 +351,14 @@ fn settings_allow_access_true_is_allowed() {
     };
     assert!(settings_allow_access(Some(&rs)));
 }
+/// This build has no paywall: a remote `allow_access = false` blocks nothing.
 #[test]
-fn settings_allow_access_false_is_blocked() {
+fn settings_allow_access_false_blocks_nothing() {
     let rs = crate::util::config::RemoteSettings {
         allow_access: Some(false),
         ..Default::default()
     };
-    assert!(!settings_allow_access(Some(&rs)));
+    assert!(settings_allow_access(Some(&rs)));
 }
 #[test]
 fn settings_allow_access_field_absent_is_allowed() {

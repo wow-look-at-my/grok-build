@@ -288,82 +288,55 @@ async fn subscription_watch_polls_free_tier_then_goes_dormant_after_upgrade() {
     oidc.abort();
 }
 
-/// A genuinely-free user gated at startup still gets the paywall, but only after a live subscription check confirmed the block.
-/// The gate is never painted straight from the stale source.
+/// This build has no paywall. Settings that deny access and carry gate copy put nothing on the screen, and the
+/// session takes a prompt.
 #[tokio::test(flavor = "multi_thread", worker_threads = 2)]
 #[ignore = "PTY e2e; run with cargo test -p xai-grok-pager-pty-harness --test it -- --ignored"]
-async fn startup_gate_shows_paywall_for_free_user_after_live_check() {
+async fn settings_that_deny_access_show_no_paywall() {
     let content = ContentController::start().await.expect("start content");
-    // Explicit deny and gate copy. An absent allow_access fails open.
     content.server().set_settings(json!({
         "allow_access": false,
         "gate_message": GATE_MSG,
         "gate_url": "https://grok.invalid/supergrok?referrer=grok-build",
         "gate_label": "Subscribe",
     }));
+    content.set_response(format!("{MOCK_RESPONSE_SENTINEL} no paywall."));
 
     let mut harness = spawn_subscription_pager(&content, "pty-subgate-free", &[]);
-
-    harness
-        .wait_for_text(WELCOME_SCREEN_SENTINEL, WELCOME_TIMEOUT)
-        .expect("welcome text");
-    // The verified gate renders. Normally the check response resolves the
-    // deferral within seconds.
-    harness
-        .wait_for_text(GATE_MSG, Duration::from_secs(45))
-        .expect("gate copy renders for a genuinely-free user");
-
-    assert!(
-        user_check_count(&content) >= 1,
-        "a live subscription check must run before the paywall is shown; requests: {:?}",
-        content
-            .requests()
-            .iter()
-            .map(|e| e.path.clone())
-            .collect::<Vec<_>>()
-    );
-
-    harness.quit().expect("clean quit");
-}
-
-/// The subscription endpoint holds its answer. The startup check waits on it, so the pager's own check finds the
-/// claim taken. The paywall must stay off the screen until the endpoint answers: a check that lost the claim is
-/// no verdict.
-#[tokio::test(flavor = "multi_thread", worker_threads = 2)]
-#[ignore = "PTY e2e; run with cargo test -p xai-grok-pager-pty-harness --test it -- --ignored"]
-async fn startup_gate_waits_for_the_live_check_to_answer() {
-    let content = ContentController::start().await.expect("start content");
-    content.server().set_settings(json!({
-        "allow_access": false,
-        "gate_message": GATE_MSG,
-        "gate_url": "https://grok.invalid/supergrok?referrer=grok-build",
-        "gate_label": "Subscribe",
-    }));
-    content.server().hold_user_info();
-
-    let mut harness = spawn_subscription_pager(&content, "pty-subgate-held", &[]);
     harness
         .wait_for_text(WELCOME_SCREEN_SENTINEL, WELCOME_TIMEOUT)
         .expect("welcome text");
     harness
         .wait_until(
-            "the live check reaches the server",
+            "the settings reach the pager",
             Duration::from_secs(20),
-            |_| user_check_count(&content) >= 1,
+            |_| settings_count(&content) >= 1,
         )
-        .expect("a live subscription check must start");
-    // Long enough for the pager's own check to come back, and far below the verify timeout.
-    harness.update(Duration::from_secs(4));
+        .expect("the settings are fetched");
+    // Long enough for a paywall to be drawn from those settings.
+    harness.update(Duration::from_secs(3));
     assert!(
         !harness.contains_text(GATE_MSG),
-        "no paywall before the live check answers\nscreen:\n{}",
+        "no paywall on the welcome screen\nscreen:\n{}",
         harness.screen_contents()
     );
 
-    content.server().release_user_info();
     harness
-        .wait_for_text(GATE_MSG, Duration::from_secs(45))
-        .expect("the paywall renders once the check answered");
+        .inject_keys(format!("{PROMPT}\r").as_bytes())
+        .expect("submit prompt");
+    harness
+        .wait_for_text(MOCK_RESPONSE_SENTINEL, Duration::from_secs(30))
+        .unwrap_or_else(|error| {
+            panic!(
+                "the session must take a prompt: {error}\nscreen:\n{}",
+                harness.screen_contents()
+            )
+        });
+    assert!(
+        !harness.contains_text(GATE_MSG),
+        "no paywall after a turn\nscreen:\n{}",
+        harness.screen_contents()
+    );
     harness.quit().expect("clean quit");
 }
 

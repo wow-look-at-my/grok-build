@@ -121,24 +121,15 @@ impl AppView {
         }
     }
 
-    /// Chokepoint for showing a gate.
-    /// An already-gated view just updates the copy.
-    /// A consumer session with access defers for live verification (the gate source may be stale).
+    /// Chokepoint for a gate from settings. This build has no paywall, so a gate is never shown.
+    /// It is logged and dropped.
     #[must_use]
     pub fn impose_gate(&mut self, gate: xai_grok_login::GateInfo) -> Vec<Effect> {
-        if self.gate.is_some() {
-            self.gate = Some(gate);
-            return vec![];
-        }
-        if self.is_consumer_session() {
-            return self.defer_gate_for_verification(gate);
-        }
         crate::unified_log::info(
-            "subscription.gate.imposed",
+            "subscription.gate.ignored",
             None,
-            Some(serde_json::json!({ "deferred": false })),
+            Some(serde_json::json!({ "message": gate.message })),
         );
-        self.gate = Some(gate);
         vec![]
     }
 
@@ -169,51 +160,10 @@ impl AppView {
         vec![Effect::CheckSubscription { verify: None }]
     }
 
-    /// Hold `gate` out of `self.gate` while a generation-stamped live check verifies it.
-    /// Resolution: authoritative meta via `apply_auth_meta` drops the deferral.
-    /// A same-generation check failure or timeout promotes it via [`Self::promote_deferred_gate`].
-    #[must_use]
-    fn defer_gate_for_verification(&mut self, gate: xai_grok_login::GateInfo) -> Vec<Effect> {
-        self.pending_gate_verification = Some(gate);
-        self.gate_verify_gen = self.gate_verify_gen.wrapping_add(1);
-        self.note_subscription_check();
-        crate::unified_log::info(
-            "subscription.gate.deferred",
-            None,
-            Some(serde_json::json!({
-                "generation": self.gate_verify_gen,
-                "tier": self.subscription_tier,
-            })),
-        );
-        vec![
-            Effect::CheckSubscription {
-                verify: Some(self.gate_verify_gen),
-            },
-            Effect::ScheduleGateVerifyTimeout {
-                generation: self.gate_verify_gen,
-            },
-        ]
-    }
-
-    /// Show a deferred gate (err on blocking); no-op unless `generation` is the current verification and nothing resolved it meanwhile.
-    /// `reason` tags the unified-log entry (`"check_failed"` / `"verify_timeout"`).
-    pub(crate) fn promote_deferred_gate(&mut self, generation: u64, reason: &'static str) {
-        if generation == self.gate_verify_gen
-            && let Some(gate) = self.pending_gate_verification.take()
-            && self.gate.is_none()
-        {
-            // Warn: the verification did not confirm access, so the user is now blocked
-            // If this is wrong (paying user paywalled), this entry plus the preceding check.fired/check.complete lines show which path failed
-            crate::unified_log::warn(
-                "subscription.gate.promoted",
-                None,
-                Some(serde_json::json!({
-                    "generation": generation,
-                    "reason": reason,
-                    "tier": self.subscription_tier,
-                })),
-            );
-            self.gate = Some(gate);
+    /// Ends the pending verification of `generation`. This build has no paywall, so nothing is shown.
+    pub(crate) fn promote_deferred_gate(&mut self, generation: u64, _reason: &'static str) {
+        if generation == self.gate_verify_gen {
+            self.pending_gate_verification = None;
         }
     }
 }

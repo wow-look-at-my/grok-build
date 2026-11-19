@@ -2461,11 +2461,11 @@ fn spawn_post_unblock_jwt_and_catalog_retry(
         }
     });
 }
-/// `allow_access` from remote settings. Fail-open unless explicitly `false`.
+/// Always true: this build has no paywall. A remote `allow_access = false` blocks nothing.
 pub(crate) fn settings_allow_access(
-    rs: Option<&crate::util::config::RemoteSettings>,
+    _rs: Option<&crate::util::config::RemoteSettings>,
 ) -> bool {
-    !matches!(rs.and_then(|s| s.allow_access), Some(false))
+    true
 }
 mod replay;
 #[cfg(test)]
