@@ -772,8 +772,16 @@ fn live_later_session_knows_what_an_earlier_session_was_told_in_passing() {
 
     let mut harness = spawn();
     let where_answer = ask_and_wait(&mut harness, &grok_home, LATER_PROMPTS[0]);
-    let _ = ask_and_wait(&mut harness, &grok_home, LATER_PROMPTS[1]);
+    let task_answer = ask_and_wait(&mut harness, &grok_home, LATER_PROMPTS[1]);
     quit(harness);
+    let task_calls: Vec<String> = history_holding(&grok_home, LATER_PROMPTS[1])
+        .iter()
+        .filter(|item| item["type"] == "assistant")
+        .map(|item| format!("{:?} {}", tool_call_names(item), item["content"]))
+        .collect();
+    println!(
+        "LIVE carry, answer to the task prompt: {task_answer}\nassistant items: {task_calls:#?}"
+    );
 
     let created: Vec<String> = std::fs::read_dir(&workspace)
         .into_iter()
