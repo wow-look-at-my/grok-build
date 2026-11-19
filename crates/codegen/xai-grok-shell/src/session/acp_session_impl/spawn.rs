@@ -1228,7 +1228,9 @@ pub(crate) async fn spawn_session_actor(
             forked_selection,
         },
         task_model_selection: task_model_selection.clone(),
-        compaction_policy,
+        compaction_policy: crate::session::agent_rebuild::CompactionPolicySlot::new(
+            compaction_policy,
+        ),
         reminder_policy,
         memory_enabled: memory_config
             .as_ref()

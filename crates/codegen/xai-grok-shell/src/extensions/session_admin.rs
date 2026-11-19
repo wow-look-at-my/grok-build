@@ -64,6 +64,7 @@ async fn handle_internal(
         InternalMethod::ReloadModelsCache => handle_reload_models_cache(agent),
         InternalMethod::ReloadOutputRateFloor => handle_reload_output_rate_floor(agent),
         InternalMethod::ReloadThinkingSummaries => handle_reload_thinking_summaries(agent),
+        InternalMethod::ReloadCompactionFeatures => handle_reload_compaction_features(agent),
         InternalMethod::AuthCleared => handle_auth_cleared(agent),
         // Arrives as a notification, so it never reaches this request path.
         InternalMethod::EvictSessions => Err(acp::Error::method_not_found()),
@@ -728,6 +729,17 @@ fn handle_reload_output_rate_floor(agent: &MvpAgent) -> ExtResult {
 fn handle_reload_thinking_summaries(agent: &MvpAgent) -> ExtResult {
     send_reload_to_residents(agent, "thinking-summary", || {
         SessionCommand::ReloadThinkingSummaries
+    })
+}
+
+/// Resolve both compaction flags from the config on disk and send them to every resident session.
+fn handle_reload_compaction_features(agent: &MvpAgent) -> ExtResult {
+    let (two_pass, compact_on_model_switch) = agent.cfg.borrow().compaction_features_from_disk();
+    send_reload_to_residents(agent, "compaction feature", || {
+        SessionCommand::ReloadCompactionFeatures {
+            two_pass,
+            compact_on_model_switch,
+        }
     })
 }
 

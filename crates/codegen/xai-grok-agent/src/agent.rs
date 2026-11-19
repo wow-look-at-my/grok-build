@@ -105,6 +105,11 @@ impl Agent {
         &self.compaction_policy
     }
 
+    /// A config reload changes the policy of a running session through this.
+    pub fn compaction_policy_mut(&mut self) -> &mut CompactionPolicy {
+        &mut self.compaction_policy
+    }
+
     pub fn reminder_policy(&self) -> &ReminderPolicy {
         &self.reminder_policy
     }
