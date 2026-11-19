@@ -384,9 +384,10 @@ fn a_dead_embedding_endpoint_is_reported_one_time_and_word_recall_goes_on() {
             "word matching must still recall the topic: {body}"
         );
 
+        let early = recorder.of_kind("memory_recall_degraded");
         assert!(
-            recorder.of_kind("memory_recall_degraded").is_empty(),
-            "one failed lookup can be a model that still loads, and is not reported"
+            early.is_empty(),
+            "one failed lookup can be a model that still loads, and is not reported: {early:?}"
         );
 
         prompt_turn(&conn, &session_id, "Now tell me about the weather.").await;
