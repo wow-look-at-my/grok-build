@@ -6904,6 +6904,39 @@ fn post_auth_settings_not_coalesced_by_in_flight_reapply() {
         assert!(agent.post_auth_settings_in_flight.get());
     });
 }
+/// The pager draws the paywall from the answer to its check. That answer must follow the re-check that holds the
+/// claim, so the wait ends only when that re-check does.
+#[test]
+fn wait_for_tier_recheck_ends_when_the_claimed_check_ends() {
+    run_local_for_bridge_test(|| async {
+        use std::sync::atomic::Ordering;
+        use std::time::Duration;
+        let agent = build_minimal_agent_for_tests();
+        tokio::time::timeout(Duration::from_secs(1), agent.wait_for_tier_recheck())
+            .await
+            .expect("with no check in flight the wait returns at once");
+
+        agent.tier_recheck_in_flight.store(true, Ordering::Release);
+        let guard = TierRecheckInFlightGuard {
+            flag: agent.tier_recheck_in_flight.clone(),
+            done: agent.tier_recheck_done.clone(),
+        };
+        assert!(
+            tokio::time::timeout(Duration::from_millis(200), agent.wait_for_tier_recheck())
+                .await
+                .is_err(),
+            "the wait must not return while a check holds the claim"
+        );
+        xai_spawn::spawn_local(async move {
+            tokio::time::sleep(Duration::from_millis(100)).await;
+            drop(guard);
+        });
+        tokio::time::timeout(Duration::from_secs(2), agent.wait_for_tier_recheck())
+            .await
+            .expect("the wait ends when the claimed check ends");
+        assert!(!agent.tier_recheck_in_flight.load(Ordering::Acquire));
+    });
+}
 /// The tier re-check work is single-flight across every caller: back-to-back gated initializes run at most one live check.
 /// An awaited authenticate-path check skips (rather than doubles or waits out) a check already wedged on a stalled subscription endpoint. Drives the exact block `initialize` runs when `tier_allowed` is false.
 /// The full `initialize` fires once-per-process GROK_HOME cleanup work that a unit test must not run against the developer's real home.

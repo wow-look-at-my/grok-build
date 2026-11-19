@@ -326,6 +326,47 @@ async fn startup_gate_shows_paywall_for_free_user_after_live_check() {
     harness.quit().expect("clean quit");
 }
 
+/// The subscription endpoint holds its answer. The startup check waits on it, so the pager's own check finds the
+/// claim taken. The paywall must stay off the screen until the endpoint answers: a check that lost the claim is
+/// no verdict.
+#[tokio::test(flavor = "multi_thread", worker_threads = 2)]
+#[ignore = "PTY e2e; run with cargo test -p xai-grok-pager-pty-harness --test it -- --ignored"]
+async fn startup_gate_waits_for_the_live_check_to_answer() {
+    let content = ContentController::start().await.expect("start content");
+    content.server().set_settings(json!({
+        "allow_access": false,
+        "gate_message": GATE_MSG,
+        "gate_url": "https://grok.invalid/supergrok?referrer=grok-build",
+        "gate_label": "Subscribe",
+    }));
+    content.server().hold_user_info();
+
+    let mut harness = spawn_subscription_pager(&content, "pty-subgate-held", &[]);
+    harness
+        .wait_for_text(WELCOME_SCREEN_SENTINEL, WELCOME_TIMEOUT)
+        .expect("welcome text");
+    harness
+        .wait_until(
+            "the live check reaches the server",
+            Duration::from_secs(20),
+            |_| user_check_count(&content) >= 1,
+        )
+        .expect("a live subscription check must start");
+    // Long enough for the pager's own check to come back, and far below the verify timeout.
+    harness.update(Duration::from_secs(4));
+    assert!(
+        !harness.contains_text(GATE_MSG),
+        "no paywall before the live check answers\nscreen:\n{}",
+        harness.screen_contents()
+    );
+
+    content.server().release_user_info();
+    harness
+        .wait_for_text(GATE_MSG, Duration::from_secs(45))
+        .expect("the paywall renders once the check answered");
+    harness.quit().expect("clean quit");
+}
+
 /// Verify-before-paywall: a user who ALREADY subscribed never sees a paywall flash when a stale
 /// gated settings snapshot reaches the client. The stale snapshot is delivered via the `/new`
 /// settings refresh, the only active `/v1/settings` consumer at that point.
