@@ -80,6 +80,13 @@ async fn memory_settings_write_config_and_show_after_a_restart() {
     harness
         .wait_for_text(WELCOME_SCREEN_SENTINEL, WELCOME_TIMEOUT)
         .expect("welcome text");
+    harness
+        .inject_keys(format!("{PROMPT}\r").as_bytes())
+        .expect("submit prompt");
+    harness
+        .wait_for_text(MOCK_RESPONSE_SENTINEL, Duration::from_secs(30))
+        .expect("turn rendered");
+    harness.wait_for_turn_idle(TIMEOUT).expect("idle session");
 
     open_memory_sheet(&mut harness);
 
@@ -112,11 +119,11 @@ async fn memory_settings_write_config_and_show_after_a_restart() {
     harness.quit().expect("stop first pager");
 
     let mut harness =
-        PtyHarness::spawn_with_content(&binary, DEFAULT_ROWS, DEFAULT_COLS, &content, &[])
+        PtyHarness::spawn_with_content(&binary, DEFAULT_ROWS, DEFAULT_COLS, &content, &["-c"])
             .expect("restart pager");
     harness
-        .wait_for_text(WELCOME_SCREEN_SENTINEL, WELCOME_TIMEOUT)
-        .expect("welcome text");
+        .wait_for_text(MOCK_RESPONSE_SENTINEL, RESUME_TIMEOUT)
+        .expect("resumed session");
     open_memory_sheet(&mut harness);
     for shown in ["nomic-embed-text", "http://localhost:11434/v1", "EMBED_KEY"] {
         harness
