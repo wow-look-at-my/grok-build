@@ -173,7 +173,7 @@ impl SessionActor {
             return;
         }
         let conversation = self.chat_state_handle.get_conversation().await;
-        let (cursor, mut seen) = {
+        let (cursor, mut seen, conversation_start) = {
             let mut state = self.memory.recall.state.borrow_mut();
             if conversation.len() < state.cursor {
                 state.reset();
@@ -182,7 +182,10 @@ impl SessionActor {
                 state.seen = seen_recall_keys(&conversation);
                 state.seeded = true;
             }
-            (state.cursor, state.seen.clone())
+            let start = *state
+                .conversation_start
+                .get_or_insert_with(std::time::SystemTime::now);
+            (state.cursor, state.seen.clone(), start)
         };
         let new_items = conversation.get(cursor..).unwrap_or_default();
         let Some(prompt) = recall_prompt(new_items) else {
@@ -244,6 +247,7 @@ impl SessionActor {
                     text: &prompt,
                     focus: Some(&prompt),
                     session_id: Some(&session_id),
+                    conversation_start: Some(conversation_start),
                 },
                 bounded
                     .as_ref()

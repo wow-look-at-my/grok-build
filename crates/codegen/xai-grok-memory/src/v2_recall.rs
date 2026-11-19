@@ -170,6 +170,8 @@ pub struct V2RecallQuery<'a> {
     pub focus: Option<&'a str>,
     /// The session that asks. Its own observations repeat the conversation, so they are never returned.
     pub session_id: Option<&'a str>,
+    /// When the asking conversation began.
+    pub conversation_start: Option<SystemTime>,
 }
 
 impl<'a> From<&'a str> for V2RecallQuery<'a> {
@@ -178,6 +180,7 @@ impl<'a> From<&'a str> for V2RecallQuery<'a> {
             text,
             focus: Some(text),
             session_id: None,
+            conversation_start: None,
         }
     }
 }
@@ -290,12 +293,23 @@ impl V2Recall {
         let query: V2RecallQuery<'a> = query.into();
         let inner = Arc::clone(&self.inner);
         let query_counts = term_counts(query.text);
-        let (chunks, lexical) = tokio::task::spawn_blocking(move || {
+        let conversation_start = query.conversation_start;
+        let (chunks, lexical, written_since_start) = tokio::task::spawn_blocking(move || {
             let chunks = inner.refresh()?;
             let query_terms =
                 distinctive_terms(&chunks, &query_counts, inner.config.max_query_terms);
             let lexical = lexical_scores(&chunks, &query_terms, &inner.config);
-            Ok::<_, V2RecallError>((chunks, lexical))
+            let written_since_start: HashSet<PathBuf> = match conversation_start {
+                Some(start) => inner
+                    .files
+                    .lock()
+                    .iter()
+                    .filter(|(_, file)| file.modified.is_some_and(|modified| modified >= start))
+                    .map(|(path, _)| path.clone())
+                    .collect(),
+                None => HashSet::new(),
+            };
+            Ok::<_, V2RecallError>((chunks, lexical, written_since_start))
         })
         .await
         .map_err(|error| V2RecallError::Task(error.to_string()))??;
@@ -329,6 +343,7 @@ impl V2Recall {
         let mut hits = Vec::new();
         for ((chunk, lexical), semantic) in chunks.iter().zip(lexical).zip(semantic) {
             if seen_paths.contains(chunk.path.as_path())
+                || written_since_start.contains(&chunk.path)
                 || (chunk.session_id.is_some() && chunk.session_id.as_deref() == query.session_id)
             {
                 continue;

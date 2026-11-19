@@ -512,16 +512,24 @@ const MEMORY_PROMPTS: [&str; 5] = [
     "Read notes.txt back to me and tell me how many lines it has.",
 ];
 
-/// Every observation file under the memory directories of `grok_home`.
-fn observation_files(grok_home: &Path) -> Vec<PathBuf> {
+/// The topic the session stores next to the release note. No prompt is about it.
+const EDITOR_NOTE: &str = "files.md";
+
+/// The observations and topics the session itself wrote under `grok_home`.
+fn notes_written_by_the_session(grok_home: &Path) -> Vec<PathBuf> {
     let mut found = Vec::new();
     let mut pending = vec![grok_home.join("memory-v2")];
     while let Some(dir) = pending.pop() {
         for entry in std::fs::read_dir(&dir).into_iter().flatten().flatten() {
             let path = entry.path();
+            let text = path.to_string_lossy().into_owned();
             if path.is_dir() {
                 pending.push(path);
-            } else if path.to_string_lossy().contains("observations/_inbox/") {
+            } else if (text.contains("/observations/") || text.contains("/topics/"))
+                && text.ends_with(".md")
+                && !text.ends_with(RELEASE_NOTE)
+                && !text.ends_with(EDITOR_NOTE)
+            {
                 found.push(path);
             }
         }
@@ -590,7 +598,7 @@ fn live_session_recalls_a_note_only_for_the_prompt_that_asks_about_it() {
     )
     .expect("write the release note");
     std::fs::write(
-        topics.join("files.md"),
+        topics.join(EDITOR_NOTE),
         "# Editor setup\nHow the editor is set up.\n\n## Formatting\n\
          - The formatter rewrites a text file on save and keeps every line under a fixed length.\n",
     )
@@ -624,7 +632,7 @@ fn live_session_recalls_a_note_only_for_the_prompt_that_asks_about_it() {
         .unwrap_or_else(|e| panic!("welcome: {e:#}\nscreen:\n{}", harness.screen_contents()));
 
     for (index, prompt) in MEMORY_PROMPTS.iter().enumerate() {
-        let notes_before = observation_files(&grok_home).len();
+        let notes_before = notes_written_by_the_session(&grok_home).len();
         harness.inject_keys(prompt.as_bytes()).expect("type prompt");
         harness.update(Duration::from_millis(500));
         harness.inject_keys(b"\r").expect("submit prompt");
@@ -670,17 +678,14 @@ fn live_session_recalls_a_note_only_for_the_prompt_that_asks_about_it() {
         // Capture runs after the turn. The next prompt must find its note on disk.
         wait_until(Duration::from_secs(90), || {
             harness.update(Duration::from_millis(500));
-            observation_files(&grok_home).len() > notes_before
+            notes_written_by_the_session(&grok_home).len() > notes_before
         });
     }
 
     let history = chat_history(&grok_home);
     let recalled = recalled_notes_by_prompt(&history);
-    let captured = observation_files(&grok_home);
-    println!(
-        "LIVE memory session, notes captured from it: {}",
-        captured.len()
-    );
+    let captured = notes_written_by_the_session(&grok_home);
+    println!("LIVE memory session, notes written from it: {captured:?}");
     for (index, notes) in recalled.iter().enumerate() {
         println!(
             "LIVE prompt {}: {} recalled {notes:?}",

@@ -131,6 +131,8 @@ pub(crate) struct RecallState {
     pub seen: std::collections::HashSet<String>,
     /// `seen` holds the keys of the reminders the conversation carries.
     pub seeded: bool,
+    /// When the first recall of the live conversation ran. A memory file written since then came from this conversation.
+    pub conversation_start: Option<std::time::SystemTime>,
     pub embedding_failures: EmbeddingFailures,
 }
 
@@ -167,6 +169,8 @@ impl RecallState {
         self.cursor = 0;
         self.seen.clear();
         self.seeded = false;
+        // A note written before the replacement is no longer in the conversation.
+        self.conversation_start = None;
     }
 }
 

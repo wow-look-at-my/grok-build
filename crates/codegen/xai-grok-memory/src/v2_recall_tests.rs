@@ -181,6 +181,7 @@ async fn an_observation_of_the_asking_session_is_never_returned() {
         text,
         focus: Some(text),
         session_id: Some(session_id),
+        conversation_start: None,
     };
 
     // The observation fixture names this session as its source.
@@ -199,6 +200,48 @@ async fn an_observation_of_the_asking_session_is_never_returned() {
         .await
         .unwrap();
     assert_eq!(top(&other).path, path);
+}
+
+#[tokio::test]
+async fn a_topic_written_since_the_conversation_began_is_never_returned() {
+    let fixture = fixture();
+    seed_topics(&fixture.workspace);
+    let text = "keep my trailing newline rule";
+    let asked_since = |conversation_start| V2RecallQuery {
+        text,
+        focus: Some(text),
+        session_id: Some("sess-asking"),
+        conversation_start: Some(conversation_start),
+    };
+    let recall = fixture.recall(V2RecallConfig::default());
+    let before_the_write = SystemTime::now() - Duration::from_secs(60);
+
+    // Consolidation writes this topic from the conversation's own observations. It names no session.
+    let path = write(
+        &fixture.workspace,
+        "topics/trailing-newline.md",
+        "# Trailing newline rule\nEvery text file ends with a trailing newline.\n",
+    );
+
+    let same_conversation = recall
+        .recall(asked_since(before_the_write), None, &HashSet::new())
+        .await
+        .unwrap();
+    assert!(
+        same_conversation.hits.is_empty(),
+        "the topic repeats what this conversation just said: {:?}",
+        same_conversation.hits
+    );
+
+    let later_conversation = recall
+        .recall(
+            asked_since(SystemTime::now() + Duration::from_secs(60)),
+            None,
+            &HashSet::new(),
+        )
+        .await
+        .unwrap();
+    assert_eq!(top(&later_conversation).path, path);
 }
 
 #[tokio::test]

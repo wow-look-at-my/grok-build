@@ -21,6 +21,8 @@ Memory-v2 needs no command. It has none for saving or consolidating. There is no
 - `inject_memory_recall` (`acp_session_impl/memory_recall.rs`) is not a tool. It searches only when the conversation holds a prompt it has not read (`recall_prompt`): a person's message, an interjection or another agent's message. A model round with no new prompt searches nothing.
 - The query is that newest prompt and nothing else. The model's own text and its tool-call arguments stay out: they share words with every note of the same repository. With them in the query, a note matches on almost every round.
 - An observation that the asking session captured is never returned (`V2RecallQuery::session_id`). Capture writes it from the conversation, so a reminder of it repeats what was just said.
+- A file written since the live conversation began is never returned (`V2RecallQuery::conversation_start`, kept in `RecallState`). Consolidation turns the session's observations into a topic within minutes, and a topic names no session. A compaction clears the start time, because the conversation no longer holds what those files say.
+- A subagent runs no recall. Its prompt is a brief its parent wrote.
 - A file is returned one time for a conversation, one chunk for each recall. The reminder names the file, so its other chunks need no reminder. A recall returns at most `max_hits` files.
 - A hit goes to the model as a `<memory-recall>` reminder and to the client as `MemoryRecalled`. Each line carries `ref <key>`. `seen_recall_keys` reads those keys back from the live conversation. That is the whole "one time for each conversation" rule. A compaction, a rewind, a fork or a resume needs no extra state.
 - `RecallState::reset` runs where `context_injected` is cleared. A conversation shorter than the cursor also resets it.
@@ -69,6 +71,7 @@ all-mpnet-base-v2      7 of 9                 0                  2 of 12
 ```
 
 On the last models a true match and a false one score the same (3.7 against 3.6), so no gate separates them. A false recall costs one reminder that the model can ignore.
+- `xai-grok-pager-pty-harness`: `live_model::live_session_recalls_a_note_only_for_the_prompt_that_asks_about_it` runs the real pager through a session of several prompts against a live model, with tools and capture on. It prints the notes recalled for each prompt. Run it when a recall rule changes. It needs the `GROK_LIVE_*` variables that [background-waits-and-the-goal-check.md](background-waits-and-the-goal-check.md) names.
 - `xai-grok-shell`: `tests/it/memory_recall_e2e.rs` drives a real agent against the mock model. It needs a workspace outside the system temp directory, because memory is off for a temp workspace.
 - `xai-grok-pager-pty-harness`: `pty_e2e/memory_cost_is_visible.rs` runs the pager against a mock that reports a price. It asserts the `mem` figure in the status bar and the cost line in `/memory`.
 - `MvpAgent::new` does not read `Config::memory_config`. The binary's startup calls `set_memory_config` after it. The test harness does the same only through `connect_and_auth_with_memory`, so every other harness session runs with no memory.
