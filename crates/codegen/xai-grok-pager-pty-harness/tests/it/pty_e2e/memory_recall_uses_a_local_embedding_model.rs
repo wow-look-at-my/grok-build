@@ -153,16 +153,22 @@ fn histories(grok_home: &Path) -> String {
 #[ignore = "PTY e2e; run with cargo test -p xai-grok-pager-pty-harness --test it -- --ignored"]
 async fn recall_matches_by_meaning_through_a_local_runtime_with_no_embedding_config() {
     let runtime = LocalRuntime::start();
+    recall_by_meaning_with_no_embedding_config(&runtime.base_url, EMBEDDING_MODEL).await;
+    assert!(
+        runtime.embedding_calls.load(Ordering::SeqCst) > 0,
+        "the local runtime must serve the embedding calls"
+    );
+}
+
+/// The session of the test above, against the Ollama at `runtime_url` that serves `model`.
+pub(crate) async fn recall_by_meaning_with_no_embedding_config(runtime_url: &str, model: &str) {
     let content = ContentController::start().await.expect("start content");
     content.set_response(format!("{REPLY_MARK} noted."));
     let grok_home = content.home().join(".grok");
     std::fs::create_dir_all(&grok_home).expect("create GROK_HOME");
     std::fs::write(
         grok_home.join("config.toml"),
-        format!(
-            "[model_providers.ollama]\nbase_url = \"{}\"\n",
-            runtime.base_url
-        ),
+        format!("[model_providers.ollama]\nbase_url = \"{runtime_url}\"\n"),
     )
     .expect("write config.toml");
     let topics = grok_home.join("memory-v2").join("global").join("topics");
@@ -200,10 +206,7 @@ async fn recall_matches_by_meaning_through_a_local_runtime_with_no_embedding_con
         .expect("idle session");
 
     // `/memory` names the model once the runtime's listing was read.
-    let recall_line = format!(
-        "Recall: words and meaning \u{00B7} {EMBEDDING_MODEL} \u{00B7} {}",
-        runtime.base_url
-    );
+    let recall_line = format!("Recall: words and meaning \u{00B7} {model} \u{00B7} {runtime_url}");
     let mut shown = false;
     let mut browser = String::new();
     for _ in 0..20 {
@@ -235,14 +238,9 @@ async fn recall_matches_by_meaning_through_a_local_runtime_with_no_embedding_con
         })
         .unwrap_or_else(|error| {
             panic!(
-                "the beacon prompt must recall the lighthouse topic: {error}\nembedding calls: {}\nscreen:\n{}",
-                runtime.embedding_calls.load(Ordering::SeqCst),
+                "the beacon prompt must recall the lighthouse topic: {error}\nscreen:\n{}",
                 harness.screen_contents()
             )
         });
-    assert!(
-        runtime.embedding_calls.load(Ordering::SeqCst) > 0,
-        "the local runtime must serve the embedding calls"
-    );
     harness.quit().expect("clean quit");
 }

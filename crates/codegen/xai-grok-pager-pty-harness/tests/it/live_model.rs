@@ -560,6 +560,21 @@ fn recalled_notes_by_prompt(history: &[Value]) -> Vec<Vec<String>> {
     by_prompt
 }
 
+/// The real pager with a real Ollama as a provider and no embedding config. A prompt that shares no word with
+/// a stored topic must recall it, and `/memory` must name the model. `GROK_LIVE_OLLAMA_URL` is the runtime's
+/// OpenAI-compatible base URL. `GROK_LIVE_OLLAMA_EMBEDDING_MODEL` is the embedding model it lists first.
+#[cfg(unix)]
+#[tokio::test(flavor = "multi_thread", worker_threads = 2)]
+#[ignore = "needs a running Ollama: GROK_LIVE_OLLAMA_URL and GROK_LIVE_OLLAMA_EMBEDDING_MODEL"]
+async fn live_recall_matches_by_meaning_through_a_real_ollama() {
+    let url = required_env("GROK_LIVE_OLLAMA_URL");
+    let model = required_env("GROK_LIVE_OLLAMA_EMBEDDING_MODEL");
+    crate::pty_e2e_smoke::memory_recall_uses_a_local_embedding_model::recall_by_meaning_with_no_embedding_config(
+        &url, &model,
+    )
+    .await;
+}
+
 /// A marker word that only the earlier session's facts hold.
 const SCRATCH_PREFIX: &str = "zz_";
 const DEPLOY_SCRIPT: &str = "tools/ship/quokka.sh";

@@ -25,7 +25,7 @@ mod input_echoes_at_idle_prompt;
 #[path = "pty_e2e/memory_cost_is_visible.rs"]
 mod memory_cost_is_visible;
 #[path = "pty_e2e/memory_recall_uses_a_local_embedding_model.rs"]
-mod memory_recall_uses_a_local_embedding_model;
+pub(crate) mod memory_recall_uses_a_local_embedding_model;
 #[path = "pty_e2e/plan_revise_empty_enter_does_not_approve.rs"]
 mod plan_revise_empty_enter_does_not_approve;
 #[path = "pty_e2e/provider_only_config_keeps_typed_prompt.rs"]
