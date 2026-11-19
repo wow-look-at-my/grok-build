@@ -338,3 +338,65 @@ async fn cancellation_join_releases_editor_lease_before_expiry() {
         })
         .await;
 }
+
+fn dream_outcome(
+    disposition: MemoryDreamDisposition,
+    observation_count: usize,
+    topics_affected: usize,
+) -> super::MemoryDreamResponse {
+    super::MemoryDreamResponse {
+        disposition,
+        observation_count,
+        topics_affected,
+        detail: None,
+    }
+}
+
+#[test]
+fn a_dream_over_both_scopes_reports_the_work_and_the_first_failure() {
+    use super::combine_scope_outcomes;
+    let merged = || dream_outcome(MemoryDreamDisposition::Completed, 5, 2);
+    let no_work = || dream_outcome(MemoryDreamDisposition::NoWork, 0, 0);
+    let failed = || {
+        let mut outcome = dream_outcome(MemoryDreamDisposition::Failed, 3, 0);
+        outcome.detail = Some("model call failed".to_owned());
+        outcome
+    };
+
+    assert_eq!(combine_scope_outcomes(merged(), no_work()), merged());
+    assert_eq!(combine_scope_outcomes(no_work(), merged()), merged());
+    assert_eq!(combine_scope_outcomes(no_work(), no_work()), no_work());
+    assert_eq!(
+        combine_scope_outcomes(merged(), merged()),
+        dream_outcome(MemoryDreamDisposition::Completed, 10, 4)
+    );
+    assert_eq!(
+        combine_scope_outcomes(failed(), merged()),
+        failed(),
+        "a later success must not hide the first scope's failure"
+    );
+    assert_eq!(combine_scope_outcomes(merged(), failed()), failed());
+    assert_eq!(combine_scope_outcomes(failed(), no_work()), failed());
+}
+
+#[test]
+fn dream_and_its_housekeeping_cover_both_scopes() {
+    use xai_grok_memory::V2MemoryScope;
+    assert_eq!(
+        super::V2_DREAM_SCOPES,
+        [V2MemoryScope::Workspace, V2MemoryScope::Global]
+    );
+    let storage = crate::session::memory::MemoryStorage::new_for_mode(
+        std::path::Path::new("/home/user/project"),
+        Some(std::path::Path::new("/memory-root")),
+        crate::config::MemoryMode::V2,
+    );
+    assert_eq!(
+        super::v2_scope_dir(&storage, V2MemoryScope::Global),
+        storage.global_dir()
+    );
+    assert_eq!(
+        super::v2_scope_dir(&storage, V2MemoryScope::Workspace),
+        storage.workspace_dir()
+    );
+}

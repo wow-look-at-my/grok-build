@@ -22,6 +22,8 @@ mod first_prompt_waits_for_model_catalog;
 mod initial_prompt_positional_auto_submits;
 #[path = "pty_e2e/input_echoes_at_idle_prompt.rs"]
 mod input_echoes_at_idle_prompt;
+#[path = "pty_e2e/memory_cost_is_visible.rs"]
+mod memory_cost_is_visible;
 #[path = "pty_e2e/plan_revise_empty_enter_does_not_approve.rs"]
 mod plan_revise_empty_enter_does_not_approve;
 #[path = "pty_e2e/provider_only_config_keeps_typed_prompt.rs"]

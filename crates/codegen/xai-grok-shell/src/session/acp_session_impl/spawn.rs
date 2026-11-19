@@ -939,6 +939,25 @@ pub(crate) async fn spawn_session_actor(
         .as_ref()
         .is_some_and(|mc| mc.root_dir_override.is_none() && mc.v2.can_run_maintenance());
     let mut memory_v2_access = None;
+    // Recall adds vectors only when an embedding model is configured. Without one it matches words.
+    let recall_embedding = memory_config
+        .as_ref()
+        .filter(|config| config.mode.is_v2() && config.v2.can_recall())
+        .map(|config| config.embedding.clone())
+        .filter(|embedding| embedding.model.as_ref().is_some_and(|m| !m.is_empty()))
+        .map(
+            |embedding| xai_grok_memory::backend::EmbeddingProviderParams {
+                config: embedding,
+                base_url: embed_base_url.clone(),
+                api_key: embed_api_key.clone(),
+                credentials: xai_grok_login::credential_provider::embedding_session_credentials(
+                    &embed_base_url,
+                    auth_manager.as_ref(),
+                    api_key_provider.clone(),
+                ),
+                usage_sink: crate::session::billed_client::session_usage_sink(&chat_state_handle),
+            },
+        );
     if let Some(storage) = memory_storage_for_session.clone() {
         if storage.mode().is_v2() {
             match memory_control::initialize_v2_memory(&storage, memory_v2_legacy_carryover)
@@ -1929,6 +1948,10 @@ pub(crate) async fn spawn_session_actor(
             dream_success_count: std::sync::atomic::AtomicU64::new(0),
             dream_error_count: std::sync::atomic::AtomicU64::new(0),
             token_totals: Default::default(),
+            recall: crate::session::memory_state::SessionRecall {
+                embedding: recall_embedding,
+                ..Default::default()
+            },
         },
         session_start: std::time::Instant::now(),
         inference_idle_timeout: Duration::from_secs(inference_idle_timeout_secs),

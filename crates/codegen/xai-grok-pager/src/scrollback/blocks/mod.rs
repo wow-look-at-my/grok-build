@@ -24,9 +24,7 @@ pub(crate) use context_info::BarGeometry;
 pub use context_info::ContextInfoBlock;
 pub(crate) use context_ledger_view::{LedgerAction, LedgerRow};
 pub(crate) use session_event::compacting_label;
-pub use session_event::{
-    CompactionDetail, MemoryCaptureBlock, MemoryCommandKind, SessionEvent, SessionEventBlock,
-};
+pub use session_event::{CompactionDetail, MemoryCaptureBlock, SessionEvent, SessionEventBlock};
 pub use subagent::{SubagentBlock, SubagentBlockKind};
 pub use system::SystemMessageBlock;
 pub use thinking::ThinkingBlock;

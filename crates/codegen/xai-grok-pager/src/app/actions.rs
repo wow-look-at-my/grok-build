@@ -1891,16 +1891,6 @@ pub enum Effect {
         path: String,
         expected_content_hash: String,
     },
-    /// Run `/flush` (example.invalid/memory/flush) as a tracked agent command.
-    MemoryFlush {
-        agent_id: AgentId,
-        session_id: acp::SessionId,
-    },
-    /// Run `/dream` (example.invalid/memory/dream) as a tracked agent command.
-    MemoryDream {
-        agent_id: AgentId,
-        session_id: acp::SessionId,
-    },
     /// Execute a hooks management action via ACP.
     HooksAction {
         agent_id: AgentId,
@@ -2837,16 +2827,6 @@ pub enum TaskResult {
         agent_id: AgentId,
         path: String,
         result: Result<xai_grok_shell::extensions::memory::MemoryForgetResponse, String>,
-    },
-    /// `/flush` finished.
-    MemoryFlushComplete {
-        agent_id: AgentId,
-        result: Result<xai_grok_shell::extensions::memory::MemoryFlushResponse, String>,
-    },
-    /// `/dream` finished.
-    MemoryDreamComplete {
-        agent_id: AgentId,
-        result: Result<xai_grok_shell::extensions::memory::MemoryDreamResponse, String>,
     },
     /// Hooks action completed.
     HooksActionResult {

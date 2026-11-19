@@ -745,7 +745,7 @@ impl MvpAgent {
         crate::remote::WorkspacesClient::new(self.auth_manager.clone())
     }
     /// Pre-session command availability snapshot. Used by the `example.invalid/commands/list` ext method and the `InitializeResponse._meta` path (`builtin_commands()`). Both fire before any session exists.
-    /// The eventual agent's toolset is unknown (it depends on the model the user picks). So runtime/tool-dependent gates (`/flush`, `/loop`, `/memory`, …) fail closed.
+    /// The eventual agent's toolset is unknown (it depends on the model the user picks). So the gates that depend on the runtime or on a tool fail closed.
     /// The session-scoped `available_commands_update` in `acp_session.rs` fills in the real per-model gating as soon as a session starts.
     pub(crate) fn command_availability(
         &self,

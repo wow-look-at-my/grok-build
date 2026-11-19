@@ -16,8 +16,8 @@ use super::cta::{
 use super::ctx::{find_agent_by_session_id, get_active_agent_mut};
 use super::notes::{handle_btw_response, handle_memory_note_saved, handle_todo_captured};
 use super::prompt::{
-    defer_to_open_reload_window, handle_compact_complete, handle_memory_command_complete,
-    handle_prompt_response, handle_suggestion_debounce_expired,
+    defer_to_open_reload_window, handle_compact_complete, handle_prompt_response,
+    handle_suggestion_debounce_expired,
 };
 use super::rewind::{
     dispatch_rewind_success, handle_rewind_execute_failed, handle_rewind_points_loaded,
@@ -63,7 +63,6 @@ use crate::app::app_view::{ActiveView, AppView, AuthState};
 use crate::app::command_catalog::CommandCatalogSource;
 use crate::app::dispatch::settings;
 use crate::scrollback::block::RenderBlock;
-use crate::scrollback::blocks::MemoryCommandKind;
 use agent_client_protocol as acp;
 pub(super) fn unregister_session_effect(session_id: Option<acp::SessionId>) -> Vec<Effect> {
     session_id
@@ -963,18 +962,6 @@ pub(super) fn dispatch_task_result(result: TaskResult, app: &mut AppView) -> Vec
         TaskResult::CompactComplete { agent_id, result } => {
             handle_compact_complete(app, agent_id, result)
         }
-        TaskResult::MemoryFlushComplete { agent_id, result } => handle_memory_command_complete(
-            app,
-            agent_id,
-            MemoryCommandKind::Flush,
-            result.map(|r| (r.summary(), r.succeeded())),
-        ),
-        TaskResult::MemoryDreamComplete { agent_id, result } => handle_memory_command_complete(
-            app,
-            agent_id,
-            MemoryCommandKind::Dream,
-            result.map(|r| (r.summary(), r.succeeded())),
-        ),
         TaskResult::SwitchModelComplete {
             agent_id,
             model_id,
@@ -1222,12 +1209,14 @@ pub(super) fn dispatch_task_result(result: TaskResult, app: &mut AppView) -> Vec
                             None | Some(crate::views::modal::ActiveModal::MemoryBrowser { .. })
                         ) => {}
                     Ok(listing) => {
+                        let memory_cost = agent.session.tracker.memory_cost();
                         agent.active_modal =
                             Some(crate::views::modal::ActiveModal::MemoryBrowser {
                                 state: Box::new(
                                     crate::views::memory_modal::MemoryModalState::from_listing(
                                         listing,
-                                    ),
+                                    )
+                                    .with_memory_cost(memory_cost),
                                 ),
                             });
                     }

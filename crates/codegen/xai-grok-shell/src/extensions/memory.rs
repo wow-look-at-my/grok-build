@@ -4,8 +4,8 @@
 //! `memory/list` and `memory/toggle` back the `/memory` modal without running a prompt turn, so
 //! opening it or flipping memory writes nothing to scrollback.
 //! `memory/forget` deletes one note from the `/memory` modal through the store's tombstone path.
-//! `memory/flush` and `memory/dream` back the pager-local `/flush` and `/dream` commands; each
-//! returns a typed disposition so the client can render the outcome.
+//! `memory/flush` waits for the capture of the session and `memory/dream` forces a Dream. No
+//! slash command calls them: both run by themselves. Each returns a typed disposition.
 
 use agent_client_protocol as acp;
 use serde::{Deserialize, Serialize};
@@ -41,7 +41,7 @@ pub const MEMORY_LIST_METHOD: &str = "example.invalid/memory/list";
 pub const MEMORY_TOGGLE_METHOD: &str = "example.invalid/memory/toggle";
 pub const MEMORY_FORGET_METHOD: &str = "example.invalid/memory/forget";
 
-/// How a `/dream` run ended.
+/// How a forced Dream (`memory/dream`) ended.
 #[derive(Debug, Clone, Copy, PartialEq, Eq, Serialize, Deserialize)]
 #[serde(rename_all = "snake_case")]
 pub enum MemoryDreamDisposition {
@@ -63,7 +63,7 @@ pub enum MemoryDreamDisposition {
     Disabled,
 }
 
-/// Longest failure text a `/dream` summary carries. A model error can echo the whole request.
+/// Longest failure text a Dream summary carries. A model error can echo the whole request.
 pub const DREAM_FAILURE_DETAIL_LIMIT: usize = 400;
 
 #[derive(Debug, Clone, PartialEq, Eq, Serialize, Deserialize)]
@@ -178,7 +178,7 @@ fn plural(count: usize, noun: &str) -> String {
     }
 }
 
-/// How a `/flush` run ended.
+/// How a forced flush (`memory/flush`) ended.
 #[derive(Debug, Clone, Copy, PartialEq, Eq, Serialize, Deserialize)]
 #[serde(rename_all = "snake_case")]
 pub enum MemoryFlushDisposition {

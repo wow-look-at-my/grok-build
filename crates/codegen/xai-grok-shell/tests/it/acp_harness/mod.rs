@@ -117,18 +117,22 @@ pub struct AgentPipes {
     pub from_agent: tokio::io::DuplexStream,
 }
 
-/// Stand up `MvpAgent` plus its ACP connection and IO tasks on the current `LocalSet`.
-/// `remote` is installed before `MvpAgent::new` so tests can seed `RemoteSettings`
-/// (including a grove kill) before the first worktree RPC.
+/// Stand up `MvpAgent` plus its ACP connection and IO tasks on the current
+/// `LocalSet`.
 fn spawn_agent_local(remote: Option<xai_grok_shell::util::config::RemoteSettings>) -> AgentPipes {
+    spawn_agent_local_with(|config| config.remote_settings = remote)
+}
+
+/// [`spawn_agent_local`] with the agent config a test needs. A default config has no memory.
+fn spawn_agent_local_with(configure: impl FnOnce(&mut AgentConfig)) -> AgentPipes {
     let (c2a_a, c2a_b) = tokio::io::duplex(DUPLEX_BUFFER_BYTES);
     let (a2c_a, a2c_b) = tokio::io::duplex(DUPLEX_BUFFER_BYTES);
 
     let mut agent_config = AgentConfig::default();
-    agent_config.remote_settings = remote;
+    configure(&mut agent_config);
     let auth_manager = Arc::new(agent_config.create_auth_manager());
     let (gw_tx, gw_rx) = tokio::sync::mpsc::unbounded_channel();
-    let agent = MvpAgent::new(
+    let mut agent = MvpAgent::new(
         GatewaySender::new(gw_tx),
         &agent_config,
         auth_manager,
@@ -136,6 +140,10 @@ fn spawn_agent_local(remote: Option<xai_grok_shell::util::config::RemoteSettings
         None,
     )
     .expect("valid config");
+    // The binary's startup makes this call. `MvpAgent::new` does not read `memory_config`.
+    if let Some(memory_config) = agent_config.memory_config.clone() {
+        agent.set_memory_config(memory_config);
+    }
 
     let agent_incoming = LineBufferedRead::spawn_local(c2a_b.compat());
     let (agent_conn, agent_io) =
@@ -177,6 +185,26 @@ where
     C: acp::Client + 'static,
 {
     let pipes = spawn_agent_local(remote);
+    connect_client(client, client_type, pipes).await
+}
+
+/// [`connect_and_auth`] with memory resolved from an empty config, as the binary's startup does.
+#[allow(dead_code)]
+pub async fn connect_and_auth_with_memory<C>(
+    client: C,
+    client_type: &str,
+) -> (acp::ClientSideConnection, acp::InitializeResponse)
+where
+    C: acp::Client + 'static,
+{
+    let pipes = spawn_agent_local_with(|config| {
+        config.memory_config = Some(xai_grok_shell::config::MemoryConfig::resolve(
+            false,
+            false,
+            &toml::Value::Table(toml::Table::new()),
+            None,
+        ));
+    });
     connect_client(client, client_type, pipes).await
 }
 
