@@ -228,15 +228,16 @@ async fn a_file_is_returned_one_time_for_a_conversation() {
         &fixture.workspace,
         "topics/mirror.md",
         &format!(
-            "# Sccache mirror\n\n## Upload\nThe rustc wrapper uploads objects. {filler}\n\n\
-             ## Eviction\nThe rustc hash names each object. {filler}\n"
+            "# Sccache mirror\n\n## Upload\nThe zanzibar walrus uploads objects. {filler}\n\n\
+             ## Eviction\nThe quokka pelican names each object. {filler}\n"
         ),
     );
     let recall = fixture.recall(V2RecallConfig {
         max_hits: 8,
         ..V2RecallConfig::default()
     });
-    let query = "sccache mirror rustc";
+    // Each section holds words of its own, so more than one chunk of the file qualifies.
+    let query = "sccache mirror zanzibar walrus quokka pelican";
 
     let first = lexical(&recall, query).await;
     assert!(first.corpus_chunks > 4, "the file must hold several chunks");
@@ -304,7 +305,7 @@ async fn snippet_is_cut_on_a_char_boundary() {
         ..V2RecallConfig::default()
     });
 
-    let outcome = lexical(&recall, "harfbuzz shaper").await;
+    let outcome = lexical(&recall, "glyphs harfbuzz shaper").await;
 
     assert_eq!(outcome.hits.len(), 1);
     assert_eq!(top(&outcome).snippet, "# Glyphs\nÆt…");
@@ -318,7 +319,7 @@ async fn seen_keys_are_skipped_without_using_up_max_hits() {
     write(
         &fixture.workspace,
         "topics/build2.md",
-        "# Remote cache\nThe sccache bucket shares artifacts; rustc upgrades invalidate it.\n",
+        "# Remote sccache\nThe sccache bucket shares artifacts; rustc upgrades invalidate it.\n",
     );
     let recall = fixture.recall(V2RecallConfig {
         max_hits: 1,
@@ -349,7 +350,7 @@ async fn edited_file_gets_a_new_key_and_deleted_file_leaves_the_corpus() {
     );
     let recall = fixture.recall(V2RecallConfig::default());
 
-    let before = lexical(&recall, "canary helm").await;
+    let before = lexical(&recall, "deploy canary helm").await;
     assert_eq!(before.hits.len(), 1);
     assert_eq!(before.corpus_chunks, 4);
 
@@ -358,13 +359,13 @@ async fn edited_file_gets_a_new_key_and_deleted_file_leaves_the_corpus() {
         "# Deploy\nThe blue green rollout now uses kustomize overlays and argocd.\n",
     )
     .unwrap();
-    let after = lexical(&recall, "kustomize argocd").await;
+    let after = lexical(&recall, "deploy kustomize argocd").await;
     assert_eq!(after.hits.len(), 1);
     assert_ne!(top(&after).key, top(&before).key);
-    assert!(lexical(&recall, "canary helm").await.hits.is_empty());
+    assert!(lexical(&recall, "deploy canary helm").await.hits.is_empty());
 
     std::fs::remove_file(&path).unwrap();
-    let gone = lexical(&recall, "kustomize argocd").await;
+    let gone = lexical(&recall, "deploy kustomize argocd").await;
     assert!(gone.hits.is_empty());
     assert_eq!(gone.corpus_chunks, 3);
 }
@@ -754,7 +755,7 @@ async fn both_scopes_are_searched() {
     );
     let recall = fixture.recall(V2RecallConfig::default());
 
-    let global = lexical(&recall, "tabs makefiles").await;
+    let global = lexical(&recall, "style tabs makefiles").await;
     assert_eq!(global.corpus_chunks, 4);
     assert_eq!(global.hits.len(), 1);
     assert_eq!(top(&global).scope, V2MemoryScope::Global);
@@ -831,6 +832,7 @@ async fn a_long_query_matches_on_its_most_distinctive_terms() {
 
     let every_term = fixture.recall(V2RecallConfig {
         max_query_terms: usize::MAX,
+        max_hits: 8,
         ..V2RecallConfig::default()
     });
     assert_eq!(
