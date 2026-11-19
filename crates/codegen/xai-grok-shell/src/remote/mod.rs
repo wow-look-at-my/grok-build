@@ -36,7 +36,12 @@ pub use conversations_client::{
     ConvError, ConvQuery, Conversation, ConversationsClient, ListConversationsPage,
     UpdateConversationBody,
 };
-pub(crate) use local_runtime::{fetch_local_listing_blocking, fetch_residency_blocking};
+#[cfg(test)]
+pub(crate) use local_runtime::local_embedding_models;
+pub(crate) use local_runtime::{
+    LocalEmbeddingModel, fetch_local_listing_blocking, fetch_residency_blocking,
+    local_embedding_model,
+};
 pub(crate) use model_source::{ModelSource, active_model_source, fetch_active_models_async};
 pub use pull::{PullResult, pull_session_to_local};
 pub use skills_client::{

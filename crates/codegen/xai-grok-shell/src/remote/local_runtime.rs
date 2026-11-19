@@ -54,6 +54,72 @@ pub(crate) fn host_root(base_url: &str) -> String {
     trimmed.to_owned()
 }
 
+/// An embedding model that a configured local runtime serves.
+#[derive(Debug, Clone, PartialEq, Eq)]
+pub(crate) struct LocalEmbeddingModel {
+    /// The OpenAI-compatible base URL of the runtime.
+    pub base_url: String,
+    pub model: String,
+}
+
+/// The embedding models of each listed local runtime, by its OpenAI-compatible base URL.
+static EMBEDDING_MODELS: std::sync::Mutex<std::collections::BTreeMap<String, Vec<String>>> =
+    std::sync::Mutex::new(std::collections::BTreeMap::new());
+
+/// Replace what `base_url` is known to serve. An empty list forgets the runtime.
+pub(crate) fn record_embedding_models(base_url: String, models: Vec<String>) {
+    let mut known = EMBEDDING_MODELS
+        .lock()
+        .unwrap_or_else(std::sync::PoisonError::into_inner);
+    if models.is_empty() {
+        known.remove(&base_url);
+    } else {
+        known.insert(base_url, models);
+    }
+}
+
+/// The model memory recall uses when the config names none.
+pub(crate) fn local_embedding_model() -> Option<LocalEmbeddingModel> {
+    local_embedding_models().into_iter().next()
+}
+
+/// Every known embedding model, by runtime URL and then in listing order.
+pub(crate) fn local_embedding_models() -> Vec<LocalEmbeddingModel> {
+    let known = EMBEDDING_MODELS
+        .lock()
+        .unwrap_or_else(std::sync::PoisonError::into_inner);
+    known
+        .iter()
+        .flat_map(|(base_url, models)| {
+            models.iter().map(|model| LocalEmbeddingModel {
+                base_url: base_url.clone(),
+                model: model.clone(),
+            })
+        })
+        .collect()
+}
+
+/// Whether Ollama serves this model for embeddings only. The chat picker leaves such a model out.
+fn is_embedding_only(show: &OllamaShowResponse) -> bool {
+    show.has_capability("embedding") && !show.has_capability("completion")
+}
+
+/// The embedding models of an LM Studio listing, v1 (`models[].key`) or v0 (`data[].id`).
+pub(crate) fn lmstudio_embedding_models(body: &serde_json::Value) -> Vec<String> {
+    let of = |list: &str, kind: &str, id: &str| -> Vec<String> {
+        body.get(list)
+            .and_then(|models| models.as_array())
+            .into_iter()
+            .flatten()
+            .filter(|model| model.get("type").and_then(|t| t.as_str()) == Some(kind))
+            .filter_map(|model| model.get(id)?.as_str().map(str::to_owned))
+            .collect()
+    };
+    let mut models = of("models", "embedding", "key");
+    models.extend(of("data", "embeddings", "id"));
+    models
+}
+
 /// Fetch one local runtime's listing and turn it into catalog entries.
 /// `inference_base_url` is what the discovered models are reached at; the
 /// listing itself comes from the host root.
@@ -65,13 +131,14 @@ pub(crate) fn fetch_local_listing_blocking(
     window_source: ContextWindowSource,
 ) -> Result<Vec<ModelEntryConfig>, BackendError> {
     let host = host_root(base_url);
-    let models = match dialect {
+    let (models, embedding) = match dialect {
         ModelsListDialect::Ollama => fetch_ollama_models(&host, api_key)?,
         ModelsListDialect::Lmstudio => fetch_lmstudio_models(&host, api_key)?,
         ModelsListDialect::Openai => {
             return super::client::fetch_models_for_api_base_blocking(base_url, api_key);
         }
     };
+    record_embedding_models(format!("{host}/v1"), embedding);
     Ok(models
         .into_iter()
         .map(|model| to_entry(model, inference_base_url, window_source))
@@ -106,7 +173,7 @@ pub(crate) fn fetch_residency_blocking(
             }
         }
         ModelsListDialect::Lmstudio => {
-            let models = fetch_lmstudio_models(&host, api_key)?;
+            let (models, _) = fetch_lmstudio_models(&host, api_key)?;
             for model in models {
                 residency.insert(model.slug, model.loaded_in_vram);
             }
@@ -206,8 +273,11 @@ fn reasoning_efforts_from_levels(
 /// is what `/api/tags` cannot avoid: the tag listing carries a size and a
 /// quantization. The tag listing says nothing about the context length or
 /// whether the model was trained for tools. These are localhost metadata
-/// reads.
-fn fetch_ollama_models(host: &str, api_key: Option<&str>) -> Result<Vec<LocalModel>, BackendError> {
+/// reads. The second list holds the embedding models, which are no chat models.
+fn fetch_ollama_models(
+    host: &str,
+    api_key: Option<&str>,
+) -> Result<(Vec<LocalModel>, Vec<String>), BackendError> {
     let client = crate::http::shared_startup_blocking_client();
     let tags: OllamaTagsResponse = get_json(&client, &format!("{host}/api/tags"), api_key)?;
 
@@ -220,6 +290,7 @@ fn fetch_ollama_models(host: &str, api_key: Option<&str>) -> Result<Vec<LocalMod
         });
 
     let mut models = Vec::with_capacity(tags.models.len());
+    let mut embedding = Vec::new();
     for tag in tags.models {
         let slug = if tag.model.is_empty() {
             tag.name.clone()
@@ -243,6 +314,10 @@ fn fetch_ollama_models(host: &str, api_key: Option<&str>) -> Result<Vec<LocalMod
             tracing::debug!(model = %slug, %error, "ollama /api/show failed; no window for this one");
         })
         .ok();
+        if show.as_ref().is_some_and(is_embedding_only) {
+            embedding.push(slug);
+            continue;
+        }
 
         let details = tag.details.as_ref();
         let description = details.map(|d| {
@@ -280,7 +355,7 @@ fn fetch_ollama_models(host: &str, api_key: Option<&str>) -> Result<Vec<LocalMod
             description: description.filter(|d| !d.is_empty()),
         });
     }
-    Ok(models)
+    Ok((models, embedding))
 }
 
 // ── LM Studio ───────────────────────────────────────────────────────────
@@ -291,10 +366,10 @@ fn fetch_ollama_models(host: &str, api_key: Option<&str>) -> Result<Vec<LocalMod
 fn fetch_lmstudio_models(
     host: &str,
     api_key: Option<&str>,
-) -> Result<Vec<LocalModel>, BackendError> {
+) -> Result<(Vec<LocalModel>, Vec<String>), BackendError> {
     let client = crate::http::shared_startup_blocking_client();
     match get_json::<serde_json::Value>(&client, &format!("{host}/api/v1/models"), api_key) {
-        Ok(body) => Ok(parse_lmstudio_v1(&body)),
+        Ok(body) => Ok((parse_lmstudio_v1(&body), lmstudio_embedding_models(&body))),
         Err(error) => {
             tracing::debug!(
                 %error,
@@ -302,7 +377,7 @@ fn fetch_lmstudio_models(
             );
             let body: serde_json::Value =
                 get_json(&client, &format!("{host}/api/v0/models"), api_key)?;
-            Ok(parse_lmstudio_v0(&body))
+            Ok((parse_lmstudio_v0(&body), lmstudio_embedding_models(&body)))
         }
     }
 }
@@ -545,6 +620,55 @@ mod tests {
 
         assert_eq!(models.len(), 1);
         assert_eq!(models[0].slug, "real-one");
+    }
+
+    #[test]
+    fn embedding_models_of_both_lmstudio_listings_are_found() {
+        let v1 = serde_json::json!({
+            "models": [
+                { "type": "embedding", "key": "nomic-embed" },
+                { "type": "llm", "key": "real-one" },
+            ]
+        });
+        assert_eq!(lmstudio_embedding_models(&v1), vec!["nomic-embed"]);
+        let v0 = serde_json::json!({
+            "data": [
+                { "type": "llm", "id": "real-one" },
+                { "type": "embeddings", "id": "bge-small" },
+            ]
+        });
+        assert_eq!(lmstudio_embedding_models(&v0), vec!["bge-small"]);
+    }
+
+    #[test]
+    fn an_ollama_model_with_no_completion_capability_is_an_embedding_model() {
+        let show = |capabilities: &[&str]| -> OllamaShowResponse {
+            serde_json::from_value(serde_json::json!({ "capabilities": capabilities }))
+                .expect("a show response")
+        };
+        assert!(is_embedding_only(&show(&["embedding"])));
+        assert!(!is_embedding_only(&show(&["completion", "tools"])));
+        assert!(!is_embedding_only(&show(&["completion", "embedding"])));
+        assert!(!is_embedding_only(&show(&[])));
+    }
+
+    #[test]
+    fn a_runtime_listing_replaces_the_embedding_models_it_recorded() {
+        // Other tests of this process record nothing under this URL.
+        let url = "http://embedding-registry.test/v1".to_owned();
+        record_embedding_models(url.clone(), vec!["first".into(), "second".into()]);
+        let known = || -> Vec<String> {
+            local_embedding_models()
+                .into_iter()
+                .filter(|found| found.base_url == "http://embedding-registry.test/v1")
+                .map(|found| found.model)
+                .collect()
+        };
+        assert_eq!(known(), vec!["first", "second"]);
+        record_embedding_models(url.clone(), vec!["second".into()]);
+        assert_eq!(known(), vec!["second"]);
+        record_embedding_models(url, Vec::new());
+        assert!(known().is_empty());
     }
 
     #[test]

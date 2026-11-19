@@ -1634,7 +1634,7 @@ pub(crate) fn default_settings_with_subagent_rows(
             category: SettingCategory::Agent,
             owner: SettingOwner::Shell,
             label: "Embedding model",
-            description: "Embedding model for meaning-based recall. Empty uses word matching only.",
+            description: "Embedding model for meaning-based recall. Empty uses an embedding model of a configured local runtime, or word matching alone.",
             keywords: &["memory", "recall", "embedding", "model", "vector", "ollama"],
             kind: SettingKind::String {
                 default: "",

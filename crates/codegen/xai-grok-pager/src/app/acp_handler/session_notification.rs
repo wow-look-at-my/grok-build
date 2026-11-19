@@ -1280,6 +1280,7 @@ pub(super) fn handle_session_notification_with_origin(
             disabled_reason,
             capture_enabled,
             dream_enabled,
+            recall_embedding,
         } => {
             let listing = xai_grok_shell::extensions::memory::MemoryListing {
                 files,
@@ -1287,6 +1288,7 @@ pub(super) fn handle_session_notification_with_origin(
                 disabled_reason,
                 capture_enabled,
                 dream_enabled,
+                recall_embedding,
             };
             agent.active_modal = Some(crate::views::modal::ActiveModal::MemoryBrowser {
                 state: Box::new(

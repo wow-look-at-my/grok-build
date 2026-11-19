@@ -180,10 +180,58 @@ pub(crate) struct SessionRecall {
     /// Built on first use.
     pub engine: RefCell<Option<xai_grok_memory::V2Recall>>,
     pub state: RefCell<RecallState>,
-    /// Builds the provider that adds vectors to recall. `None` leaves recall on word matching.
+    /// Builds the provider that adds vectors to recall, for the model the config names.
     pub embedding: Option<xai_grok_memory::backend::EmbeddingProviderParams>,
+    /// Set when the config names no model.
+    pub auto_embedding: Option<AutoEmbedding>,
     /// Notes shown to the model.
     pub shown: AtomicU64,
+}
+
+impl SessionRecall {
+    /// What builds the embedding provider right now. `None` leaves recall on word matching.
+    pub fn active_embedding(&self) -> Option<xai_grok_memory::backend::EmbeddingProviderParams> {
+        if let Some(configured) = &self.embedding {
+            return Some(configured.clone());
+        }
+        let auto = self.auto_embedding.as_ref()?;
+        crate::remote::local_embedding_model().map(|found| auto.params(&found))
+    }
+}
+
+/// The key sent to an embedding endpoint that names no key variable. A local runtime reads none.
+pub(crate) const KEYLESS_EMBEDDING_KEY: &str = "none";
+
+/// What an embedding provider for a local runtime's model is built from.
+pub(crate) struct AutoEmbedding {
+    pub auth_manager: Option<Arc<xai_grok_login::AuthManager>>,
+    pub api_key_provider: Option<xai_grok_tools::types::SharedApiKeyProvider>,
+    pub usage_sink: xai_grok_sampler::SharedUsageSink,
+}
+
+impl AutoEmbedding {
+    pub fn params(
+        &self,
+        found: &crate::remote::LocalEmbeddingModel,
+    ) -> xai_grok_memory::backend::EmbeddingProviderParams {
+        xai_grok_memory::backend::EmbeddingProviderParams {
+            config: crate::config::MemoryEmbeddingConfig {
+                model: Some(found.model.clone()),
+                base_url: Some(found.base_url.clone()),
+                // The runtime refuses a size above the model's own.
+                request_dimensions: false,
+                ..Default::default()
+            },
+            base_url: found.base_url.clone(),
+            api_key: Some(KEYLESS_EMBEDDING_KEY.to_owned()),
+            credentials: xai_grok_login::credential_provider::embedding_session_credentials(
+                &found.base_url,
+                self.auth_manager.as_ref(),
+                self.api_key_provider.clone(),
+            ),
+            usage_sink: self.usage_sink.clone(),
+        }
+    }
 }
 
 pub(crate) struct SessionMemory {

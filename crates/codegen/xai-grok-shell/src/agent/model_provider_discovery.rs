@@ -689,6 +689,66 @@ mod tests {
         (base, handle)
     }
 
+    /// An embedding model is no chat model. The listing keeps it for memory recall.
+    #[tokio::test(flavor = "multi_thread", worker_threads = 2)]
+    async fn an_ollama_embedding_model_is_kept_for_recall_and_left_out_of_the_catalog() {
+        use axum::routing::{get, post};
+        let listener = tokio::net::TcpListener::bind("127.0.0.1:0").await.unwrap();
+        let base = format!("http://127.0.0.1:{}", listener.local_addr().unwrap().port());
+        let app = axum::Router::new()
+            .route(
+                "/api/tags",
+                get(|| async {
+                    axum::Json(serde_json::json!({
+                        "models": [
+                            {"name": "llama3.2:latest", "model": "llama3.2:latest"},
+                            {"name": "nomic-embed-text:latest", "model": "nomic-embed-text:latest"},
+                        ]
+                    }))
+                }),
+            )
+            .route(
+                "/api/ps",
+                get(|| async { axum::Json(serde_json::json!({ "models": [] })) }),
+            )
+            .route(
+                "/api/show",
+                post(|body: axum::Json<serde_json::Value>| async move {
+                    let embedding = body["model"] == "nomic-embed-text:latest";
+                    let capabilities = if embedding {
+                        serde_json::json!(["embedding"])
+                    } else {
+                        serde_json::json!(["completion", "tools"])
+                    };
+                    axum::Json(serde_json::json!({ "capabilities": capabilities }))
+                }),
+            );
+        let server = xai_spawn::spawn(async move { axum::serve(listener, app).await.unwrap() });
+        let cfg = config_from(&format!(
+            r#"
+            [model_providers.ollama]
+            base_url = "{base}/v1"
+            "#
+        ));
+
+        let discovered = resolve_discovered_models(&cfg, &discover_provider_models(&cfg).await);
+        server.abort();
+
+        assert!(discovered.contains_key("ollama/llama3.2:latest"));
+        assert!(
+            !discovered.contains_key("ollama/nomic-embed-text:latest"),
+            "an embedding model cannot chat, so the picker must not offer it"
+        );
+        let found = crate::remote::local_embedding_models();
+        assert!(
+            found.contains(&crate::remote::LocalEmbeddingModel {
+                base_url: format!("{base}/v1"),
+                model: "nomic-embed-text:latest".to_owned(),
+            }),
+            "recall must find the embedding model of the runtime: {found:?}"
+        );
+    }
+
     #[tokio::test(flavor = "multi_thread", worker_threads = 2)]
     async fn the_ollama_dialect_reads_the_loaded_window_and_the_residency() {
         let (base, server) = start_ollama_server().await;
