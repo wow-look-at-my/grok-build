@@ -1547,6 +1547,77 @@ pub(crate) fn default_settings_with_subagent_rows(
             },
             restart_required: true,
         },
+        // PAGER-owned, set over ACP. Reads from `PagerLocalSnapshot.plan_mode_active`.
+        // The default "off" matches `AgentView::new`'s `plan_mode_active = false`
+        SettingMeta {
+            key: "plan_mode",
+            category: SettingCategory::Agent,
+            owner: SettingOwner::Pager,
+            label: "Plan mode",
+            description: "When on, the agent summarises a plan before running tools or making edits.",
+            keywords: &[
+                "plan", "mode", "agent", "summary", "approval", "review", "session",
+            ],
+            kind: SettingKind::Enum {
+                default: "off",
+                choices: PLAN_MODE_CHOICES,
+                supports_preview: false,
+            },
+            restart_required: false,
+        },
+        // SHELL-owned `[features].two_pass_compaction`, a registry feature row like `subagent_model_inheritance`.
+        SettingMeta {
+            key: "two_pass_compaction",
+            category: SettingCategory::Agent,
+            owner: SettingOwner::Shell,
+            label: "Two-pass compaction",
+            description: "Summarizes the older part of the conversation in the background before the context fills, so compaction takes less time when it fires. Turn off to always compact the whole conversation in one request.",
+            keywords: &[
+                "compaction",
+                "compact",
+                "two-pass",
+                "prefire",
+                "summary",
+                "context",
+            ],
+            kind: SettingKind::Bool {
+                default: Feature::TwoPassCompaction.default_enabled(),
+            },
+            restart_required: false,
+        },
+        // SHELL-owned `[features].compact_on_model_switch`. The config watcher reloads it into every running session.
+        SettingMeta {
+            key: "compact_on_model_switch",
+            category: SettingCategory::Agent,
+            owner: SettingOwner::Shell,
+            label: "Compact on model switch",
+            description: "Compacts the conversation at the first turn after every model change, so the new model starts from a summary. Off keeps the full history across a switch.",
+            keywords: &[
+                "compaction",
+                "compact",
+                "model",
+                "switch",
+                "summary",
+                "context",
+            ],
+            kind: SettingKind::Bool {
+                default: Feature::CompactOnModelSwitch.default_enabled(),
+            },
+            restart_required: false,
+        },
+        // SHELL-owned `[features].session_recap`. The shell re-reads it on each recap request, so it applies live.
+        SettingMeta {
+            key: "session_recap",
+            category: SettingCategory::Agent,
+            owner: SettingOwner::Shell,
+            label: "Session recaps",
+            description: "Writes a short \"where was I\" recap when you come back to the terminal, and enables `/recap`. Turn off to stop every recap.",
+            keywords: &["recap", "where was i", "away", "resume", "summary", "return"],
+            kind: SettingKind::Bool {
+                default: Feature::SessionRecap.default_enabled(),
+            },
+            restart_required: false,
+        },
         // SHELL-owned memory options. A session reads them when it starts.
         SettingMeta {
             key: "memory.v2.recall_enabled",
@@ -1644,77 +1715,6 @@ pub(crate) fn default_settings_with_subagent_rows(
             ],
             kind: SettingKind::Group {
                 children: MEMORY_CHILDREN,
-            },
-            restart_required: false,
-        },
-        // PAGER-owned, set over ACP. Reads from `PagerLocalSnapshot.plan_mode_active`.
-        // The default "off" matches `AgentView::new`'s `plan_mode_active = false`
-        SettingMeta {
-            key: "plan_mode",
-            category: SettingCategory::Agent,
-            owner: SettingOwner::Pager,
-            label: "Plan mode",
-            description: "When on, the agent summarises a plan before running tools or making edits.",
-            keywords: &[
-                "plan", "mode", "agent", "summary", "approval", "review", "session",
-            ],
-            kind: SettingKind::Enum {
-                default: "off",
-                choices: PLAN_MODE_CHOICES,
-                supports_preview: false,
-            },
-            restart_required: false,
-        },
-        // SHELL-owned `[features].two_pass_compaction`, a registry feature row like `subagent_model_inheritance`.
-        SettingMeta {
-            key: "two_pass_compaction",
-            category: SettingCategory::Agent,
-            owner: SettingOwner::Shell,
-            label: "Two-pass compaction",
-            description: "Summarizes the older part of the conversation in the background before the context fills, so compaction takes less time when it fires. Turn off to always compact the whole conversation in one request.",
-            keywords: &[
-                "compaction",
-                "compact",
-                "two-pass",
-                "prefire",
-                "summary",
-                "context",
-            ],
-            kind: SettingKind::Bool {
-                default: Feature::TwoPassCompaction.default_enabled(),
-            },
-            restart_required: false,
-        },
-        // SHELL-owned `[features].compact_on_model_switch`. The config watcher reloads it into every running session.
-        SettingMeta {
-            key: "compact_on_model_switch",
-            category: SettingCategory::Agent,
-            owner: SettingOwner::Shell,
-            label: "Compact on model switch",
-            description: "Compacts the conversation at the first turn after every model change, so the new model starts from a summary. Off keeps the full history across a switch.",
-            keywords: &[
-                "compaction",
-                "compact",
-                "model",
-                "switch",
-                "summary",
-                "context",
-            ],
-            kind: SettingKind::Bool {
-                default: Feature::CompactOnModelSwitch.default_enabled(),
-            },
-            restart_required: false,
-        },
-        // SHELL-owned `[features].session_recap`. The shell re-reads it on each recap request, so it applies live.
-        SettingMeta {
-            key: "session_recap",
-            category: SettingCategory::Agent,
-            owner: SettingOwner::Shell,
-            label: "Session recaps",
-            description: "Writes a short \"where was I\" recap when you come back to the terminal, and enables `/recap`. Turn off to stop every recap.",
-            keywords: &["recap", "where was i", "away", "resume", "summary", "return"],
-            kind: SettingKind::Bool {
-                default: Feature::SessionRecap.default_enabled(),
             },
             restart_required: false,
         },
