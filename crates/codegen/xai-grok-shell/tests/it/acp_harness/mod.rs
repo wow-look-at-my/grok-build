@@ -197,12 +197,23 @@ pub async fn connect_and_auth_with_memory<C>(
 where
     C: acp::Client + 'static,
 {
-    let pipes = spawn_agent_local_with(|config| {
-        config.memory_config = Some(xai_grok_shell::config::MemoryConfig::resolve(
-            false,
-            false,
-            &toml::Value::Table(toml::Table::new()),
-            None,
+    connect_and_auth_with_memory_config(client, client_type, "").await
+}
+
+/// [`connect_and_auth_with_memory`] with memory resolved from `config_toml`.
+#[allow(dead_code)]
+pub async fn connect_and_auth_with_memory_config<C>(
+    client: C,
+    client_type: &str,
+    config_toml: &str,
+) -> (acp::ClientSideConnection, acp::InitializeResponse)
+where
+    C: acp::Client + 'static,
+{
+    let config: toml::Value = toml::from_str(config_toml).expect("valid config TOML");
+    let pipes = spawn_agent_local_with(|agent_config| {
+        agent_config.memory_config = Some(xai_grok_shell::config::MemoryConfig::resolve(
+            false, false, &config, None,
         ));
     });
     connect_client(client, client_type, pipes).await

@@ -385,6 +385,18 @@ To edit memory from the shell, open the files in your editor directly -- for exa
 | `provider` | `"api"` | Embedding provider (currently `"api"`) |
 | `model` | unset | Embedding model name. Unset or `""` uses full-text-only retrieval. |
 | `dimensions` | `1024` | Embedding vector dimensions |
+| `base_url` | unset | OpenAI-style base URL for embedding calls, for example a local runtime. Unset sends them to the chat model's endpoint. |
+| `api_key_env` | unset | Name of the environment variable that holds the key for `base_url`. Leave it unset for an endpoint that takes no key. |
+
+A chat provider that speaks the Anthropic Messages API serves no embedding route. Point `base_url` at an endpoint that does:
+
+```toml
+[memory.embedding]
+model = "nomic-embed-text"
+base_url = "http://127.0.0.1:11434/v1"
+```
+
+The chat model's key is never sent to `base_url`. When the embedding lookup cannot run, the session says so one time on screen and recall keeps matching on words.
 
 ### Search Settings (`memory.search`)
 

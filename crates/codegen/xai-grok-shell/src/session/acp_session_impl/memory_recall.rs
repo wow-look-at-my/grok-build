@@ -204,6 +204,25 @@ impl EmbeddingProvider for BoundedEmbeddingProvider<'_> {
 }
 
 impl SessionActor {
+    /// Tells the log and the client, one time for a session, that recall lost its embedding lookup.
+    async fn report_recall_degraded(&self, reason: String) {
+        {
+            let mut state = self.memory.recall.state.borrow_mut();
+            if state.embedding_failure_reported {
+                return;
+            }
+            state.embedding_failure_reported = true;
+        }
+        tracing::error!(
+            target: xai_grok_telemetry::memory_log::TARGET,
+            session_id = %self.session_info.id.0,
+            %reason,
+            "MEMORY_RECALL: embedding lookup cannot run; recall matches on words only"
+        );
+        self.send_xai_notification(XaiSessionUpdate::MemoryRecallDegraded { reason })
+            .await;
+    }
+
     /// Run one recall over the conversation text added since the last one, and push a reminder
     /// when stored notes match. `turn_start` is the first model round of a prompt turn.
     pub(super) async fn inject_memory_recall(&self, turn_start: bool) {
@@ -267,6 +286,15 @@ impl SessionActor {
             }
             None => None,
         };
+        if provider.is_none()
+            && let Some(params) = self.memory.recall.embedding.as_ref()
+        {
+            self.report_recall_degraded(format!(
+                "no credential reaches the embedding endpoint {}",
+                params.base_url
+            ))
+            .await;
+        }
         let bounded = provider.as_ref().map(|provider| BoundedEmbeddingProvider {
             inner: provider as &dyn EmbeddingProvider,
         });
@@ -296,16 +324,7 @@ impl SessionActor {
             }
         };
         if let V2RecallMode::EmbeddingFailed(error) = &outcome.mode {
-            let mut state = self.memory.recall.state.borrow_mut();
-            if !state.embedding_failure_reported {
-                state.embedding_failure_reported = true;
-                tracing::error!(
-                    target: xai_grok_telemetry::memory_log::TARGET,
-                    session_id = %self.session_info.id.0,
-                    %error,
-                    "MEMORY_RECALL: embedding lookup failed; recall matches on words only"
-                );
-            }
+            self.report_recall_degraded(error.clone()).await;
         }
         {
             let mut state = self.memory.recall.state.borrow_mut();

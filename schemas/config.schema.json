@@ -4692,6 +4692,22 @@
 					"format": "uint",
 					"minimum": 0,
 					"default": null
+				},
+				"base_url": {
+					"type": [
+						"string",
+						"null"
+					],
+					"description": "OpenAI-style base URL for embedding calls. Unset sends them to the chat model's endpoint.",
+					"default": null
+				},
+				"api_key_env": {
+					"type": [
+						"string",
+						"null"
+					],
+					"description": "Name of the environment variable that holds the key for `base_url`.",
+					"default": null
 				}
 			}
 		},
