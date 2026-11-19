@@ -956,14 +956,25 @@ pub fn read_memory_settings(root: &toml::Value) -> MemorySettingsMirror {
 /// Persist a memory option in the user `config.json`.
 pub async fn set_memory_setting(setting: MemorySetting, value: MemorySettingValue) -> Result<()> {
     rewrite_user_config_locked(setting.key(), move |path| {
-        rewrite_user_config_table(
+        write_memory_setting(
             path,
-            setting.key(),
+            setting,
+            &value,
             crate::util::config::persist::atomic_write_follow_bound,
-            |root| apply_memory_setting(root, setting, &value),
         )
     })
     .await
+}
+
+pub(super) fn write_memory_setting(
+    path: &Path,
+    setting: MemorySetting,
+    value: &MemorySettingValue,
+    write: impl FnOnce(&Path, &BoundDest, &str) -> std::io::Result<()>,
+) -> Result<()> {
+    rewrite_user_config_table(path, setting.key(), write, |root| {
+        apply_memory_setting(root, setting, value)
+    })
 }
 
 /// The TOML edit of [`set_memory_setting`], apart from the disk.

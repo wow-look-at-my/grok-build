@@ -368,7 +368,7 @@ pub(super) fn set_memory_setting_inner(
 }
 
 /// SHELL-owned setter for a Memory row; persists via `Effect::PersistSetting`.
-/// Applies to new sessions (restart-required).
+/// Applies after a restart.
 pub(in crate::app::dispatch) fn set_memory_setting(
     app: &mut AppView,
     key: crate::settings::SettingKey,

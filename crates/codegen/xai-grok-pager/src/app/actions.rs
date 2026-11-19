@@ -449,7 +449,7 @@ pub enum Action {
     SetRememberToolApprovals(bool),
     /// Toggle the ask_user_question timeout. SHELL-owned; persisted to `[toolset.ask_user_question].timeout_enabled`. Applies to new sessions.
     SetAskUserQuestionTimeoutEnabled(bool),
-    /// Commit one row of the Memory sub-sheet. SHELL-owned; sessions read it when they start.
+    /// Commit one row of the Memory sub-sheet. SHELL-owned; the agent reads it at startup.
     SetMemorySetting {
         key: crate::settings::SettingKey,
         value: crate::settings::SettingValue,

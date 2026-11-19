@@ -2161,6 +2161,79 @@ fn apply_memory_setting_empty_values_remove_the_key_and_prune_empty_tables() {
     );
 }
 
+/// The modal's writes land at the JSON paths that the session's memory config reads.
+#[test]
+fn memory_settings_saved_to_config_json_are_what_the_memory_config_reads() {
+    use super::super::settings_writes::{
+        MemorySetting, MemorySettingValue as V, read_memory_settings, write_memory_setting,
+    };
+    let directory = tempfile::tempdir().unwrap();
+    let path = directory.path().join("config.json");
+    std::fs::write(
+        &path,
+        r#"{ "memory": { "enabled": true, "v2": { "enabled": true } }, "ui": { "theme": "dark" } }"#,
+    )
+    .unwrap();
+    for (setting, value) in [
+        (MemorySetting::RecallEnabled, V::Bool(false)),
+        (
+            MemorySetting::EmbeddingModel,
+            V::Text("nomic-embed-text".into()),
+        ),
+        (
+            MemorySetting::EmbeddingBaseUrl,
+            V::Text("http://localhost:11434/v1".into()),
+        ),
+        (
+            MemorySetting::EmbeddingApiKeyEnv,
+            V::Text("EMBED_KEY".into()),
+        ),
+        (MemorySetting::EmbeddingDimensions, V::Int(768)),
+    ] {
+        write_memory_setting(&path, setting, &value, atomic_write_follow_bound).unwrap();
+    }
+
+    let text = std::fs::read_to_string(&path).unwrap();
+    let saved: serde_json::Value = serde_json::from_str(&text).expect("config.json stays JSON");
+    assert_eq!(saved["memory"]["v2"]["recall_enabled"], false);
+    assert_eq!(saved["memory"]["v2"]["enabled"], true);
+    assert_eq!(saved["memory"]["enabled"], true);
+    assert_eq!(saved["memory"]["embedding"]["model"], "nomic-embed-text");
+    assert_eq!(
+        saved["memory"]["embedding"]["base_url"],
+        "http://localhost:11434/v1"
+    );
+    assert_eq!(saved["memory"]["embedding"]["api_key_env"], "EMBED_KEY");
+    assert_eq!(saved["memory"]["embedding"]["dimensions"], 768);
+    assert_eq!(saved["ui"]["theme"], "dark");
+
+    let tree = parse_existing_config(&path, &text).unwrap();
+    let mirror = read_memory_settings(&tree);
+    assert_eq!(mirror.recall_enabled, Some(false));
+    assert_eq!(mirror.embedding_dimensions, Some(768));
+    let config = crate::config::MemoryConfig::resolve_with_override(None, &tree, None);
+    assert!(!config.v2.recall_enabled);
+    assert_eq!(config.embedding.model.as_deref(), Some("nomic-embed-text"));
+    assert_eq!(
+        config.embedding.base_url.as_deref(),
+        Some("http://localhost:11434/v1")
+    );
+    assert_eq!(config.embedding.api_key_env.as_deref(), Some("EMBED_KEY"));
+    assert_eq!(config.embedding.dimensions, 768);
+
+    write_memory_setting(
+        &path,
+        MemorySetting::EmbeddingBaseUrl,
+        &V::Text(String::new()),
+        atomic_write_follow_bound,
+    )
+    .unwrap();
+    let saved: serde_json::Value =
+        serde_json::from_str(&std::fs::read_to_string(&path).unwrap()).unwrap();
+    assert!(saved["memory"]["embedding"].get("base_url").is_none());
+    assert_eq!(saved["memory"]["embedding"]["model"], "nomic-embed-text");
+}
+
 #[test]
 fn read_memory_settings_reads_back_what_apply_memory_setting_wrote() {
     use super::super::settings_writes::{

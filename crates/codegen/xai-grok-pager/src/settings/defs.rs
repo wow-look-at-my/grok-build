@@ -1618,7 +1618,7 @@ pub(crate) fn default_settings_with_subagent_rows(
             },
             restart_required: false,
         },
-        // SHELL-owned memory options. A session reads them when it starts.
+        // SHELL-owned memory options. The agent reads them at startup.
         SettingMeta {
             key: "memory.v2.recall_enabled",
             category: SettingCategory::Agent,
