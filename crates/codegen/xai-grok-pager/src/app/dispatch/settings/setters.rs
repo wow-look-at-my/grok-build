@@ -313,6 +313,103 @@ pub(in crate::app::dispatch) fn set_ask_user_question_timeout_enabled(
     }]
 }
 
+/// The value a Memory row shows for the mirror, or `None` for a key that is not a Memory row.
+pub(super) fn memory_setting_value(
+    mirror: &xai_grok_shell::util::config::MemorySettingsMirror,
+    key: &str,
+) -> Option<crate::settings::SettingValue> {
+    use crate::settings::SettingValue;
+    use xai_grok_shell::util::config::MemorySetting;
+    let text = |value: &Option<String>| SettingValue::String(value.clone().unwrap_or_default());
+    Some(match MemorySetting::from_key(key)? {
+        MemorySetting::RecallEnabled => SettingValue::Bool(mirror.recall_enabled.unwrap_or(true)),
+        MemorySetting::EmbeddingModel => text(&mirror.embedding_model),
+        MemorySetting::EmbeddingBaseUrl => text(&mirror.embedding_base_url),
+        MemorySetting::EmbeddingApiKeyEnv => text(&mirror.embedding_api_key_env),
+        MemorySetting::EmbeddingDimensions => {
+            SettingValue::Int(mirror.embedding_dimensions.unwrap_or(0))
+        }
+    })
+}
+
+/// Mirror a Memory row value in `app`. Returns `false` when the key or the value kind is not a Memory
+/// row.
+pub(super) fn set_memory_setting_inner(
+    app: &mut AppView,
+    key: &str,
+    value: &crate::settings::SettingValue,
+) -> bool {
+    use crate::settings::SettingValue;
+    use xai_grok_shell::util::config::MemorySetting;
+    let text = |s: &str| {
+        let s = s.trim();
+        (!s.is_empty()).then(|| s.to_owned())
+    };
+    let mirror = &mut app.memory_settings;
+    match (MemorySetting::from_key(key), value) {
+        (Some(MemorySetting::RecallEnabled), SettingValue::Bool(b)) => {
+            mirror.recall_enabled = Some(*b);
+        }
+        (Some(MemorySetting::EmbeddingModel), SettingValue::String(s)) => {
+            mirror.embedding_model = text(s);
+        }
+        (Some(MemorySetting::EmbeddingBaseUrl), SettingValue::String(s)) => {
+            mirror.embedding_base_url = text(s);
+        }
+        (Some(MemorySetting::EmbeddingApiKeyEnv), SettingValue::String(s)) => {
+            mirror.embedding_api_key_env = text(s);
+        }
+        (Some(MemorySetting::EmbeddingDimensions), SettingValue::Int(n)) => {
+            mirror.embedding_dimensions = (*n != 0).then_some(*n);
+        }
+        _ => return false,
+    }
+    true
+}
+
+/// SHELL-owned setter for a Memory row; persists via `Effect::PersistSetting`.
+/// Applies to new sessions (restart-required).
+pub(in crate::app::dispatch) fn set_memory_setting(
+    app: &mut AppView,
+    key: crate::settings::SettingKey,
+    value: crate::settings::SettingValue,
+) -> Vec<Effect> {
+    use crate::settings::SettingValue;
+    let Some(prev) = memory_setting_value(&app.memory_settings, key) else {
+        tracing::warn!(target: "settings", key, "not a memory setting");
+        return vec![];
+    };
+    if !set_memory_setting_inner(app, key, &value) {
+        tracing::warn!(target: "settings", key, ?value, "memory setting got a value of the wrong kind");
+        return vec![];
+    }
+    let Some(new) = memory_setting_value(&app.memory_settings, key) else {
+        return vec![];
+    };
+    if new == prev {
+        return vec![];
+    }
+    refresh_open_settings_modals(app);
+    tracing::info!(target: "settings", key, value = ?new, "setting changed");
+    let label = crate::settings::SettingsRegistry::defaults()
+        .find(key)
+        .map_or(key, |meta| meta.label);
+    let shown = match &new {
+        SettingValue::Bool(b) => save_success_toast(label, *b),
+        SettingValue::String(s) if s.is_empty() => format!("\u{2713} {label}: cleared"),
+        SettingValue::String(s) => format!("\u{2713} {label}: {s}"),
+        SettingValue::Int(0) => format!("\u{2713} {label}: model default"),
+        SettingValue::Int(n) => format!("\u{2713} {label}: {n}"),
+        SettingValue::Enum(s) => format!("\u{2713} {label}: {s}"),
+    };
+    app.show_toast(&format!("{shown} (restart to apply)"));
+    vec![Effect::PersistSetting {
+        key,
+        value: new,
+        rollback_value: prev,
+    }]
+}
+
 const SUBAGENT_MODEL_INHERITANCE_LABEL: &str = "Subagent model inheritance";
 const TWO_PASS_COMPACTION_LABEL: &str = "Two-pass compaction";
 const COMPACT_ON_MODEL_SWITCH_LABEL: &str = "Compact on model switch";

@@ -449,6 +449,11 @@ pub enum Action {
     SetRememberToolApprovals(bool),
     /// Toggle the ask_user_question timeout. SHELL-owned; persisted to `[toolset.ask_user_question].timeout_enabled`. Applies to new sessions.
     SetAskUserQuestionTimeoutEnabled(bool),
+    /// Commit one row of the Memory sub-sheet. SHELL-owned; sessions read it when they start.
+    SetMemorySetting {
+        key: crate::settings::SettingKey,
+        value: crate::settings::SettingValue,
+    },
     /// Save `[features].subagent_model_inheritance` as an explicit override. SHELL-owned; agents latch it when built, so it applies on restart.
     SetSubagentModelInheritance(bool),
     /// Delete the saved `[features].subagent_model_inheritance` key so the remote setting or the default applies again.

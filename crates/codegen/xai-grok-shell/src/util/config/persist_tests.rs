@@ -2073,3 +2073,133 @@ async fn cancelled_blocking_save_holds_write_guard_until_worker_finishes() {
         "second writer acquired locks before the detached save released them"
     );
 }
+
+#[test]
+fn apply_memory_setting_writes_each_key_at_its_internal_path() {
+    use super::super::settings_writes::{
+        MemorySetting, MemorySettingValue as V, apply_memory_setting,
+    };
+    let mut root = TomlMap::new();
+    let writes = [
+        (MemorySetting::RecallEnabled, V::Bool(false)),
+        (
+            MemorySetting::EmbeddingModel,
+            V::Text("nomic-embed-text".into()),
+        ),
+        (
+            MemorySetting::EmbeddingBaseUrl,
+            V::Text("http://localhost:11434/v1".into()),
+        ),
+        (
+            MemorySetting::EmbeddingApiKeyEnv,
+            V::Text("EMBED_KEY".into()),
+        ),
+        (MemorySetting::EmbeddingDimensions, V::Int(768)),
+    ];
+    for (setting, value) in &writes {
+        apply_memory_setting(&mut root, *setting, value).unwrap();
+    }
+    assert_eq!(root["memory_v2"]["recall_enabled"].as_bool(), Some(false));
+    let embedding = &root["memory"]["embedding"];
+    assert_eq!(embedding["model"].as_str(), Some("nomic-embed-text"));
+    assert_eq!(
+        embedding["base_url"].as_str(),
+        Some("http://localhost:11434/v1")
+    );
+    assert_eq!(embedding["api_key_env"].as_str(), Some("EMBED_KEY"));
+    assert_eq!(embedding["dimensions"].as_integer(), Some(768));
+
+    for setting in MemorySetting::ALL {
+        assert_eq!(MemorySetting::from_key(setting.key()), Some(setting));
+    }
+    assert_eq!(MemorySetting::from_key("memory.enabled"), None);
+}
+
+#[test]
+fn apply_memory_setting_empty_values_remove_the_key_and_prune_empty_tables() {
+    use super::super::settings_writes::{
+        MemorySetting, MemorySettingValue as V, apply_memory_setting,
+    };
+    let mut root: TomlMap<String, TomlValue> = toml::from_str(
+        "[memory]\nenabled = true\n[memory.embedding]\nmodel = \"m\"\ndimensions = 256\n[memory_v2]\nrecall_enabled = false\n",
+    )
+    .unwrap();
+    apply_memory_setting(
+        &mut root,
+        MemorySetting::EmbeddingModel,
+        &V::Text(String::new()),
+    )
+    .unwrap();
+    apply_memory_setting(&mut root, MemorySetting::EmbeddingDimensions, &V::Int(0)).unwrap();
+    assert!(
+        !root["memory"].as_table().unwrap().contains_key("embedding"),
+        "an emptied embedding table must go"
+    );
+    assert_eq!(root["memory"]["enabled"].as_bool(), Some(true));
+
+    let mut only_embedding: TomlMap<String, TomlValue> =
+        toml::from_str("[memory.embedding]\nbase_url = \"http://x\"\n").unwrap();
+    apply_memory_setting(
+        &mut only_embedding,
+        MemorySetting::EmbeddingBaseUrl,
+        &V::Text(String::new()),
+    )
+    .unwrap();
+    assert!(only_embedding.is_empty(), "{only_embedding:?}");
+
+    apply_memory_setting(&mut root, MemorySetting::RecallEnabled, &V::Bool(true)).unwrap();
+    assert_eq!(root["memory_v2"]["recall_enabled"].as_bool(), Some(true));
+
+    let err =
+        apply_memory_setting(&mut root, MemorySetting::RecallEnabled, &V::Int(1)).unwrap_err();
+    assert!(
+        err.to_string().contains("memory.v2.recall_enabled"),
+        "{err}"
+    );
+    assert!(
+        apply_memory_setting(&mut root, MemorySetting::EmbeddingDimensions, &V::Int(-1)).is_err()
+    );
+}
+
+#[test]
+fn read_memory_settings_reads_back_what_apply_memory_setting_wrote() {
+    use super::super::settings_writes::{
+        MemorySetting, MemorySettingValue as V, MemorySettingsMirror, apply_memory_setting,
+        read_memory_settings,
+    };
+    let mut root = TomlMap::new();
+    assert_eq!(
+        read_memory_settings(&TomlValue::Table(root.clone())),
+        MemorySettingsMirror::default()
+    );
+    apply_memory_setting(&mut root, MemorySetting::RecallEnabled, &V::Bool(false)).unwrap();
+    apply_memory_setting(
+        &mut root,
+        MemorySetting::EmbeddingModel,
+        &V::Text("e".into()),
+    )
+    .unwrap();
+    apply_memory_setting(
+        &mut root,
+        MemorySetting::EmbeddingBaseUrl,
+        &V::Text("http://h/v1".into()),
+    )
+    .unwrap();
+    apply_memory_setting(
+        &mut root,
+        MemorySetting::EmbeddingApiKeyEnv,
+        &V::Text("K".into()),
+    )
+    .unwrap();
+    apply_memory_setting(&mut root, MemorySetting::EmbeddingDimensions, &V::Int(64)).unwrap();
+    assert_eq!(
+        read_memory_settings(&TomlValue::Table(root)),
+        MemorySettingsMirror {
+            recall_enabled: Some(false),
+            embedding_model: Some("e".into()),
+            embedding_base_url: Some("http://h/v1".into()),
+            embedding_api_key_env: Some("K".into()),
+            embedding_dimensions: Some(64),
+        }
+    );
+}

@@ -1387,6 +1387,7 @@ pub(crate) async fn run(
     let config_session_bools = load_initial_config_session_bools();
     app.show_tips = config_session_bools.show_tips;
     app.ask_user_question_timeout_enabled = config_session_bools.ask_user_question_timeout_enabled;
+    app.memory_settings = config_session_bools.memory_settings;
     crate::appearance::cache::prime(&app.current_ui);
     crate::appearance::cache::apply_remote_keep_text_selection_default(
         remote_settings
@@ -2774,6 +2775,7 @@ pub(crate) fn load_initial_ui_config() -> xai_grok_shell::agent::config::UiConfi
 struct InitialConfigSessionBools {
     show_tips: Option<bool>,
     ask_user_question_timeout_enabled: Option<bool>,
+    memory_settings: xai_grok_shell::util::config::MemorySettingsMirror,
 }
 fn load_initial_config_session_bools() -> InitialConfigSessionBools {
     let Ok(root) = xai_grok_shell::config::load_effective_config() else {
@@ -2787,6 +2789,7 @@ fn load_initial_config_session_bools() -> InitialConfigSessionBools {
             .and_then(|t| t.get("ask_user_question"))
             .and_then(|a| a.get("timeout_enabled"))
             .and_then(|v| v.as_bool()),
+        memory_settings: xai_grok_shell::util::config::read_memory_settings(&root),
     }
 }
 /// Sync shell `sessionRecap` into the execution gate and every place that offers `/recap`.

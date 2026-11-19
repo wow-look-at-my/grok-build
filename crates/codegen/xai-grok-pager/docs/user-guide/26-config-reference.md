@@ -244,6 +244,10 @@ User-level configuration lives in `$GROK_HOME/config.json` (default `~/.grok/con
 
 | Key | Type / Values | Requirements | Managed | Details |
 | --- | --- | --- | --- | --- |
+| `memory.embedding.api_key_env` | `string` | — | `user` | Name of the environment variable that holds the key for `memory.embedding.base_url`. Unset sends no key. |
+| `memory.embedding.base_url` | `string` | — | `user` | OpenAI-style base URL for embedding calls, for example `http://localhost:11434/v1` for a local Ollama. Unset sends them to the chat model's endpoint. |
+| `memory.embedding.dimensions` | `number` | — | `user` | Vector size to ask the embedding model for. With `memory.embedding.base_url` set, leave it unset to take the model's own size. |
+| `memory.embedding.model` | `string` | — | `user` | Embedding model for meaning-based recall. Unset or `""` uses word matching only. |
 | `memory.enabled` | `boolean` | `pin` | `user` | Memory switch. Also `GROK_MEMORY`. `false` turns memory off unless `memory_v2.enabled = true`. With v2 off, `true` turns legacy memory on. |
 | `memory.v2.archived_retention_days` | `number` | — | `user` | Retains archived memory-v2 observation files for this many days. Default: `30`. |
 | `memory.v2.automatic_dream_enabled` | `boolean` | — | `user` | Enables event-driven memory-v2 Dream. Default: `true`. |

@@ -157,6 +157,7 @@ pub(crate) fn test_app() -> AppView {
         coding_data_write_seq: 0,
         show_tips: None,
         ask_user_question_timeout_enabled: None,
+        memory_settings: Default::default(),
         subagent_model_inheritance: crate::settings::FeatureOverrideState::new(
             xai_grok_shell::agent::config::Feature::SubagentModelInheritance,
         ),

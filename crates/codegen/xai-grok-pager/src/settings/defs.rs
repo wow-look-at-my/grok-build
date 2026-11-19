@@ -5,6 +5,7 @@
 
 use super::registry::{
     DynamicEnumSource, EnumChoice, SettingCategory, SettingKind, SettingMeta, SettingOwner,
+    StringValidator,
 };
 use crate::appearance::ScrollMode;
 use crate::appearance::TextSelection;
@@ -52,6 +53,15 @@ pub(crate) const OUTPUT_RATE_FLOOR_CHILDREN: &[&str] = &[
     "output_rate_window_secs",
     "output_rate_max_retries",
     "ttft_timeout_secs",
+];
+
+/// The rows of the "Memory" sub-screen: recall and the embedding endpoint.
+pub(crate) const MEMORY_CHILDREN: &[&str] = &[
+    "memory.v2.recall_enabled",
+    "memory.embedding.model",
+    "memory.embedding.base_url",
+    "memory.embedding.api_key_env",
+    "memory.embedding.dimensions",
 ];
 
 // ---------------------------------------------------------------------------
@@ -1536,6 +1546,106 @@ pub(crate) fn default_settings_with_subagent_rows(
                 default: ask_user_question::DEFAULT_ASK_USER_QUESTION_TIMEOUT_ENABLED,
             },
             restart_required: true,
+        },
+        // SHELL-owned memory options. A session reads them when it starts.
+        SettingMeta {
+            key: "memory.v2.recall_enabled",
+            category: SettingCategory::Agent,
+            owner: SettingOwner::Shell,
+            label: "Memory recall",
+            description: "Search stored memory with each prompt you send and show the model the notes that match it.",
+            keywords: &["memory", "recall", "notes", "search", "prompt"],
+            kind: SettingKind::Bool { default: true },
+            restart_required: true,
+        },
+        SettingMeta {
+            key: "memory.embedding.model",
+            category: SettingCategory::Agent,
+            owner: SettingOwner::Shell,
+            label: "Embedding model",
+            description: "Embedding model for meaning-based recall. Empty uses word matching only.",
+            keywords: &["memory", "recall", "embedding", "model", "vector", "ollama"],
+            kind: SettingKind::String {
+                default: "",
+                validator: StringValidator::Any,
+            },
+            restart_required: true,
+        },
+        SettingMeta {
+            key: "memory.embedding.base_url",
+            category: SettingCategory::Agent,
+            owner: SettingOwner::Shell,
+            label: "Embedding endpoint",
+            description: "OpenAI-style base URL for embedding calls, for example http://localhost:11434/v1 for a local Ollama. Empty uses the chat model's endpoint.",
+            keywords: &[
+                "memory",
+                "recall",
+                "embedding",
+                "endpoint",
+                "url",
+                "ollama",
+                "local",
+            ],
+            kind: SettingKind::String {
+                default: "",
+                validator: StringValidator::HttpUrlOrEmpty,
+            },
+            restart_required: true,
+        },
+        SettingMeta {
+            key: "memory.embedding.api_key_env",
+            category: SettingCategory::Agent,
+            owner: SettingOwner::Shell,
+            label: "Embedding key variable",
+            description: "Name of the environment variable that holds the key for the embedding endpoint. Empty sends no key.",
+            keywords: &[
+                "memory",
+                "embedding",
+                "key",
+                "api",
+                "environment",
+                "variable",
+                "endpoint",
+            ],
+            kind: SettingKind::String {
+                default: "",
+                validator: StringValidator::Any,
+            },
+            restart_required: true,
+        },
+        SettingMeta {
+            key: "memory.embedding.dimensions",
+            category: SettingCategory::Agent,
+            owner: SettingOwner::Shell,
+            label: "Embedding size",
+            description: "Vector size to ask the embedding model for. 0 uses the model's own size.",
+            keywords: &["memory", "embedding", "vector", "dimensions", "size"],
+            kind: SettingKind::Int {
+                default: 0,
+                min: 0,
+                max: xai_grok_shell::util::config::MAX_MEMORY_EMBEDDING_DIMENSIONS,
+            },
+            restart_required: true,
+        },
+        // The sub-screen that holds every memory row above.
+        SettingMeta {
+            key: "memory",
+            category: SettingCategory::Agent,
+            owner: SettingOwner::Shell,
+            label: "Memory",
+            description: "Memory recall and the embedding endpoint it uses.",
+            keywords: &[
+                "memory",
+                "recall",
+                "embedding",
+                "ollama",
+                "endpoint",
+                "vector",
+            ],
+            kind: SettingKind::Group {
+                children: MEMORY_CHILDREN,
+            },
+            restart_required: false,
         },
         // PAGER-owned, set over ACP. Reads from `PagerLocalSnapshot.plan_mode_active`.
         // The default "off" matches `AgentView::new`'s `plan_mode_active = false`
