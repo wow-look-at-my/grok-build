@@ -22,7 +22,10 @@ fn open_memory_sheet(harness: &mut PtyHarness) {
         .expect("search focused");
     harness.inject_keys(b"memory recall").expect("type search");
     harness
-        .wait_for_text("Memory recall and the embedding endpoint", TIMEOUT)
+        .wait_until("search leaves the Memory row", TIMEOUT, |harness| {
+            let screen = harness.screen_contents();
+            screen.contains("\u{25B8} Memory") && !screen.contains("Appearance")
+        })
         .unwrap_or_else(|_| panic!("search finds the group\n{}", harness.screen_contents()));
     harness
         .inject_keys(keys::ENTER)
