@@ -27,8 +27,11 @@ Memory-v2 needs no command. It has none for saving or consolidating. There is no
 - Only the most distinctive query terms are matched (`max_query_terms`): frequent in the query, rare in the corpus. Without that cut, a long stretch of conversation holds enough words to match every chunk.
 - The embedding reads `recall_focus_text`, not the whole query: the last user prompt in the new text, else the last assistant text. Word matching still reads everything. One vector over assistant text, tool arguments and a prompt together sits near no note.
 - A standard score judges a semantic hit, not by a fixed cosine. Each embedding model puts cosines on its own scale: one model scores every pair high, another scores a true match low. `BASELINE_NOTES` are embedded once for each model. A chunk's cosine with the query is compared with the mean and the spread of the query's cosines with those notes. `min_standard_score` is the gate. `runner_up_fraction` drops a weaker chunk that sits beside a strong one.
+<<<<<<< HEAD
 - Embedding calls go to the chat model's endpoint unless `[memory.embedding].base_url` names another one (`embedding_endpoint` in `spawn.rs`). Its key comes from the variable `api_key_env` names. The chat model's key never goes there. An Anthropic-style provider serves no `/embeddings` route. It needs this.
 - A failed embedding call, or a provider with no credential, sends `MemoryRecallDegraded` one time for a session. The pager prints it. Recall keeps its word matches.
+=======
+>>>>>>> origin/master
 - Vectors are optional. A cached vector is deleted when its chunk leaves the corpus. With `[memory.embedding].model` set, chunk vectors are cached in the `recall_embeddings` table of the scope's `index.sqlite`, keyed by text hash and model. A provider failure or a slow call returns the word matches and logs one error for the session. It never fails the turn.
 - `[memory_v2] recall_enabled = false` turns recall off.
 

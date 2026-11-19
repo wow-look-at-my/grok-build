@@ -304,7 +304,10 @@ pub(super) fn handle_session_notification_with_origin(
         | XaiSessionUpdate::MemoryCaptureActivity { .. }
         | XaiSessionUpdate::MemoryDreamCompleted { .. }
         | XaiSessionUpdate::MemoryRecalled { .. }
+<<<<<<< HEAD
         | XaiSessionUpdate::MemoryRecallDegraded { .. }
+=======
+>>>>>>> origin/master
         | XaiSessionUpdate::MemoryCost { .. }
         | XaiSessionUpdate::MemorySessionSaved { .. }) => {
             apply_compaction_or_retry_update(agent, update, is_api_key_auth)
@@ -1669,7 +1672,10 @@ pub(super) fn handle_child_session_notification(
         | XaiSessionUpdate::MemoryFlushCompleted { .. }
         | XaiSessionUpdate::MemoryDreamCompleted { .. }
         | XaiSessionUpdate::MemoryRecalled { .. }
+<<<<<<< HEAD
         | XaiSessionUpdate::MemoryRecallDegraded { .. }
+=======
+>>>>>>> origin/master
         | XaiSessionUpdate::MemoryCost { .. }
         | XaiSessionUpdate::MemorySessionSaved { .. } => {
             let mut changed = false;
@@ -2151,10 +2157,13 @@ pub(super) fn apply_session_event(
             }
             None => false,
         },
+<<<<<<< HEAD
         XaiSessionUpdate::MemoryRecallDegraded { reason } => {
             scrollback.push_block(RenderBlock::system(memory_recall_degraded_message(reason)));
             true
         }
+=======
+>>>>>>> origin/master
         XaiSessionUpdate::MemoryCost {
             totals,
             session_cost_usd_ticks,
@@ -2171,6 +2180,7 @@ pub(super) fn apply_session_event(
         _ => false,
     }
 }
+<<<<<<< HEAD
 /// Says that recall lost its embedding lookup, and why, in one line.
 fn memory_recall_degraded_message(reason: &str) -> String {
     const MAX_REASON_CHARS: usize = 240;
@@ -2184,6 +2194,8 @@ fn memory_recall_degraded_message(reason: &str) -> String {
     )
 }
 
+=======
+>>>>>>> origin/master
 /// One line that names the stored notes recall showed the model.
 fn memory_recalled_message(
     notes: &[xai_grok_shell::extensions::notification::MemoryRecalledNote],
@@ -2500,6 +2512,7 @@ mod memory_capture_privacy_tests {
     }
 
     #[test]
+<<<<<<< HEAD
     fn a_degraded_recall_is_named_on_screen_with_its_reason() {
         use crate::app::agent_view::test_fixtures::make_agent;
         use xai_grok_shell::extensions::notification::SessionUpdate as XaiSessionUpdate;
@@ -2522,6 +2535,8 @@ mod memory_capture_privacy_tests {
     }
 
     #[test]
+=======
+>>>>>>> origin/master
     fn a_memory_cost_update_stores_the_totals_and_adopts_the_session_cost() {
         use crate::app::agent_view::test_fixtures::make_agent;
         use xai_grok_shell::extensions::notification::{

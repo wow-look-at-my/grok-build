@@ -2,6 +2,7 @@
 
 use crate::acp_harness;
 
+<<<<<<< HEAD
 use std::cell::RefCell;
 use std::path::{Path, PathBuf};
 use std::rc::Rc;
@@ -13,6 +14,14 @@ use acp_harness::{
     new_session, prompt_turn, run_agent_test,
 };
 use agent_client_protocol as acp;
+=======
+use std::path::{Path, PathBuf};
+use std::time::Duration;
+
+use acp_harness::{
+    AutoApproveClient, connect_and_auth_with_memory, new_session, prompt_turn, run_agent_test,
+};
+>>>>>>> origin/master
 
 const RECALL_OPEN_TAG: &str = "<memory-recall>";
 
@@ -188,6 +197,7 @@ fn a_preference_from_one_workspace_is_recalled_in_another_without_a_command() {
         assert!(body.contains(file_name), "{body}");
     });
 }
+<<<<<<< HEAD
 
 /// An OpenAI-style `/v1/embeddings` server on its own thread. A text about a
 /// lighthouse or a beacon gets one vector.
@@ -400,3 +410,5 @@ fn a_dead_embedding_endpoint_is_reported_one_time_and_word_recall_goes_on() {
         );
     });
 }
+=======
+>>>>>>> origin/master
