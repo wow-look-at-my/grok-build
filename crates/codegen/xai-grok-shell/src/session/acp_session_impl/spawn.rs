@@ -566,8 +566,12 @@ pub(crate) async fn spawn_session_actor(
         xai_grok_tools::implementations::WebSearchConfig::Disabled
     };
     drop(web_search_config_step);
-    let embed_base_url = sampling_config.base_url.clone();
-    let embed_api_key = sampling_config.api_key.clone();
+    let (embed_base_url, embed_api_key) = embedding_endpoint(
+        memory_config.as_ref().map(|config| &config.embedding),
+        &sampling_config.base_url,
+        sampling_config.api_key.as_deref(),
+        |name| std::env::var(name).ok(),
+    );
     let session_pruning_config: crate::config::PruningConfig = memory_config.as_ref().map_or_else(
         || crate::config::PruningConfig {
             enabled: false,
@@ -2972,6 +2976,27 @@ impl crate::session::mcp_restart::RestartActions for SessionRestartActions {
             .end_restart(server);
     }
 }
+/// The key sent to an embedding endpoint that names no `api_key_env`. A local runtime reads none.
+const KEYLESS_EMBEDDING_KEY: &str = "none";
+
+/// Where embedding calls go, and with which key. `[memory.embedding].base_url` names its own
+/// endpoint and takes its key from `api_key_env`. The chat model's key never goes there.
+fn embedding_endpoint(
+    embedding: Option<&crate::config::MemoryEmbeddingConfig>,
+    chat_base_url: &str,
+    chat_api_key: Option<&str>,
+    env: impl Fn(&str) -> Option<String>,
+) -> (String, Option<String>) {
+    let Some(base_url) = embedding.and_then(|config| config.base_url.as_deref()) else {
+        return (chat_base_url.to_owned(), chat_api_key.map(str::to_owned));
+    };
+    let key = match embedding.and_then(|config| config.api_key_env.as_deref()) {
+        Some(name) => env(name).filter(|key| !key.is_empty()),
+        None => Some(KEYLESS_EMBEDDING_KEY.to_owned()),
+    };
+    (base_url.to_owned(), key)
+}
+
 #[derive(Debug, Clone, Copy, PartialEq, Eq)]
 enum MemoryStorageSelection {
     Enabled,
@@ -3086,7 +3111,10 @@ mod resumed_prefix_fallback_tests {
 }
 #[cfg(test)]
 mod memory_storage_select_tests {
-    use super::{MemoryStorageSelection, memory_v2_exposed, select_memory_storage};
+    use super::{
+        KEYLESS_EMBEDDING_KEY, MemoryStorageSelection, embedding_endpoint, memory_v2_exposed,
+        select_memory_storage,
+    };
     use crate::config::{MemoryConfig, MemoryMode, MemoryV2Rollout};
     use crate::session::memory::MemoryStorage;
     use std::path::Path;
@@ -3113,6 +3141,62 @@ mod memory_storage_select_tests {
             MemoryV2Rollout::Active
         ))));
     }
+    #[test]
+    fn embedding_calls_go_to_their_own_endpoint_with_their_own_key() {
+        let chat = ("https://chat.example/v1", Some("chat-key"));
+        let env = |name: &str| (name == "EMBED_KEY").then(|| "embed-key".to_owned());
+        let embedding = |base_url: Option<&str>, api_key_env: Option<&str>| {
+            crate::config::MemoryEmbeddingConfig {
+                base_url: base_url.map(str::to_owned),
+                api_key_env: api_key_env.map(str::to_owned),
+                ..Default::default()
+            }
+        };
+
+        // No endpoint of its own: the chat model's endpoint and key.
+        assert_eq!(
+            embedding_endpoint(Some(&embedding(None, None)), chat.0, chat.1, env),
+            (
+                "https://chat.example/v1".to_owned(),
+                Some("chat-key".to_owned())
+            )
+        );
+        assert_eq!(
+            embedding_endpoint(None, chat.0, chat.1, env),
+            (
+                "https://chat.example/v1".to_owned(),
+                Some("chat-key".to_owned())
+            )
+        );
+
+        // Its own endpoint takes the key its variable holds, never the chat key.
+        let own = embedding(Some("https://embed.example/v1"), Some("EMBED_KEY"));
+        assert_eq!(
+            embedding_endpoint(Some(&own), chat.0, chat.1, env),
+            (
+                "https://embed.example/v1".to_owned(),
+                Some("embed-key".to_owned())
+            )
+        );
+
+        // A variable that is not set gives no key, so no provider is built.
+        let unset = embedding(Some("https://embed.example/v1"), Some("MISSING"));
+        assert_eq!(
+            embedding_endpoint(Some(&unset), chat.0, chat.1, env),
+            ("https://embed.example/v1".to_owned(), None)
+        );
+
+        // A local runtime names no variable.
+        let local = embedding(Some("http://127.0.0.1:11434/v1"), None);
+        assert_eq!(
+            embedding_endpoint(Some(&local), chat.0, chat.1, env),
+            (
+                "http://127.0.0.1:11434/v1".to_owned(),
+                Some(KEYLESS_EMBEDDING_KEY.to_owned())
+            )
+        );
+    }
+
     #[test]
     fn v2_storage_is_unavailable_only_for_ephemeral_workspaces() {
         let temp_cwd = std::env::temp_dir().join("qa-scratch");

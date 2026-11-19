@@ -30,9 +30,9 @@ You do not tell Grok to remember. You do not run a command to save.
 - **Capture.** After every turn, a background call reads the turn and records what a later session needs. Where things are (files, commands, URLs, config keys), your preferences, your corrections, and project facts with their reasons. It does not record a fact the memory index already lists.
 - **Scope.** A fact that holds in every repository, such as how you like to work, goes to global memory and follows you to other projects. A fact about this repository goes to workspace memory.
 - **Consolidation.** Observations become topics when enough of them wait, or when the oldest one waited a while. Grok checks this after each capture and when a session starts, so notes from yesterday are topics today.
-- **Recall.** As the conversation moves, Grok searches stored memory with the new text: your prompt, its own replies and the arguments of its tool calls. A note that matches is shown to the model with its file path, and the scrollback shows a `Recalled from memory` line. Each note is shown one time for each conversation. A compaction removes the reminders. A note can be shown again after it.
+- **Recall.** When you send a prompt, Grok searches stored memory with that prompt. Its own replies and tool calls start no search. A note that matches is shown to the model with its file path, and the scrollback shows a `Recalled from memory` line. Each memory file is shown one time for each conversation. A note or topic that was written from the conversation you are in is never shown back to it. A compaction removes the reminders. A file can be shown again after it.
 
-Recall matches on words by default. Set `memory.embedding.model` to an embedding model your provider serves to add meaning-based matches. Recall then also finds a note that shares no word with what you typed. It compares your prompt, not the whole conversation, with each note, and it adjusts to the model you chose, so no similarity threshold needs tuning. If the embedding call fails, recall keeps the word matches and logs the error.
+Recall matches on words by default, and a word match counts only when your prompt names what the note is about. This covers its title, a heading or its keywords. Set `memory.embedding.model` to an embedding model to add meaning-based matches. Recall then also finds a note that shares no word with what you typed. It adjusts to the model you chose, so no similarity threshold needs tuning.
 
 There is no command for saving or consolidating: both run by themselves. To turn recall off, set `memory.v2.recall_enabled` to `false`.
 
@@ -384,7 +384,26 @@ To edit memory from the shell, open the files in your editor directly -- for exa
 |-----|---------|-------------|
 | `provider` | `"api"` | Embedding provider (currently `"api"`) |
 | `model` | unset | Embedding model name. Unset or `""` uses full-text-only retrieval. |
-| `dimensions` | `1024` | Embedding vector dimensions |
+| `dimensions` | `1024` | Embedding vector dimensions. With `base_url` set, leave it unset to take the model's own size. |
+| `base_url` | unset | OpenAI-style base URL for embedding calls, for example a local runtime. Unset sends them to the chat model's endpoint. |
+| `api_key_env` | unset | Name of the environment variable that holds the key for `base_url`. Leave it unset for an endpoint that takes no key. |
+
+The embedding endpoint is separate from the chat endpoint. A chat provider that speaks the Anthropic Messages API serves no embedding route, so point `base_url` at an endpoint that does. For a local Ollama:
+
+```json
+{
+  "memory": {
+    "embedding": {
+      "model": "nomic-embed-text",
+      "base_url": "http://localhost:11434/v1"
+    }
+  }
+}
+```
+
+Pull the model first (`ollama pull nomic-embed-text`). Ollama takes no key, so `api_key_env` stays unset. The chat model's key is never sent to `base_url`.
+
+A local model can be slow on its first call while it loads. Recall stores the vectors it gets, so a slow start costs a few turns of word-only matching and no repeated work. When the embedding lookup fails on multiple recalls in a row, the session says so one time on screen and recall keeps matching on words.
 
 ### Search Settings (`memory.search`)
 
