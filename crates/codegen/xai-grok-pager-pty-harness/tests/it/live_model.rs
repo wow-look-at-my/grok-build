@@ -576,6 +576,18 @@ const LATER_PROMPTS: [&str; 2] = [
     "Create a scratch file in the current directory that holds the single line bye. Choose the name yourself.",
 ];
 
+/// Words a note holds when it stored the "do not create it or run it" of the second earlier prompt.
+const ONE_REQUEST_LIMIT_PHRASES: [&str; 8] = [
+    "forbade",
+    "forbid",
+    "not create",
+    "not be created",
+    "not to create",
+    "not run",
+    "not be run",
+    "created or run",
+];
+
 /// The history of the session that holds `prompt`, or nothing before that session wrote one.
 fn history_holding(grok_home: &Path, prompt: &str) -> Vec<Value> {
     let sessions = grok_home.join("sessions");
@@ -756,9 +768,17 @@ fn live_later_session_knows_what_an_earlier_session_was_told_in_passing() {
     quit(harness);
     let captured = notes_written_by_the_session(&grok_home);
     println!("LIVE carry, notes of the earlier session: {captured:?}");
+    let mut one_request_limits = Vec::new();
     for note in &captured {
         let text = std::fs::read_to_string(note).unwrap_or_default();
         println!("--- {}\n{text}", note.display());
+        let lower = text.to_lowercase();
+        if let Some(phrase) = ONE_REQUEST_LIMIT_PHRASES
+            .into_iter()
+            .find(|phrase| lower.contains(phrase))
+        {
+            one_request_limits.push(format!("`{phrase}` in {}", note.display()));
+        }
     }
     println!("LIVE carry, manifests:\n{}", manifests(&grok_home));
     // The later session must not learn the prefix from the file.
@@ -802,6 +822,10 @@ fn live_later_session_knows_what_an_earlier_session_was_told_in_passing() {
     assert!(
         !captured.is_empty(),
         "the earlier session must write a note with no request to remember"
+    );
+    assert!(
+        one_request_limits.is_empty(),
+        "\"do not create it or run it\" was a limit for one request, and it was stored: {one_request_limits:?}"
     );
     assert!(
         where_answer.contains(DEPLOY_SCRIPT),
