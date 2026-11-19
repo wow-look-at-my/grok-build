@@ -438,12 +438,19 @@ fn a_note_is_recalled_again_after_a_compaction() {
         .await;
         assert_eq!(recalls(), 1, "a note is shown one time for a conversation");
 
+        // A summary shorter than the seed minimum is rejected. This says
+        // nothing about the note.
+        server.set_response(
+            "The user asked two questions about a deployment and got a short acknowledgement each time. "
+                .repeat(8),
+        );
         ext_method(
             &conn,
             "example.invalid/compact_conversation",
             serde_json::json!({ "session_id": session_id.0.to_string() }),
         )
         .await;
+        server.set_response("Noted.");
 
         let after = "Tell me once more how the zebrafish deploy pipeline starts.";
         prompt_turn(&conn, &session_id, after).await;
