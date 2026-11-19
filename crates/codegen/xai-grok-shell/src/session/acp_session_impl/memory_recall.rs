@@ -204,7 +204,6 @@ impl EmbeddingProvider for BoundedEmbeddingProvider<'_> {
 }
 
 impl SessionActor {
-<<<<<<< HEAD
     /// Tells the log and the client, one time for a session, that recall lost its embedding lookup.
     async fn report_recall_degraded(&self, reason: String) {
         {
@@ -224,8 +223,6 @@ impl SessionActor {
             .await;
     }
 
-=======
->>>>>>> origin/master
     /// Run one recall over the conversation text added since the last one, and push a reminder
     /// when stored notes match. `turn_start` is the first model round of a prompt turn.
     pub(super) async fn inject_memory_recall(&self, turn_start: bool) {
@@ -285,7 +282,6 @@ impl SessionActor {
                     params.usage_sink,
                     Arc::clone(&self.memory.token_totals.recall_cost_usd_ticks),
                 );
-<<<<<<< HEAD
                 // A turn waits on this call. One attempt now, and the next recall tries again.
                 params
                     .make()
@@ -303,12 +299,6 @@ impl SessionActor {
             ))
             .await;
         }
-=======
-                params.make().await
-            }
-            None => None,
-        };
->>>>>>> origin/master
         let bounded = provider.as_ref().map(|provider| BoundedEmbeddingProvider {
             inner: provider as &dyn EmbeddingProvider,
         });
@@ -338,20 +328,7 @@ impl SessionActor {
             }
         };
         if let V2RecallMode::EmbeddingFailed(error) = &outcome.mode {
-<<<<<<< HEAD
             self.report_recall_degraded(error.clone()).await;
-=======
-            let mut state = self.memory.recall.state.borrow_mut();
-            if !state.embedding_failure_reported {
-                state.embedding_failure_reported = true;
-                tracing::error!(
-                    target: xai_grok_telemetry::memory_log::TARGET,
-                    session_id = %self.session_info.id.0,
-                    %error,
-                    "MEMORY_RECALL: embedding lookup failed; recall matches on words only"
-                );
-            }
->>>>>>> origin/master
         }
         {
             let mut state = self.memory.recall.state.borrow_mut();

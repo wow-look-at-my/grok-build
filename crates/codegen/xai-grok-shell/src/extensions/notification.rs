@@ -639,11 +639,8 @@ pub enum SessionUpdate {
     },
     /// Recall found stored memory notes that match the conversation and showed them to the model.
     MemoryRecalled { notes: Vec<MemoryRecalledNote> },
-<<<<<<< HEAD
     /// The embedding lookup cannot run, so recall matches on words only. Sent one time for a session.
     MemoryRecallDegraded { reason: String },
-=======
->>>>>>> origin/master
     /// A memory model call ended. Carries the memory totals and the new session total.
     MemoryCost {
         totals: MemoryCostTotals,
@@ -2318,7 +2315,6 @@ mod tests {
     }
 
     #[test]
-<<<<<<< HEAD
     fn memory_recall_degraded_roundtrips() {
         let update = SessionUpdate::MemoryRecallDegraded {
             reason: "embedding API error 404".into(),
@@ -2330,8 +2326,6 @@ mod tests {
     }
 
     #[test]
-=======
->>>>>>> origin/master
     fn memory_cost_roundtrips_and_sums() {
         let totals = MemoryCostTotals {
             capture_usd_ticks: 30,

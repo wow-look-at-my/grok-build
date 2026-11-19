@@ -197,7 +197,6 @@ pub async fn connect_and_auth_with_memory<C>(
 where
     C: acp::Client + 'static,
 {
-<<<<<<< HEAD
     connect_and_auth_with_memory_config(client, client_type, "").await
 }
 
@@ -215,14 +214,6 @@ where
     let pipes = spawn_agent_local_with(|agent_config| {
         agent_config.memory_config = Some(xai_grok_shell::config::MemoryConfig::resolve(
             false, false, &config, None,
-=======
-    let pipes = spawn_agent_local_with(|config| {
-        config.memory_config = Some(xai_grok_shell::config::MemoryConfig::resolve(
-            false,
-            false,
-            &toml::Value::Table(toml::Table::new()),
-            None,
->>>>>>> origin/master
         ));
     });
     connect_client(client, client_type, pipes).await
