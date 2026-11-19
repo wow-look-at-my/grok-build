@@ -46,6 +46,8 @@ pub enum ConfigUpdate {
     OutputRateFloorChanged,
     /// `[ui].thinking_summaries` or a `[ui].thinking_summary_history_*` key changed. Every resident session re-reads them.
     ThinkingSummariesChanged,
+    /// `[features].two_pass_compaction` or `[features].compact_on_model_switch` changed. Every resident session re-reads them.
+    CompactionFeaturesChanged,
     /// Updated UI settings; the agent broadcasts `example.invalid/config_changed` to IPC clients.
     Ui { theme: Option<String>, yolo: bool },
 }
@@ -356,6 +358,15 @@ impl ConfigReloader {
                 .send(ConfigUpdate::ThinkingSummariesChanged);
         }
 
+        if compaction_feature_inputs(&self.last_global_config)
+            != compaction_feature_inputs(&new_global)
+        {
+            info!("compaction feature config change detected");
+            let _ = self
+                .config_update_tx
+                .send(ConfigUpdate::CompactionFeaturesChanged);
+        }
+
         // UI fields (theme, yolo)
         let old_ui = extract_ui_fields(&self.last_global_config);
         let new_ui = extract_ui_fields(&new_global);
@@ -407,6 +418,16 @@ fn thinking_summary_inputs(config: &toml::Value) -> [Option<&toml::Value>; 3] {
         ui_key("thinking_summaries"),
         ui_key("thinking_summary_history_window_secs"),
         ui_key("thinking_summary_history_min_count"),
+    ]
+}
+
+/// Every config value a session's compaction policy reloads.
+fn compaction_feature_inputs(config: &toml::Value) -> [Option<&toml::Value>; 2] {
+    let features = config.get("features");
+    let feature_key = |key: &str| features.and_then(|features| features.get(key));
+    [
+        feature_key("two_pass_compaction"),
+        feature_key("compact_on_model_switch"),
     ]
 }
 
@@ -934,6 +955,27 @@ yolo = true
         assert_eq!(
             thinking_summary_inputs(&base),
             thinking_summary_inputs(&unrelated)
+        );
+    }
+
+    #[test]
+    fn compaction_feature_inputs_see_both_flags_and_nothing_else() {
+        let base: toml::Value = toml::from_str("[features]\nsession_recap = true").unwrap();
+        for changed in [
+            "[features]\nsession_recap = true\ntwo_pass_compaction = false",
+            "[features]\nsession_recap = true\ncompact_on_model_switch = true",
+        ] {
+            let other: toml::Value = toml::from_str(changed).unwrap();
+            assert_ne!(
+                compaction_feature_inputs(&base),
+                compaction_feature_inputs(&other),
+                "{changed}"
+            );
+        }
+        let unrelated: toml::Value = toml::from_str("[features]\nsession_recap = false").unwrap();
+        assert_eq!(
+            compaction_feature_inputs(&base),
+            compaction_feature_inputs(&unrelated)
         );
     }
 

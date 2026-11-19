@@ -4507,19 +4507,18 @@ impl MvpAgent {
             );
             agent_definition.user_message_template = template;
         }
+        // Both compaction flags come from the config on disk, so a `/settings` edit reaches the next session.
+        let (two_pass_from_disk, compact_on_model_switch) =
+            self.cfg.borrow().compaction_features_from_disk();
         let pins = crate::session::cursor_compaction_pins(
             self.cfg.borrow().resolve_compaction_mode(),
-            self.cfg.borrow().is_two_pass_compaction_enabled(),
+            two_pass_from_disk,
             crate::session::is_cursor_user_template(
                 &agent_definition.user_message_template,
             ),
         );
         let compaction_mode = pins.mode;
         let two_pass_enabled = pins.two_pass;
-        let compact_on_model_switch = self
-            .cfg
-            .borrow()
-            .is_feature_enabled(crate::agent::config::Feature::CompactOnModelSwitch);
         let (session_model_id, mut sampling_config) = self
             .apply_agent_model_override(
                 pinned_model.as_ref(),

@@ -1432,6 +1432,66 @@ async fn the_compact_on_model_switch_setting_compacts_after_every_switch() {
         })
         .await;
 }
+/// A config reload turns both compaction flags on in a running session, with no restart.
+/// A later agent rebuild keeps the reloaded flags.
+#[tokio::test(flavor = "current_thread")]
+async fn a_config_reload_applies_the_compaction_flags_to_a_running_session() {
+    use crate::session::compaction_config::PreviousModelInfo;
+    let local = tokio::task::LocalSet::new();
+    local
+        .run_until(async {
+            let (gateway_tx, _gateway_rx) = mpsc::unbounded_channel();
+            let (persistence_tx, _persistence_rx) = mpsc::unbounded_channel();
+            let actor =
+                Arc::new(create_test_actor(10_000, 200_000, 85, gateway_tx, persistence_tx).await);
+            let server = xai_grok_test_support::MockInferenceServer::start()
+                .await
+                .unwrap();
+            server.set_response("Summary of the work so far. ".repeat(20));
+            let mut cfg = actor.chat_state_handle.get_sampling_config().await.unwrap();
+            cfg.base_url = server.url();
+            actor.chat_state_handle.update_sampling_config(cfg);
+            actor.chat_state_handle.replace_conversation(vec![
+                ConversationItem::system("sys"),
+                ConversationItem::user("hello"),
+                ConversationItem::assistant("hi"),
+                ConversationItem::user("next"),
+            ]);
+            assert!(!actor.two_pass_active());
+
+            actor.handle_reload_compaction_features(true, true);
+
+            assert!(actor.two_pass_active(), "the reload must turn two-pass on");
+            let spec_policy = actor.rebuild_spec.compaction_policy.get();
+            assert!(
+                spec_policy.two_pass_enabled && spec_policy.compact_on_model_switch,
+                "a rebuild must keep the reloaded flags: {spec_policy:?}"
+            );
+            actor.compaction.previous_model.set(Some(PreviousModelInfo {
+                model_slug: "the-model-before-the-switch".to_string(),
+                context_window: 200_000,
+            }));
+            actor.maybe_compact_on_model_switch().await.unwrap();
+            assert!(
+                !server.requests().is_empty(),
+                "after the reload, a switch to a window of the same size must compact"
+            );
+
+            actor.handle_reload_compaction_features(false, false);
+            assert!(
+                !actor.two_pass_active(),
+                "the reload must turn two-pass off"
+            );
+            assert!(
+                !actor
+                    .agent
+                    .borrow()
+                    .compaction_policy()
+                    .compact_on_model_switch
+            );
+        })
+        .await;
+}
 /// Non-auth model-switch compact failures stay log-only (turn continues).
 #[tokio::test(flavor = "current_thread")]
 async fn e2e_model_switch_compact_non_auth_failure_does_not_abort() {
