@@ -6938,9 +6938,8 @@ fn wait_for_tier_recheck_ends_when_the_claimed_check_ends() {
         assert!(!agent.tier_recheck_in_flight.load(Ordering::Acquire));
     });
 }
-/// The tier re-check work is single-flight across every caller: back-to-back gated initializes run at most one live check.
-/// An awaited authenticate-path check skips (rather than doubles or waits out) a check already wedged on a stalled subscription endpoint. Drives the exact block `initialize` runs when `tier_allowed` is false.
-/// The full `initialize` fires once-per-process GROK_HOME cleanup work that a unit test must not run against the developer's real home.
+/// The tier re-check is single-flight: a second call skips while a check is wedged on a stalled subscription endpoint.
+/// The access check never waits on it, and it blocks nothing.
 #[test]
 fn gated_reconnect_tier_recheck_is_single_flight() {
     run_local_for_bridge_test(|| async {
@@ -6980,11 +6979,11 @@ fn gated_reconnect_tier_recheck_is_single_flight() {
         };
         agent.auth_manager.hot_swap(auth.clone());
         *agent.allow_access_resolved_for.borrow_mut() = Some(auth.user_id.clone());
-        agent.tier_allowed.set(false);
         for _ in 0..2 {
-            if !agent.tier_allowed.get() {
-                agent.spawn_tier_recheck();
-            }
+            let agent_ref = LocalRef::new(&agent);
+            xai_spawn::spawn_local(async move {
+                agent_ref.get().retry_subscription_check().await;
+            });
             tokio::time::sleep(std::time::Duration::from_millis(100)).await;
         }
         assert_eq!(
@@ -6997,15 +6996,15 @@ fn gated_reconnect_tier_recheck_is_single_flight() {
             agent.enforce_grok_code_access(&auth),
         )
         .await
-        .expect("an awaited check must skip, not wait out, the wedged re-check");
+        .expect("the access check must not wait out the wedged re-check");
         assert_eq!(
             agent.tier_recheck_run_count.get(),
             1,
-            "the awaited check must not run a second concurrent re-check"
+            "the access check must not run a second concurrent re-check"
         );
         assert!(
-            !agent.tier_allowed.get(),
-            "the gate stays until a re-check resolves"
+            agent.tier_allowed.get(),
+            "this build has no paywall: settings that deny access block nothing"
         );
         stop.store(true, std::sync::atomic::Ordering::Release);
         accept_thread.join().expect("accept loop joins");
