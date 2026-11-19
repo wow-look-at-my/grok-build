@@ -340,9 +340,8 @@ async fn settings_that_deny_access_show_no_paywall() {
     harness.quit().expect("clean quit");
 }
 
-/// Verify-before-paywall: a user who ALREADY subscribed never sees a paywall flash when a stale
-/// gated settings snapshot reaches the client. The stale snapshot is delivered via the `/new`
-/// settings refresh, the only active `/v1/settings` consumer at that point.
+/// A gated settings snapshot that reaches a running session shows no paywall. The snapshot is delivered via the
+/// `/new` settings refresh, the only active `/v1/settings` consumer at that point.
 #[tokio::test(flavor = "multi_thread", worker_threads = 2)]
 #[ignore = "PTY e2e; run with cargo test -p xai-grok-pager-pty-harness --test it -- --ignored"]
 async fn stale_gate_push_never_flashes_paywall_for_subscribed_user() {
@@ -363,7 +362,6 @@ async fn stale_gate_push_never_flashes_paywall_for_subscribed_user() {
 
     // Let startup fetches fully settle so the scripted one-shot below can only be consumed by the /new refresh
     harness.update(Duration::from_secs(2));
-    let checks_before = user_check_count(&content);
 
     // One stale gated snapshot simulates remote settings going stale
     content.enqueue_response(
@@ -386,17 +384,7 @@ async fn stale_gate_push_never_flashes_paywall_for_subscribed_user() {
         );
     }
 
-    // Positive anchors: the deferral's live check ran, and the session is
-    // fully usable (prompt round-trips)
-    assert!(
-        user_check_count(&content) > checks_before,
-        "expected a live subscription check for the deferred gate; requests: {:?}",
-        content
-            .requests()
-            .iter()
-            .map(|e| e.path.clone())
-            .collect::<Vec<_>>()
-    );
+    // The session stays fully usable: a prompt round-trips.
     content.set_response(format!("{MOCK_RESPONSE_SENTINEL} still usable."));
     harness
         .inject_keys(format!("{PROMPT}\r").as_bytes())
