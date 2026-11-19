@@ -10,7 +10,7 @@ use std::time::Duration;
 
 use acp_harness::{
     AutoApproveClient, connect_and_auth_with_memory, connect_and_auth_with_memory_config,
-    new_session, prompt_turn, run_agent_test,
+    ext_method, new_session, prompt_turn, run_agent_test,
 };
 use agent_client_protocol as acp;
 
@@ -397,6 +397,64 @@ fn a_paraphrase_is_recalled_through_the_configured_embedding_endpoint() {
             sent.iter().all(|value| !value.contains("test-key-for-ci")),
             "the chat key must not reach the embedding endpoint: {sent:?}"
         );
+    });
+}
+
+/// A note is shown one time for a conversation. A compaction replaces the conversation and its reminder, so the
+/// next prompt about the note recalls it again.
+#[test]
+fn a_note_is_recalled_again_after_a_compaction() {
+    run_agent_test(|_cwd, server| async move {
+        let workspace = Workspace::new("compaction");
+        let recorder = UpdateRecorder::default();
+        let (conn, _init) = connect_and_auth_with_memory_config(
+            recorder.clone(),
+            "memory-recall-compaction-test",
+            "",
+        )
+        .await;
+        let session_id = new_session(&conn, &workspace.0).await;
+        write_global_topic(
+            "release.md",
+            "# Release steps\nHow a release is cut.\n\n## Zebrafish deploy pipeline\n\
+             - The zebrafish deploy pipeline starts with `make quokka-release`.\n",
+        );
+        server.set_response("Noted.");
+        let recalls = || recorder.of_kind("memory_recalled").len();
+
+        prompt_turn(
+            &conn,
+            &session_id,
+            "How do I run the zebrafish deploy pipeline?",
+        )
+        .await;
+        assert_eq!(recalls(), 1, "the first prompt about the note recalls it");
+
+        prompt_turn(
+            &conn,
+            &session_id,
+            "Run the zebrafish deploy pipeline one more time, please.",
+        )
+        .await;
+        assert_eq!(recalls(), 1, "a note is shown one time for a conversation");
+
+        ext_method(
+            &conn,
+            "example.invalid/compact_conversation",
+            serde_json::json!({ "session_id": session_id.0.to_string() }),
+        )
+        .await;
+
+        let after = "Tell me once more how the zebrafish deploy pipeline starts.";
+        prompt_turn(&conn, &session_id, after).await;
+        assert_eq!(
+            recalls(),
+            2,
+            "the compaction removed the reminder, so the note is recalled again"
+        );
+        let bodies = turn_bodies(&server, after);
+        let body = bodies.first().expect("the turn must reach the model");
+        assert!(body.contains("make quokka-release"), "{body}");
     });
 }
 
