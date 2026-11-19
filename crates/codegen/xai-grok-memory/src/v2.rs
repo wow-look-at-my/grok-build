@@ -780,12 +780,10 @@ fn collect_entries_from(
     Ok(discovered_entries)
 }
 
-#[cfg(test)]
 pub(crate) fn excluded_manifest_paths(scope_dir: &Path) -> Result<BTreeSet<String>> {
     excluded_manifest_paths_with_journal_mode(scope_dir, None)
 }
 
-#[cfg(test)]
 pub(crate) fn excluded_manifest_paths_with_journal_mode(
     scope_dir: &Path,
     journal_mode: Option<JournalMode>,
