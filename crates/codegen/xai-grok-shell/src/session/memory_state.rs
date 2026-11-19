@@ -190,7 +190,9 @@ pub(crate) struct SessionRecall {
 
 impl SessionRecall {
     /// What builds the embedding provider right now. `None` leaves recall on word matching.
-    pub fn active_embedding(&self) -> Option<xai_grok_memory::backend::EmbeddingProviderParams> {
+    pub(crate) fn active_embedding(
+        &self,
+    ) -> Option<xai_grok_memory::backend::EmbeddingProviderParams> {
         if let Some(configured) = &self.embedding {
             return Some(configured.clone());
         }
@@ -210,7 +212,7 @@ pub(crate) struct AutoEmbedding {
 }
 
 impl AutoEmbedding {
-    pub fn params(
+    pub(crate) fn params(
         &self,
         found: &crate::remote::LocalEmbeddingModel,
     ) -> xai_grok_memory::backend::EmbeddingProviderParams {
