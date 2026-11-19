@@ -332,6 +332,8 @@ pub struct MemoryEmbeddingConfig {
     pub base_url: Option<String>,
     /// Name of the environment variable that holds the key for `base_url`.
     pub api_key_env: Option<String>,
+    /// Send `dimensions` with each request.
+    pub request_dimensions: bool,
 }
 
 impl Default for MemoryEmbeddingConfig {
@@ -342,6 +344,7 @@ impl Default for MemoryEmbeddingConfig {
             dimensions: 1024,
             base_url: None,
             api_key_env: None,
+            request_dimensions: true,
         }
     }
 }
@@ -832,6 +835,13 @@ impl MemoryConfig {
                     .map(str::trim)
                     .filter(|name| !name.is_empty())
                     .map(str::to_owned),
+                request_dimensions: embedding.is_none_or(|settings| {
+                    let has_own_endpoint = settings
+                        .base_url
+                        .as_deref()
+                        .is_some_and(|url| !url.trim().is_empty());
+                    !has_own_endpoint || settings.dimensions.is_some()
+                }),
             },
             search: MemorySearchConfig {
                 max_results: search

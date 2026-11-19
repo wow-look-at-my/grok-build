@@ -35,6 +35,8 @@ pub struct ApiEmbeddingProvider {
     usage_sink: xai_grok_sampler::SharedUsageSink,
     max_batch_size: usize,
     max_attempts: usize,
+    /// Ask the server for `dimensions`. Without it the server returns the model's own size.
+    request_dimensions: bool,
 }
 
 impl ApiEmbeddingProvider {
@@ -60,6 +62,7 @@ impl ApiEmbeddingProvider {
             usage_sink,
             max_batch_size: 32,
             max_attempts: MAX_RETRIES,
+            request_dimensions: true,
         }
     }
 
@@ -70,13 +73,9 @@ impl ApiEmbeddingProvider {
         usage_sink: xai_grok_sampler::SharedUsageSink,
     ) -> Option<Self> {
         let model = config.model.clone().filter(|m| !m.is_empty())?;
-        Some(Self::new(
-            api_base,
-            model,
-            config.dimensions,
-            auth,
-            usage_sink,
-        ))
+        let mut provider = Self::new(api_base, model, config.dimensions, auth, usage_sink);
+        provider.request_dimensions = config.request_dimensions;
+        Some(provider)
     }
 
     /// `auth_key` is a key for the endpoint, sent as `Authorization: Bearer`.
@@ -139,11 +138,13 @@ impl EmbeddingProvider for ApiEmbeddingProvider {
         // Process in batches to respect API payload limits
         for batch in texts.chunks(self.max_batch_size) {
             let input: Vec<&str> = batch.to_vec();
-            let body_json = serde_json::json!({
+            let mut body_json = serde_json::json!({
                 "model": self.model,
                 "input": input,
-                "dimensions": self.dimensions,
             });
+            if self.request_dimensions {
+                body_json["dimensions"] = serde_json::json!(self.dimensions);
+            }
 
             // Transient errors (429, 5xx) are retried with exponential backoff
             let mut last_err = String::new();
@@ -346,6 +347,62 @@ mod tests {
         let provider = MockEmbeddingProvider { dimensions: 4 };
         let results = provider.embed_batch(&[]).await.unwrap();
         assert!(results.is_empty());
+    }
+
+    /// A config with its own endpoint and no size sends no `dimensions`. Ollama refuses a size
+    /// above the model's own, and the default size is above most local models.
+    #[tokio::test]
+    async fn an_endpoint_with_no_configured_size_gets_no_dimensions_field() {
+        let server = wiremock::MockServer::start().await;
+        wiremock::Mock::given(wiremock::matchers::method("POST"))
+            .and(wiremock::matchers::path("/v1/embeddings"))
+            .respond_with(
+                wiremock::ResponseTemplate::new(200).set_body_json(serde_json::json!({
+                    "model": "nomic-embed-text",
+                    "data": [{ "embedding": [0.5, 0.25, 0.125] }],
+                    "usage": { "prompt_tokens": 1, "total_tokens": 1 }
+                })),
+            )
+            .mount(&server)
+            .await;
+        let provider_for = |request_dimensions: bool| {
+            let config = xai_grok_config_types::MemoryEmbeddingConfig {
+                model: Some("nomic-embed-text".into()),
+                request_dimensions,
+                ..Default::default()
+            };
+            ApiEmbeddingProvider::from_session(
+                &config,
+                format!("{}/v1", server.uri()),
+                "none".into(),
+                std::sync::Arc::new(Recorder::default()),
+            )
+            .expect("a model is configured")
+        };
+
+        let vectors = provider_for(false)
+            .embed_batch(&["hello"])
+            .await
+            .expect("embeddings");
+        assert_eq!(vectors, vec![vec![0.5, 0.25, 0.125]]);
+        provider_for(true)
+            .embed_batch(&["hello"])
+            .await
+            .expect("embeddings");
+
+        let bodies: Vec<serde_json::Value> = server
+            .received_requests()
+            .await
+            .expect("recorded requests")
+            .iter()
+            .map(|request| request.body_json().expect("JSON body"))
+            .collect();
+        let [without, with] = bodies.as_slice() else {
+            panic!("expected two requests: {bodies:?}");
+        };
+        assert!(without.get("dimensions").is_none(), "{without}");
+        assert_eq!(without["model"], "nomic-embed-text");
+        assert_eq!(with["dimensions"], 1024);
     }
 
     /// A provider without retries sends one request to a failing server and returns at once.

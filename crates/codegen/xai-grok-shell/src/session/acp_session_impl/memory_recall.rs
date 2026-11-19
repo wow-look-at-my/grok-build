@@ -206,13 +206,6 @@ impl EmbeddingProvider for BoundedEmbeddingProvider<'_> {
 impl SessionActor {
     /// Tells the log and the client, one time for a session, that recall lost its embedding lookup.
     async fn report_recall_degraded(&self, reason: String) {
-        {
-            let mut state = self.memory.recall.state.borrow_mut();
-            if state.embedding_failure_reported {
-                return;
-            }
-            state.embedding_failure_reported = true;
-        }
         tracing::error!(
             target: xai_grok_telemetry::memory_log::TARGET,
             session_id = %self.session_info.id.0,
@@ -292,6 +285,13 @@ impl SessionActor {
         };
         if provider.is_none()
             && let Some(params) = self.memory.recall.embedding.as_ref()
+            && self
+                .memory
+                .recall
+                .state
+                .borrow_mut()
+                .embedding_failures
+                .cannot_run()
         {
             self.report_recall_degraded(format!(
                 "no credential reaches the embedding endpoint {}",
@@ -327,8 +327,21 @@ impl SessionActor {
                 return;
             }
         };
-        if let V2RecallMode::EmbeddingFailed(error) = &outcome.mode {
-            self.report_recall_degraded(error.clone()).await;
+        let report = {
+            let mut state = self.memory.recall.state.borrow_mut();
+            match &outcome.mode {
+                V2RecallMode::EmbeddingFailed(error) => {
+                    state.embedding_failures.failed().then(|| error.clone())
+                }
+                V2RecallMode::Hybrid => {
+                    state.embedding_failures.succeeded();
+                    None
+                }
+                V2RecallMode::Lexical => None,
+            }
+        };
+        if let Some(reason) = report {
+            self.report_recall_degraded(reason).await;
         }
         {
             let mut state = self.memory.recall.state.borrow_mut();

@@ -131,7 +131,34 @@ pub(crate) struct RecallState {
     pub seen: std::collections::HashSet<String>,
     /// `seen` holds the keys of the reminders the conversation carries.
     pub seeded: bool,
-    pub embedding_failure_reported: bool,
+    pub embedding_failures: EmbeddingFailures,
+}
+
+/// Decides when the user hears that recall lost its embedding lookup. One time for a session.
+#[derive(Default)]
+pub(crate) struct EmbeddingFailures {
+    in_a_row: u8,
+    reported: bool,
+}
+
+impl EmbeddingFailures {
+    /// A local model loads on its first call and can miss one deadline.
+    const REPORT_AFTER: u8 = 2;
+
+    pub(crate) fn succeeded(&mut self) {
+        self.in_a_row = 0;
+    }
+
+    /// A call failed. True when this failure is the one to report.
+    pub(crate) fn failed(&mut self) -> bool {
+        self.in_a_row = self.in_a_row.saturating_add(1);
+        self.in_a_row >= Self::REPORT_AFTER && !std::mem::replace(&mut self.reported, true)
+    }
+
+    /// No later call can work, as with a missing key. True the first time.
+    pub(crate) fn cannot_run(&mut self) -> bool {
+        !std::mem::replace(&mut self.reported, true)
+    }
 }
 
 impl RecallState {
