@@ -135,7 +135,7 @@ pub struct V2RecallConfig {
 impl Default for V2RecallConfig {
     fn default() -> Self {
         Self {
-            max_hits: 4,
+            max_hits: 2,
             min_matched_terms: 2,
             min_term_weight: 1.5,
             min_standard_score: 3.5,
@@ -168,6 +168,8 @@ pub struct V2RecallQuery<'a> {
     pub text: &'a str,
     /// The last thing a person or the model said in `text`.
     pub focus: Option<&'a str>,
+    /// The session that asks. Its own observations repeat the conversation, so they are never returned.
+    pub session_id: Option<&'a str>,
 }
 
 impl<'a> From<&'a str> for V2RecallQuery<'a> {
@@ -175,6 +177,7 @@ impl<'a> From<&'a str> for V2RecallQuery<'a> {
         Self {
             text,
             focus: Some(text),
+            session_id: None,
         }
     }
 }
@@ -242,6 +245,10 @@ struct CorpusChunk {
     /// `chunk_hash` of `searchable`; the embedding cache key.
     hash: String,
     terms: HashSet<String>,
+    /// Terms of the title, the headings and an observation's keywords: what the chunk is about.
+    subject_terms: HashSet<String>,
+    /// The session that captured an observation.
+    session_id: Option<String>,
 }
 
 struct ListedFile {
@@ -272,8 +279,8 @@ impl V2Recall {
         }
     }
 
-    /// Refresh the corpus from disk, then return the chunks relevant to `query`, best first.
-    /// Chunks whose key is in `seen` are never returned and do not use up `max_hits`.
+    /// Refresh the corpus from disk, then return the chunks relevant to `query`, best first, one for each file.
+    /// A file with a chunk whose key is in `seen` is never returned and does not use up `max_hits`.
     pub async fn recall<'a>(
         &self,
         query: impl Into<V2RecallQuery<'a>>,
@@ -313,8 +320,19 @@ impl V2Recall {
         };
 
         let config = &self.inner.config;
+        // The reminder of one chunk names its file, so the rest of that file needs no second reminder.
+        let seen_paths: HashSet<&Path> = chunks
+            .iter()
+            .filter(|chunk| seen.contains(&chunk.key))
+            .map(|chunk| chunk.path.as_path())
+            .collect();
         let mut hits = Vec::new();
         for ((chunk, lexical), semantic) in chunks.iter().zip(lexical).zip(semantic) {
+            if seen_paths.contains(chunk.path.as_path())
+                || (chunk.session_id.is_some() && chunk.session_id.as_deref() == query.session_id)
+            {
+                continue;
+            }
             let semantic_score =
                 semantic.map(|standard| (standard / FULL_MATCH_STANDARD_SCORE).clamp(0.0, 1.0));
             let score = match (lexical.score, semantic_score) {
@@ -325,9 +343,6 @@ impl V2Recall {
                 (None, Some(semantic)) => semantic,
                 (None, None) => continue,
             };
-            if seen.contains(&chunk.key) {
-                continue;
-            }
             hits.push(V2RecallHit {
                 key: chunk.key.clone(),
                 scope: chunk.scope,
@@ -351,6 +366,8 @@ impl V2Recall {
                 .then_with(|| left.path.cmp(&right.path))
                 .then_with(|| left.start_line.cmp(&right.start_line))
         });
+        let mut files = HashSet::new();
+        hits.retain(|hit| files.insert(hit.path.clone()));
         hits.truncate(config.max_hits);
         Ok(V2RecallOutcome {
             hits,
@@ -767,9 +784,14 @@ fn build_chunks(
     kind: V2RecallKind,
     content: &str,
 ) -> Vec<Arc<CorpusChunk>> {
-    let (line_offset, body, extras) = match kind {
+    let Frontmatter {
+        line_offset,
+        body,
+        extras,
+        session_id,
+    } = match kind {
         V2RecallKind::Observation => split_frontmatter(content),
-        V2RecallKind::Topic => (0, content, Vec::new()),
+        V2RecallKind::Topic => Frontmatter::none(content),
     };
     let title = body
         .lines()
@@ -806,9 +828,20 @@ fn build_chunks(
         end_line = end_line.max(start_line);
 
         let mut searchable = format!("{}\n{title}", chunk.text);
+        let mut subject = title.clone();
+        for heading in chunk
+            .text
+            .lines()
+            .filter(|line| line.trim_start().starts_with('#'))
+        {
+            subject.push('\n');
+            subject.push_str(heading);
+        }
         for extra in &extras {
             searchable.push('\n');
             searchable.push_str(extra);
+            subject.push('\n');
+            subject.push_str(extra);
         }
         let key: String = blake3::hash(format!("{path_text}\n{}", chunk.text).as_bytes())
             .to_hex()
@@ -825,6 +858,8 @@ fn build_chunks(
             end_line,
             hash: chunk_hash(&searchable),
             terms: tokenize(&searchable).into_iter().collect(),
+            subject_terms: tokenize(&subject).into_iter().collect(),
+            session_id: session_id.clone(),
             searchable,
             display: chunk.text,
         }));
@@ -832,20 +867,45 @@ fn build_chunks(
     chunks
 }
 
-/// Split a leading `---` block off. Other keys stay out of search.
-fn split_frontmatter(content: &str) -> (usize, &str, Vec<String>) {
+/// A file split at its leading `---` block. Other keys stay out of search.
+struct Frontmatter<'a> {
+    /// Lines of the file before `body`.
+    line_offset: usize,
+    body: &'a str,
+    /// Keywords, aliases and the topic hint.
+    extras: Vec<String>,
+    session_id: Option<String>,
+}
+
+impl<'a> Frontmatter<'a> {
+    fn none(content: &'a str) -> Self {
+        Self {
+            line_offset: 0,
+            body: content,
+            extras: Vec::new(),
+            session_id: None,
+        }
+    }
+}
+
+fn split_frontmatter(content: &str) -> Frontmatter<'_> {
     let mut lines = content.split_inclusive('\n');
     if lines.next().map(str::trim_end) != Some("---") {
-        return (0, content, Vec::new());
+        return Frontmatter::none(content);
     }
     let mut offset = lines_len_first(content);
     let mut extras = Vec::new();
+    let mut session_id = None;
     for (index, line) in lines.enumerate() {
         offset += line.len();
         let trimmed = line.trim_end();
         if trimmed == "---" {
-            let body = content.get(offset..).unwrap_or_default();
-            return (index + 2, body, extras);
+            return Frontmatter {
+                line_offset: index + 2,
+                body: content.get(offset..).unwrap_or_default(),
+                extras,
+                session_id,
+            };
         }
         let Some((key, value)) = trimmed.split_once(':') else {
             continue;
@@ -861,10 +921,15 @@ fn split_frontmatter(content: &str) -> (usize, &str, Vec<String>) {
                 Ok(None) => {}
                 Err(_) => extras.push(value.trim_matches('"').to_owned()),
             },
+            "session_id" => {
+                let id = serde_json::from_str::<String>(value)
+                    .unwrap_or_else(|_| value.trim_matches('"').to_owned());
+                session_id = Some(id).filter(|id| !id.is_empty());
+            }
             _ => {}
         }
     }
-    (0, content, Vec::new())
+    Frontmatter::none(content)
 }
 
 fn lines_len_first(content: &str) -> usize {
@@ -967,7 +1032,12 @@ fn lexical_scores(
                 .iter()
                 .filter_map(|term| idf.get(term.as_str()))
                 .sum();
+            // Words that only the body shares say the query and the note use the same vocabulary, not that the query is about the note.
+            let names_subject = matched
+                .iter()
+                .any(|term| chunk.subject_terms.contains(term));
             let qualifies = idf_max > 0.0
+                && names_subject
                 && matched.len() >= config.min_matched_terms
                 && weight >= config.min_term_weight * idf_max;
             LexicalScore {

@@ -162,6 +162,97 @@ async fn observation_frontmatter_terms_are_searchable_but_bookkeeping_is_not() {
 }
 
 #[tokio::test]
+async fn an_observation_of_the_asking_session_is_never_returned() {
+    let fixture = fixture();
+    seed_topics(&fixture.workspace);
+    let path = write(
+        &fixture.workspace,
+        "observations/_inbox/obs.md",
+        &observation(
+            "Releases ship on Thursdays",
+            &["cadence", "weekly_train"],
+            &["shipday"],
+            None,
+        ),
+    );
+    let recall = fixture.recall(V2RecallConfig::default());
+    let text = "what is the cadence of the weekly train shipday";
+    let asked_by = |session_id| V2RecallQuery {
+        text,
+        focus: Some(text),
+        session_id: Some(session_id),
+    };
+
+    // The observation fixture names this session as its source.
+    let own = recall
+        .recall(asked_by("sess-zebrafish-4471"), None, &HashSet::new())
+        .await
+        .unwrap();
+    assert!(
+        own.hits.is_empty(),
+        "a note captured from this conversation repeats it: {:?}",
+        own.hits
+    );
+
+    let other = recall
+        .recall(asked_by("sess-another"), None, &HashSet::new())
+        .await
+        .unwrap();
+    assert_eq!(top(&other).path, path);
+}
+
+#[tokio::test]
+async fn words_that_only_the_body_shares_do_not_recall_a_note() {
+    let fixture = fixture();
+    seed_topics(&fixture.workspace);
+    let path = write(
+        &fixture.workspace,
+        "topics/fonts.md",
+        "# Glyph shaping\nThe harfbuzz shaper renders ligatures through the freetype rasterizer.\n",
+    );
+    let recall = fixture.recall(V2RecallConfig::default());
+
+    let body_only = lexical(&recall, "harfbuzz freetype rasterizer ligatures").await;
+    assert!(body_only.hits.is_empty(), "{:?}", body_only.hits);
+
+    let names_subject = lexical(&recall, "glyph shaping with harfbuzz").await;
+    assert_eq!(top(&names_subject).path, path);
+}
+
+#[tokio::test]
+async fn a_file_is_returned_one_time_for_a_conversation() {
+    let fixture = fixture();
+    seed_topics(&fixture.workspace);
+    let filler = "The mirror keeps one bucket for each region. ".repeat(30);
+    let path = write(
+        &fixture.workspace,
+        "topics/mirror.md",
+        &format!(
+            "# Sccache mirror\n\n## Upload\nThe rustc wrapper uploads objects. {filler}\n\n\
+             ## Eviction\nThe rustc hash names each object. {filler}\n"
+        ),
+    );
+    let recall = fixture.recall(V2RecallConfig {
+        max_hits: 8,
+        ..V2RecallConfig::default()
+    });
+    let query = "sccache mirror rustc";
+
+    let first = lexical(&recall, query).await;
+    assert!(first.corpus_chunks > 4, "the file must hold several chunks");
+    let from_file: Vec<&V2RecallHit> = first.hits.iter().filter(|hit| hit.path == path).collect();
+    assert_eq!(from_file.len(), 1, "{:?}", first.hits);
+
+    let seen: HashSet<String> = first.hits.iter().map(|hit| hit.key.clone()).collect();
+    let second = recall.recall(query, None, &seen).await.unwrap();
+    assert!(
+        second.hits.iter().all(|hit| hit.path != path),
+        "the first reminder named the file: {:?}",
+        second.hits
+    );
+}
+
+#[tokio::test]
 async fn observation_hit_has_statement_title_and_real_line_range() {
     let fixture = fixture();
     seed_topics(&fixture.workspace);

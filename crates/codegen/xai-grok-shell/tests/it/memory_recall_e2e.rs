@@ -189,6 +189,58 @@ fn a_preference_from_one_workspace_is_recalled_in_another_without_a_command() {
     });
 }
 
+#[test]
+fn a_note_captured_from_this_conversation_is_not_recalled_into_it() {
+    run_agent_test(|_cwd, server| async move {
+        let workspace = Workspace::new("own-note");
+        let (conn, _init) =
+            connect_and_auth_with_memory(AutoApproveClient, "memory-own-note-test").await;
+
+        // The mock gives every request this reply, so the extractor reads it as its output.
+        server.set_response(
+            serde_json::json!({
+                "outcome": "observations",
+                "observations": [{
+                    "type": "user",
+                    "scope": "global",
+                    "topic_hint": "code style",
+                    "statement": "The user wants every indent to be a tab, never spaces.",
+                    "keywords": ["indent", "indentation", "tabs", "whitespace"],
+                    "aliases": ["tab"],
+                    "body": null
+                }]
+            })
+            .to_string(),
+        );
+        let session_id = new_session(&conn, &workspace.0).await;
+        prompt_turn(&conn, &session_id, "Reformat this file the way I like it.").await;
+
+        let inbox = global_scope_dir().join("observations/_inbox");
+        wait_for("the captured note in global memory", || {
+            std::fs::read_dir(&inbox)
+                .ok()?
+                .filter_map(Result::ok)
+                .map(|entry| entry.path())
+                .find(|path| {
+                    std::fs::read_to_string(path)
+                        .is_ok_and(|text| text.contains("every indent to be a tab"))
+                })
+        })
+        .await;
+
+        server.set_response("Done.");
+        // Another session recalls the note for this prompt. See the test above.
+        let prompt = "Please fix the indentation and whitespace in main.rs.";
+        prompt_turn(&conn, &session_id, prompt).await;
+        let bodies = turn_bodies(&server, prompt);
+        let body = bodies.first().expect("the turn must reach the model");
+        assert!(
+            !body.contains(RECALL_OPEN_TAG),
+            "the note came from this conversation, so a reminder of it repeats the conversation: {body}"
+        );
+    });
+}
+
 /// An OpenAI-style `/v1/embeddings` server on its own thread. A text about a
 /// lighthouse or a beacon gets one vector.
 struct EmbeddingServer {
@@ -387,16 +439,7 @@ fn a_dead_embedding_endpoint_is_reported_one_time_and_word_recall_goes_on() {
         let early = recorder.of_kind("memory_recall_degraded");
         assert!(
             early.is_empty(),
-            "one failed lookup can be a model that still loads, and is not reported: {early:?} turn requests {} all requests {:?}",
-            bodies.len(),
-            server
-                .requests()
-                .iter()
-                .map(|request| request
-                    .header("x-grok-req-id")
-                    .unwrap_or_default()
-                    .to_owned())
-                .collect::<Vec<_>>()
+            "one failed lookup can be a model that still loads, and is not reported: {early:?}"
         );
 
         prompt_turn(&conn, &session_id, "Now tell me about the weather.").await;

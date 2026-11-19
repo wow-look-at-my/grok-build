@@ -182,20 +182,6 @@ const UNRELATED: &[&str] = &[
     "Sort this list of users by their last login time.",
 ];
 
-/// What the conversation holds before the prompt: assistant text and tool-call arguments.
-const EARLIER_TURN: &str = "Done. I updated the parser and the two call sites, and the unit \
-    tests pass.\n{\"command\":\"cargo test -p parser\",\"timeout\":120000}\nAll 42 tests pass. \
-    The change is in src/parser/lexer.rs.";
-
-/// The query a session builds: every new piece as `text`, the user's words as `focus`.
-fn session_query<'a>(text: &'a mut String, prompt: &'a str) -> V2RecallQuery<'a> {
-    *text = format!("{EARLIER_TURN}\n{prompt}");
-    V2RecallQuery {
-        text,
-        focus: Some(prompt),
-    }
-}
-
 struct LiveFixture {
     _temp: TempDir,
     recall_dirs: (std::path::PathBuf, std::path::PathBuf),
@@ -243,13 +229,8 @@ async fn standard_scores(
             ..V2RecallConfig::default()
         },
     );
-    let mut text = String::new();
     let outcome = recall
-        .recall(
-            session_query(&mut text, query),
-            Some(provider),
-            &HashSet::new(),
-        )
+        .recall(query, Some(provider), &HashSet::new())
         .await
         .unwrap();
     assert_eq!(
@@ -309,16 +290,11 @@ async fn live_model_recalls_a_paraphrase_and_stays_quiet_otherwise() {
             ..V2RecallConfig::default()
         },
     );
-    let mut text = String::new();
     let mut recalled = 0;
     let mut wrong = Vec::new();
     for (prompt, expected) in PARAPHRASES {
         let outcome = recall
-            .recall(
-                session_query(&mut text, prompt),
-                Some(&provider),
-                &HashSet::new(),
-            )
+            .recall(*prompt, Some(&provider), &HashSet::new())
             .await
             .unwrap();
         assert_eq!(outcome.mode, V2RecallMode::Hybrid);
@@ -332,11 +308,7 @@ async fn live_model_recalls_a_paraphrase_and_stays_quiet_otherwise() {
     let mut noise = Vec::new();
     for prompt in UNRELATED {
         let outcome = recall
-            .recall(
-                session_query(&mut text, prompt),
-                Some(&provider),
-                &HashSet::new(),
-            )
+            .recall(*prompt, Some(&provider), &HashSet::new())
             .await
             .unwrap();
         assert_eq!(outcome.mode, V2RecallMode::Hybrid);
