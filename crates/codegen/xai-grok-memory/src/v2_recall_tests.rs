@@ -534,6 +534,124 @@ async fn failing_provider_falls_back_to_lexical_hits() {
     assert!(!top(&outcome).is_semantic);
 }
 
+/// Fails one request, by its position, and answers the others as `TestProvider` does.
+struct FlakyProvider {
+    inner: TestProvider,
+    requests: AtomicUsize,
+    failing_request: usize,
+}
+
+#[async_trait]
+impl crate::embedding::EmbeddingProvider for FlakyProvider {
+    async fn embed_batch(
+        &self,
+        texts: &[&str],
+    ) -> Result<Vec<Vec<f32>>, Box<dyn std::error::Error>> {
+        if self.requests.fetch_add(1, Ordering::SeqCst) + 1 == self.failing_request {
+            return Err("embedding service timed out".into());
+        }
+        self.inner.embed_batch(texts).await
+    }
+
+    fn model_name(&self) -> &str {
+        self.inner.model_name()
+    }
+
+    fn dimensions(&self) -> usize {
+        self.inner.dimensions()
+    }
+}
+
+#[tokio::test]
+async fn a_failed_request_keeps_the_vectors_of_the_requests_before_it() {
+    let fixture = fixture();
+    seed_topics(&fixture.workspace);
+    let path = write(
+        &fixture.global,
+        "topics/coast.md",
+        "# Lighthouse\nThe keeper trims the lamp wick nightly.\n",
+    );
+    let provider = FlakyProvider {
+        inner: TestProvider {
+            texts: AtomicUsize::new(0),
+        },
+        requests: AtomicUsize::new(0),
+        failing_request: 2,
+    };
+    let config = V2RecallConfig::default();
+    let batch = config.embed_batch_size;
+    let recall = fixture.recall(config);
+    let query = "a beacon guiding ships";
+
+    let failed = recall
+        .recall(query, Some(&provider), &HashSet::new())
+        .await
+        .unwrap();
+
+    assert!(
+        matches!(failed.mode, V2RecallMode::EmbeddingFailed(_)),
+        "{:?}",
+        failed.mode
+    );
+    assert_eq!(provider.inner.texts.load(Ordering::SeqCst), batch);
+
+    let outcome = recall
+        .recall(query, Some(&provider), &HashSet::new())
+        .await
+        .unwrap();
+
+    assert_eq!(outcome.mode, V2RecallMode::Hybrid);
+    assert_eq!(top(&outcome).path, path);
+    assert!(top(&outcome).is_semantic);
+    // The second recall embeds only what the first one did not store.
+    assert_eq!(
+        provider.inner.texts.load(Ordering::SeqCst),
+        BASELINE_NOTES.len() + 4 + 1
+    );
+}
+
+#[tokio::test]
+async fn a_model_slower_than_the_time_budget_finishes_over_several_recalls() {
+    let fixture = fixture();
+    seed_topics(&fixture.workspace);
+    let path = write(
+        &fixture.global,
+        "topics/coast.md",
+        "# Lighthouse\nThe keeper trims the lamp wick nightly.\n",
+    );
+    let provider = TestProvider {
+        texts: AtomicUsize::new(0),
+    };
+    let config = V2RecallConfig {
+        embed_time_budget: Duration::ZERO,
+        ..V2RecallConfig::default()
+    };
+    let batch = config.embed_batch_size;
+    let recall = fixture.recall(config);
+    let query = "a beacon guiding ships";
+
+    // One request for each recall. No chunk is judged before the baseline has its vectors.
+    let baseline_recalls = BASELINE_NOTES.len().div_ceil(batch);
+    for done in 1..=baseline_recalls {
+        let outcome = recall
+            .recall(query, Some(&provider), &HashSet::new())
+            .await
+            .unwrap();
+        assert_eq!(outcome.mode, V2RecallMode::Hybrid);
+        assert!(outcome.hits.is_empty(), "{:?}", outcome.hits);
+        let embedded = provider.texts.load(Ordering::SeqCst);
+        assert!(embedded >= (done * batch).min(BASELINE_NOTES.len()));
+    }
+
+    let outcome = recall
+        .recall(query, Some(&provider), &HashSet::new())
+        .await
+        .unwrap();
+
+    assert_eq!(top(&outcome).path, path);
+    assert!(top(&outcome).is_semantic);
+}
+
 #[tokio::test]
 async fn both_scopes_are_searched() {
     let fixture = fixture();

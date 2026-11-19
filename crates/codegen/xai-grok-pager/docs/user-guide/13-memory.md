@@ -384,19 +384,26 @@ To edit memory from the shell, open the files in your editor directly -- for exa
 |-----|---------|-------------|
 | `provider` | `"api"` | Embedding provider (currently `"api"`) |
 | `model` | unset | Embedding model name. Unset or `""` uses full-text-only retrieval. |
-| `dimensions` | `1024` | Embedding vector dimensions |
+| `dimensions` | `1024` | Embedding vector dimensions. With `base_url` set, leave it unset to take the model's own size. |
 | `base_url` | unset | OpenAI-style base URL for embedding calls, for example a local runtime. Unset sends them to the chat model's endpoint. |
 | `api_key_env` | unset | Name of the environment variable that holds the key for `base_url`. Leave it unset for an endpoint that takes no key. |
 
-A chat provider that speaks the Anthropic Messages API serves no embedding route. Point `base_url` at an endpoint that does:
+The embedding endpoint is separate from the chat endpoint. A chat provider that speaks the Anthropic Messages API serves no embedding route, so point `base_url` at an endpoint that does. For a local Ollama:
 
-```toml
-[memory.embedding]
-model = "nomic-embed-text"
-base_url = "http://127.0.0.1:11434/v1"
+```json
+{
+  "memory": {
+    "embedding": {
+      "model": "nomic-embed-text",
+      "base_url": "http://localhost:11434/v1"
+    }
+  }
+}
 ```
 
-The chat model's key is never sent to `base_url`. When the embedding lookup cannot run, the session says so one time on screen and recall keeps matching on words.
+Pull the model first (`ollama pull nomic-embed-text`). Ollama takes no key, so `api_key_env` stays unset. The chat model's key is never sent to `base_url`.
+
+A local model can be slow on its first call while it loads. Recall stores the vectors it gets, so a slow start costs a few turns of word-only matching and no repeated work. When the embedding lookup fails on multiple recalls in a row, the session says so one time on screen and recall keeps matching on words.
 
 ### Search Settings (`memory.search`)
 

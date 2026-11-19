@@ -5,7 +5,7 @@ use std::collections::{BTreeSet, HashMap, HashSet};
 use std::io::Read as _;
 use std::path::{Path, PathBuf};
 use std::sync::Arc;
-use std::time::SystemTime;
+use std::time::{Duration, Instant, SystemTime};
 
 use parking_lot::Mutex;
 use rusqlite::params;
@@ -124,6 +124,10 @@ pub struct V2RecallConfig {
     pub snippet_chars: usize,
     pub max_chunks: usize,
     pub max_embed_per_call: usize,
+    /// Texts in one embedding request. Each request stores its vectors, so a slow model keeps its progress.
+    pub embed_batch_size: usize,
+    /// No new chunk request starts after this long. The rest wait for the next recall.
+    pub embed_time_budget: Duration,
     /// Word matching uses at most this many query terms, the most distinctive ones.
     pub max_query_terms: usize,
 }
@@ -139,6 +143,8 @@ impl Default for V2RecallConfig {
             snippet_chars: 320,
             max_chunks: 4096,
             max_embed_per_call: 64,
+            embed_batch_size: 8,
+            embed_time_budget: Duration::from_secs(4),
             max_query_terms: 24,
         }
     }
@@ -413,7 +419,8 @@ impl V2Recall {
                 missing.push((baseline_slot, hash.as_str(), text));
             }
         }
-        let chunk_budget = missing.len() + self.inner.config.max_embed_per_call;
+        let baseline_missing = missing.len();
+        let chunk_budget = baseline_missing + self.inner.config.max_embed_per_call;
         for chunk in chunks {
             if missing.len() >= chunk_budget {
                 break;
@@ -427,8 +434,18 @@ impl V2Recall {
             }
         }
 
-        if !missing.is_empty() {
-            let texts: Vec<&str> = missing.iter().map(|(_, _, text)| *text).collect();
+        let config = &self.inner.config;
+        let batch_size = config.embed_batch_size.max(1);
+        let started = Instant::now();
+        for (index, batch) in missing.chunks(batch_size).enumerate() {
+            if index > 0 && started.elapsed() >= config.embed_time_budget {
+                if index * batch_size < baseline_missing {
+                    // Part of the baseline has no vector yet, so no chunk can be judged in this recall.
+                    return Ok(vec![None; chunks.len()]);
+                }
+                break;
+            }
+            let texts: Vec<&str> = batch.iter().map(|(_, _, text)| *text).collect();
             let vectors = provider
                 .embed_batch(&texts)
                 .await
@@ -441,7 +458,7 @@ impl V2Recall {
                 ));
             }
             let mut fresh: [Vec<(String, Vec<f32>)>; 2] = Default::default();
-            for ((slot, hash, _), vector) in missing.iter().zip(vectors) {
+            for ((slot, hash, _), vector) in batch.iter().zip(vectors) {
                 if vector.is_empty() {
                     continue;
                 }
@@ -513,7 +530,6 @@ impl V2Recall {
             .flatten()
             .copied()
             .fold(f64::NEG_INFINITY, f64::max);
-        let config = &self.inner.config;
         let floor = config
             .min_standard_score
             .max(best * config.runner_up_fraction);
