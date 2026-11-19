@@ -1095,14 +1095,16 @@ pub(crate) fn recall_status_line(
                 .unwrap_or("the chat endpoint");
             recall_embedding_line(model, endpoint)
         }
-        None => "Recall: word matching. Set an embedding model in /settings \u{2192} Memory to \
-                 match by meaning."
-            .to_owned(),
+        None => {
+            "Recall: words only. /settings \u{2192} Memory sets an embedding model for meaning."
+                .to_owned()
+        }
     }
 }
 
+/// The endpoint is last, so a narrow modal cuts it and keeps the model.
 fn recall_embedding_line(model: &str, endpoint: &str) -> String {
-    format!("Recall: word matching, and meaning with {model} at {endpoint}")
+    format!("Recall: words and meaning \u{00B7} {model} \u{00B7} {endpoint}")
 }
 
 /// Draws the recall line and the memory cost on the last rows of `area`, over the full width,
@@ -2883,7 +2885,7 @@ mod tests {
         use xai_grok_shell::util::config::MemorySettingsMirror;
         assert_eq!(
             recall_status_line(&MemorySettingsMirror::default()),
-            "Recall: word matching. Set an embedding model in /settings \u{2192} Memory to match by meaning."
+            "Recall: words only. /settings \u{2192} Memory sets an embedding model for meaning."
         );
         let local = MemorySettingsMirror {
             embedding_model: Some("nomic-embed-text".into()),
@@ -2892,7 +2894,7 @@ mod tests {
         };
         assert_eq!(
             recall_status_line(&local),
-            "Recall: word matching, and meaning with nomic-embed-text at http://localhost:11434/v1"
+            "Recall: words and meaning \u{00B7} nomic-embed-text \u{00B7} http://localhost:11434/v1"
         );
         let shared = MemorySettingsMirror {
             embedding_model: Some("embed-large".into()),
@@ -2900,7 +2902,7 @@ mod tests {
         };
         assert_eq!(
             recall_status_line(&shared),
-            "Recall: word matching, and meaning with embed-large at the chat endpoint"
+            "Recall: words and meaning \u{00B7} embed-large \u{00B7} the chat endpoint"
         );
         let off = MemorySettingsMirror {
             recall_enabled: Some(false),
@@ -2927,11 +2929,11 @@ mod tests {
             }),
         };
         let mut state = MemoryModalState::from_listing(listing)
-            .with_recall_line("Recall: word matching. Set an embedding model".into());
+            .with_recall_line("Recall: words only. Set an embedding model".into());
         let text = render_full(&mut state);
         assert!(
             text.contains(
-                "Recall: word matching, and meaning with nomic-embed-text:latest at http://localhost:11434/v1"
+                "Recall: words and meaning \u{00B7} nomic-embed-text:latest \u{00B7} http://localhost:11434/v1"
             ),
             "{text}"
         );

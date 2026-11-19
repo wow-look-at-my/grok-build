@@ -201,7 +201,7 @@ async fn recall_matches_by_meaning_through_a_local_runtime_with_no_embedding_con
 
     // `/memory` names the model once the runtime's listing was read.
     let recall_line = format!(
-        "Recall: word matching, and meaning with {EMBEDDING_MODEL} at {}",
+        "Recall: words and meaning \u{00B7} {EMBEDDING_MODEL} \u{00B7} {}",
         runtime.base_url
     );
     let mut shown = false;
