@@ -238,6 +238,8 @@ async fn standard_scores(
             min_matched_terms: usize::MAX,
             min_standard_score: f64::NEG_INFINITY,
             runner_up_fraction: 0.0,
+            // The table must not depend on how fast the model answers.
+            embed_time_budget: Duration::MAX,
             ..V2RecallConfig::default()
         },
     );
@@ -303,6 +305,7 @@ async fn live_model_recalls_a_paraphrase_and_stays_quiet_otherwise() {
         V2RecallConfig {
             // The lexical path is off, so each hit below comes from the model alone.
             min_matched_terms: usize::MAX,
+            embed_time_budget: Duration::MAX,
             ..V2RecallConfig::default()
         },
     );

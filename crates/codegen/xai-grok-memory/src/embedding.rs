@@ -138,13 +138,15 @@ impl EmbeddingProvider for ApiEmbeddingProvider {
         // Process in batches to respect API payload limits
         for batch in texts.chunks(self.max_batch_size) {
             let input: Vec<&str> = batch.to_vec();
-            let mut body_json = serde_json::json!({
-                "model": self.model,
-                "input": input,
-            });
-            if self.request_dimensions {
-                body_json["dimensions"] = serde_json::json!(self.dimensions);
-            }
+            let body_json = if self.request_dimensions {
+                serde_json::json!({
+                    "model": self.model,
+                    "input": input,
+                    "dimensions": self.dimensions,
+                })
+            } else {
+                serde_json::json!({ "model": self.model, "input": input })
+            };
 
             // Transient errors (429, 5xx) are retried with exponential backoff
             let mut last_err = String::new();
