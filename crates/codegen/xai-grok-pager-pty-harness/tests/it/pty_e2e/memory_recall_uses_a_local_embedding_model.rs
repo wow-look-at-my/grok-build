@@ -205,23 +205,23 @@ async fn recall_matches_by_meaning_through_a_local_runtime_with_no_embedding_con
         runtime.base_url
     );
     let mut shown = false;
+    let mut browser = String::new();
     for _ in 0..20 {
         harness.inject_keys(b"/memory\r").expect("submit /memory");
         shown = harness
             .wait_for_text(&recall_line, Duration::from_secs(3))
             .is_ok();
-        let screen = harness.screen_contents();
+        browser = harness.screen_contents();
         harness.inject_keys(keys::ESC).expect("close /memory");
         harness.update(Duration::from_millis(300));
         if shown {
             break;
         }
-        assert!(!screen.contains("panicked"), "pager panicked\n{screen}");
+        assert!(!browser.contains("panicked"), "pager panicked\n{browser}");
     }
     assert!(
         shown,
-        "`/memory` must name the embedding model of the local runtime\nscreen:\n{}",
-        harness.screen_contents()
+        "`/memory` must name the embedding model of the local runtime\nthe browser:\n{browser}"
     );
 
     // No word of this prompt is in the topic, so only a vector can match it.
