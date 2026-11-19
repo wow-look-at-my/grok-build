@@ -1912,10 +1912,10 @@ impl Config {
     /// A failed load answers the values this config holds.
     pub(crate) fn compaction_features_from_disk(&self) -> (bool, bool) {
         match crate::config::load_effective_config_with_layers() {
-            Ok((layers, _)) => (
-                self.feature_from_layers(Feature::TwoPassCompaction, &layers)
+            Ok(loaded) => (
+                self.feature_from_layers(Feature::TwoPassCompaction, &loaded)
                     .value,
-                self.feature_from_layers(Feature::CompactOnModelSwitch, &layers)
+                self.feature_from_layers(Feature::CompactOnModelSwitch, &loaded)
                     .value,
             ),
             Err(e) => {
