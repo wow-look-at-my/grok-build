@@ -98,6 +98,10 @@ fn reload_request(update: &ConfigUpdate) -> Option<(InternalMethod, serde_json::
             InternalMethod::ReloadThinkingSummaries,
             serde_json::json!({}),
         ),
+        ConfigUpdate::CompactionFeaturesChanged => (
+            InternalMethod::ReloadCompactionFeatures,
+            serde_json::json!({}),
+        ),
         _ => return None,
     })
 }

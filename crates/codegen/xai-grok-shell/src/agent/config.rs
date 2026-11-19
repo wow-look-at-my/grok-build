@@ -1908,8 +1908,27 @@ impl Config {
     pub(crate) fn is_voice_mode_enabled(&self) -> bool {
         self.is_feature_enabled(Feature::VoiceMode)
     }
-    pub(crate) fn is_two_pass_compaction_enabled(&self) -> bool {
-        self.is_feature_enabled(Feature::TwoPassCompaction)
+    /// `(two_pass_compaction, compact_on_model_switch)` as the config on disk resolves them now.
+    /// A failed load answers the values this config holds.
+    pub(crate) fn compaction_features_from_disk(&self) -> (bool, bool) {
+        match crate::config::load_effective_config_with_layers() {
+            Ok((layers, _)) => (
+                self.feature_from_layers(Feature::TwoPassCompaction, &layers)
+                    .value,
+                self.feature_from_layers(Feature::CompactOnModelSwitch, &layers)
+                    .value,
+            ),
+            Err(e) => {
+                tracing::warn!(
+                    error = %e,
+                    "config not re-read; the compaction features keep their values from agent start"
+                );
+                (
+                    self.is_feature_enabled(Feature::TwoPassCompaction),
+                    self.is_feature_enabled(Feature::CompactOnModelSwitch),
+                )
+            }
+        }
     }
     pub(crate) fn resolve_telemetry_mode(&self) -> Resolved<TelemetryMode> {
         return Resolved::new(TelemetryMode::Disabled, ConfigSource::Default);

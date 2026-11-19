@@ -401,7 +401,7 @@ fn refuse_fixed_feature_override(app: &mut AppView, feature: Feature, label: &st
 }
 
 /// Shared body of the `[features]` row setters; persists via `Effect::PersistFeatureOverride`.
-/// An explicit `false` is a real override of a remote `true`, so both values are written. Applies to new agents (restart-required).
+/// An explicit `false` is a real override of a remote `true`, so both values are written. `apply_live_feature` names the rows that apply without a restart.
 fn set_feature_override(
     app: &mut AppView,
     feature: Feature,
@@ -430,12 +430,16 @@ fn set_feature_override(
 /// Push a `[features]` row that applies without a restart into the running pager.
 /// Returns false for a row that agents latch when they are built.
 fn apply_live_feature(app: &mut AppView, feature: Feature) -> bool {
-    if feature != Feature::SessionRecap {
-        return false;
+    match feature {
+        Feature::SessionRecap => {
+            let available = app.session_recap.resolve().value;
+            crate::app::event_loop::apply_session_recap_available(app, available);
+            true
+        }
+        // The shell's config watcher reloads these into every running session.
+        Feature::TwoPassCompaction | Feature::CompactOnModelSwitch => true,
+        _ => false,
     }
-    let available = app.session_recap.resolve().value;
-    crate::app::event_loop::apply_session_recap_available(app, available);
-    true
 }
 
 /// Shared body of the `[features]` row resets: deletes the saved key rather than writing the compiled default.

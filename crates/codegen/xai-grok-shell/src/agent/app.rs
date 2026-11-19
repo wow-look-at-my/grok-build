@@ -1124,7 +1124,8 @@ pub async fn run_leader(
                         | ConfigUpdate::ModelsChanged
                         | ConfigUpdate::ModelsCacheChanged
                         | ConfigUpdate::OutputRateFloorChanged
-                        | ConfigUpdate::ThinkingSummariesChanged => {
+                        | ConfigUpdate::ThinkingSummariesChanged
+                        | ConfigUpdate::CompactionFeaturesChanged => {
                             warn!("config change arrived before the agent was built");
                         }
                         ConfigUpdate::Memory(mem) => {

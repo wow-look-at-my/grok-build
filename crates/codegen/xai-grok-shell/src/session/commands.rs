@@ -496,6 +496,11 @@ pub enum SessionCommand {
     ReloadOutputRateFloor,
     /// Re-read `ui.thinking_summaries` and `ui.thinking_summary_history_*` from config.json.
     ReloadThinkingSummaries,
+    /// Set the compaction flags that `[features]` resolved to after a config change.
+    ReloadCompactionFeatures {
+        two_pass: bool,
+        compact_on_model_switch: bool,
+    },
     /// Take the context window of the session's model from the rebuilt catalog.
     ReloadContextWindow,
     /// Signals then report the override model rather than the agent-level default.

@@ -1556,8 +1556,7 @@ pub(crate) fn default_settings_with_subagent_rows(
             },
             restart_required: false,
         },
-        // SHELL-owned `[features].two_pass_compaction`, a registry feature row like `subagent_model_inheritance`
-        // `restart_required` because each agent latches the flag when it is built
+        // SHELL-owned `[features].two_pass_compaction`, a registry feature row like `subagent_model_inheritance`.
         SettingMeta {
             key: "two_pass_compaction",
             category: SettingCategory::Agent,
@@ -1575,9 +1574,9 @@ pub(crate) fn default_settings_with_subagent_rows(
             kind: SettingKind::Bool {
                 default: Feature::TwoPassCompaction.default_enabled(),
             },
-            restart_required: true,
+            restart_required: false,
         },
-        // SHELL-owned `[features].compact_on_model_switch`. Each agent latches the flag when it is built.
+        // SHELL-owned `[features].compact_on_model_switch`. The config watcher reloads it into every running session.
         SettingMeta {
             key: "compact_on_model_switch",
             category: SettingCategory::Agent,
@@ -1595,7 +1594,7 @@ pub(crate) fn default_settings_with_subagent_rows(
             kind: SettingKind::Bool {
                 default: Feature::CompactOnModelSwitch.default_enabled(),
             },
-            restart_required: true,
+            restart_required: false,
         },
         // SHELL-owned `[features].session_recap`. The shell re-reads it on each recap request, so it applies live.
         SettingMeta {

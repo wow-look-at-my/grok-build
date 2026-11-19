@@ -21,6 +21,31 @@ impl SessionActor {
         self.output_rate_floor.set(policy);
     }
 
+    /// Handle [`SessionCommand::ReloadCompactionFeatures`]. The live agent and
+    /// the rebuild spec both take the flags, so a later agent rebuild keeps them.
+    pub(crate) fn handle_reload_compaction_features(
+        &self,
+        two_pass: bool,
+        compact_on_model_switch: bool,
+    ) {
+        let mut agent = self.agent.borrow_mut();
+        // An agent that keeps its own short self-summary never runs two-pass.
+        let two_pass = two_pass
+            && !crate::session::is_cursor_user_template(&agent.definition().user_message_template);
+        let apply = |policy: &mut xai_grok_agent::CompactionPolicy| {
+            policy.two_pass_enabled = two_pass;
+            policy.compact_on_model_switch = compact_on_model_switch;
+        };
+        apply(agent.compaction_policy_mut());
+        self.rebuild_spec.compaction_policy.update(apply);
+        tracing::info!(
+            session_id = %self.session_info.id.0,
+            two_pass,
+            compact_on_model_switch,
+            "compaction features reloaded from config"
+        );
+    }
+
     /// Handle [`SessionCommand::ReloadContextWindow`]: a config edit to a
     /// model's `context_window` reaches the running session.
     pub(super) async fn handle_reload_context_window(&self) {

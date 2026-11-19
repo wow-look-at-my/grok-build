@@ -944,6 +944,9 @@ pub(super) async fn run_session(
                         SessionCommand::ReloadThinkingSummaries => {
                             session.handle_reload_thinking_summaries();
                         }
+                        SessionCommand::ReloadCompactionFeatures { two_pass, compact_on_model_switch } => {
+                            session.handle_reload_compaction_features(two_pass, compact_on_model_switch);
+                        }
                         SessionCommand::ReloadContextWindow => {
                             session.handle_reload_context_window().await;
                         }

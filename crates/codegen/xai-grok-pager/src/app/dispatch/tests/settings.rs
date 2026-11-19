@@ -1443,7 +1443,7 @@ fn two_pass_compaction_persists_overrides_and_reads_back() {
     assert_eq!(Some(false), app.two_pass_compaction.config.user);
     assert_eq!(None, app.subagent_model_inheritance.config.user);
     assert_eq!(Some(crate::settings::SettingValue::Bool(false)), read(&app));
-    assert!(read_toast(&app).contains("restart to apply"));
+    assert!(!read_toast(&app).contains("restart to apply"));
     let _ = handle_feature_override_persisted(&mut app, feature, Ok(Some(false)));
     assert!(app.two_pass_compaction.writes.is_none());
     let effects = dispatch(Action::ClearTwoPassCompaction, &mut app);
@@ -1476,7 +1476,7 @@ fn compact_on_model_switch_persists_overrides_and_reads_back() {
     assert_eq!(Some(true), app.compact_on_model_switch.config.user);
     assert_eq!(None, app.two_pass_compaction.config.user);
     assert_eq!(Some(crate::settings::SettingValue::Bool(true)), read(&app));
-    assert!(read_toast(&app).contains("restart to apply"));
+    assert!(!read_toast(&app).contains("restart to apply"));
     let _ = handle_feature_override_persisted(&mut app, feature, Ok(Some(true)));
     assert!(app.compact_on_model_switch.writes.is_none());
     let effects = dispatch(Action::ClearCompactOnModelSwitch, &mut app);
