@@ -6327,6 +6327,7 @@ fn session_recap_follows_the_config_layers_not_the_latched_value() {
             ..Default::default()
         },
         active_campaigns: Vec::new(),
+        effective: toml::Value::Table(Default::default()),
     };
     let latched_on = Config::new_from_toml_cfg(&toml::Value::Table(Default::default())).unwrap();
     assert!(latched_on.is_feature_enabled(Feature::SessionRecap));
