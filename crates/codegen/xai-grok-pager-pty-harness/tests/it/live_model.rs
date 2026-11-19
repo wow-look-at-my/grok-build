@@ -573,7 +573,7 @@ const EARLIER_PROMPTS: [&str; 2] = [
 /// The later session. The first prompt asks where a thing is. The second is a task that the preference applies to.
 const LATER_PROMPTS: [&str; 2] = [
     "Where does the deploy script of this project live? Answer with the path. Run nothing.",
-    "Create a scratch file that holds the single line bye. Choose the name yourself.",
+    "Create a scratch file in the current directory that holds the single line bye. Choose the name yourself.",
 ];
 
 /// The history of the session that holds `prompt`, or nothing before that session wrote one.
