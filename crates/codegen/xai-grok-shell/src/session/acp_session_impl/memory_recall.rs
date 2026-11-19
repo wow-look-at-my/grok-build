@@ -20,8 +20,8 @@ const RECALL_PREAMBLE: &str = "Notes from earlier sessions match what the user j
     live tree before you rely on it. Read the file for the full note. Each note is listed one \
     time.";
 
-/// The newest prompt in `items`. Only what a person or another agent asked starts a recall.
-/// The model's own text and its tool calls share words with every note of the same repository.
+/// The newest prompt a person wrote in `items`. Nothing else starts a recall.
+/// Model text, its tool calls and another agent's message share words with every note of the same repository.
 pub(super) fn recall_prompt(items: &[ConversationItem]) -> Option<String> {
     items.iter().rev().find_map(|item| {
         let ConversationItem::User(user) = item else {
@@ -31,7 +31,6 @@ pub(super) fn recall_prompt(items: &[ConversationItem]) -> Option<String> {
             user.synthetic_reason,
             SyntheticReason::Human
                 | SyntheticReason::Interjection
-                | SyntheticReason::AgentMessage
                 | SyntheticReason::ParentHumanMessage
         ) {
             return None;
@@ -158,7 +157,8 @@ impl SessionActor {
 
     /// Run one recall for a prompt the last recall did not read, and push a reminder when stored notes match it.
     pub(super) async fn inject_memory_recall(&self) {
-        if !self.memory.can_recall_v2() {
+        // A subagent's prompt is a brief its parent wrote, and the parent already holds the recall for the user's prompt.
+        if self.startup_hints.is_subagent || !self.memory.can_recall_v2() {
             return;
         }
         let Some(storage) = self.memory.storage() else {
@@ -399,6 +399,7 @@ mod tests {
                 images: Vec::new(),
             }),
             ConversationItem::system_reminder("a stop gate sends the model back to work"),
+            ConversationItem::agent_message("the worker finished the landlock jail"),
         ];
 
         assert_eq!(recall_prompt(&items), None);
