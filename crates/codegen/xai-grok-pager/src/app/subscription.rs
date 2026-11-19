@@ -299,62 +299,33 @@ mod tests {
         );
     }
 
+    /// This build has no paywall: a gate is dropped for every kind of session.
     #[test]
-    fn impose_gate_defers_for_consumer_session() {
-        let mut app = test_app();
-        let effs = app.impose_gate(watch_gate());
+    fn impose_gate_never_shows_a_gate() {
+        let mut consumer = test_app();
+        assert!(consumer.impose_gate(watch_gate()).is_empty());
+        assert!(consumer.has_access());
+        assert!(consumer.pending_gate_verification.is_none());
 
-        assert!(
-            app.has_access(),
-            "deferred gate must not render as a paywall"
-        );
-        assert!(app.pending_gate_verification.is_some());
-        assert!(
-            !app.subscription_check_allowed(),
-            "the deferral's own check counts for the debounce"
-        );
-        assert!(matches!(
-            effs.as_slice(),
-            [
-                Effect::CheckSubscription {
-                    verify: Some(check_gen)
-                },
-                Effect::ScheduleGateVerifyTimeout {
-                    generation: timeout_gen
-                }
-            ] if *check_gen == app.gate_verify_gen && *timeout_gen == app.gate_verify_gen
-        ));
+        let mut team = test_app();
+        team.team_name = Some("Acme Corp".into());
+        assert!(team.impose_gate(watch_gate()).is_empty());
+        assert!(team.has_access());
+
+        let mut api_key = test_app();
+        api_key.is_api_key_auth = true;
+        assert!(api_key.impose_gate(watch_gate()).is_empty());
+        assert!(api_key.has_access());
     }
 
     #[test]
-    fn impose_gate_direct_for_non_consumer_and_already_gated() {
-        // Team session: no live verification possible, so the gate shows directly
+    fn a_gate_in_the_auth_meta_is_dropped() {
         let mut app = test_app();
-        app.team_name = Some("Acme Corp".into());
-        assert!(app.impose_gate(watch_gate()).is_empty());
-        assert!(!app.has_access());
-        assert!(app.pending_gate_verification.is_none());
-
-        // Already gated: update the copy only.
-        let mut gated = test_app();
-        gated.gate = Some(watch_gate());
-        let new_copy = xai_grok_login::GateInfo {
-            message: "New copy".into(),
-            url: None,
-            label: None,
-        };
-        assert!(gated.impose_gate(new_copy).is_empty());
-        assert_eq!(gated.gate.as_ref().unwrap().message, "New copy");
-    }
-
-    #[test]
-    fn impose_gate_bumps_generation_each_time() {
-        let mut app = test_app();
-        let _ = app.impose_gate(watch_gate());
-        let first = app.gate_verify_gen;
-        app.pending_gate_verification = None; // As if a check resolved the deferral
-        let _ = app.impose_gate(watch_gate());
-        assert_eq!(app.gate_verify_gen, first + 1, "each deferral re-stamps");
+        app.apply_auth_meta(&xai_grok_login::AuthMeta {
+            gate: Some(watch_gate()),
+            ..xai_grok_login::AuthMeta::default()
+        });
+        assert!(app.has_access());
     }
 
     #[test]
@@ -379,36 +350,12 @@ mod tests {
     }
 
     #[test]
-    fn lift_gate_counts_pending_deferral_as_blocked() {
+    fn promote_deferred_gate_shows_nothing() {
         let mut app = test_app();
-        let _ = app.impose_gate(watch_gate());
-
-        let effs = app.lift_gate();
-        assert!(app.pending_gate_verification.is_none());
-        assert!(
-            matches!(
-                effs.as_slice(),
-                [Effect::CheckSubscription { verify: None }]
-            ),
-            "a confirmed lift of a pending gate must still refresh the JWT"
-        );
-    }
-
-    #[test]
-    fn promote_deferred_gate_is_generation_scoped() {
-        let mut app = test_app();
-        let _ = app.impose_gate(watch_gate());
-        let stale_gen = app.gate_verify_gen;
-        let _ = app.impose_gate(watch_gate());
-
-        app.promote_deferred_gate(stale_gen, "verify_timeout");
-        assert!(
-            app.has_access(),
-            "stale generation must not promote the newer deferral"
-        );
-
+        app.pending_gate_verification = Some(watch_gate());
         app.promote_deferred_gate(app.gate_verify_gen, "verify_timeout");
-        assert!(!app.has_access(), "current generation promotes");
+        assert!(app.has_access());
+        assert!(app.pending_gate_verification.is_none());
     }
 
     #[test]
