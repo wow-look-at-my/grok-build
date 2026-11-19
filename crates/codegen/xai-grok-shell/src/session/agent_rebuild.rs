@@ -87,6 +87,20 @@ impl MemoryV2AccessSlot {
         *self.0.lock() = access;
     }
 }
+/// The live compaction policy. A config reload replaces it, so a rebuild keeps the reloaded flags.
+pub(crate) struct CompactionPolicySlot(parking_lot::Mutex<CompactionPolicy>);
+impl CompactionPolicySlot {
+    pub(crate) fn new(policy: CompactionPolicy) -> Self {
+        Self(parking_lot::Mutex::new(policy))
+    }
+    pub(crate) fn get(&self) -> CompactionPolicy {
+        self.0.lock().clone()
+    }
+    /// Run `edit` on the stored policy.
+    pub(crate) fn update(&self, edit: impl FnOnce(&mut CompactionPolicy)) {
+        edit(&mut self.0.lock());
+    }
+}
 /// Cached recipe for building a session-scoped [`Agent`].
 /// See module docs for the invariant: this is the only construction site for `Agent` in the shell crate.
 /// Cloning is intentionally not derived; the spec lives behind an [`Arc`] and is shared by cloning that `Arc`.
@@ -100,7 +114,7 @@ pub(crate) struct AgentRebuildSpec {
     pub models_manager: crate::agent::remote_config::ModelsManager,
     pub task_model_policy: TaskModelPolicyInputs,
     pub task_model_selection: LatchedTaskModelSelection,
-    pub compaction_policy: CompactionPolicy,
+    pub compaction_policy: CompactionPolicySlot,
     pub reminder_policy: ReminderPolicy,
     pub memory_enabled: bool,
     pub memory_global_path: Option<String>,
@@ -314,7 +328,7 @@ impl AgentRebuildSpec {
             tools_notification_handle.clone(),
         )
         .from_definition(definition)
-        .with_compaction_policy(compaction_policy.clone())
+        .with_compaction_policy(compaction_policy.get())
         .with_reminder_policy(reminder_policy.clone())
         .with_memory_enabled(*memory_enabled)
         .with_memory_paths(memory_global_path.clone(), memory_workspace_path.clone())
@@ -520,7 +534,7 @@ pub(crate) fn test_rebuild_spec_default() -> Arc<AgentRebuildSpec> {
             forked_selection: None,
         },
         task_model_selection: LatchedTaskModelSelection::default(),
-        compaction_policy: CompactionPolicy::default(),
+        compaction_policy: CompactionPolicySlot::new(CompactionPolicy::default()),
         reminder_policy: ReminderPolicy::default(),
         memory_enabled: false,
         memory_global_path: None,

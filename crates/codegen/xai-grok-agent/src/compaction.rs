@@ -14,7 +14,7 @@ pub struct CompactionPolicy {
 
     /// Two-pass compaction: when usage approaches the threshold, the earlier history is speculatively summarized in the background (pass 1).
     /// At compaction, that note and the recent tail are summarized together (pass 2).
-    /// Resolved from the `two_pass_compaction` config flag at session build; `false` keeps the legacy single-pass path.
+    /// Resolved from the `two_pass_compaction` config flag at session build and at each config reload;`false` keeps the legacy single-pass path.
     pub two_pass_enabled: bool,
 
     /// Compact at the first turn after every model change, whatever the context use.
