@@ -162,6 +162,237 @@ async fn observation_frontmatter_terms_are_searchable_but_bookkeeping_is_not() {
 }
 
 #[tokio::test]
+async fn an_observation_of_the_asking_session_is_never_returned() {
+    let fixture = fixture();
+    seed_topics(&fixture.workspace);
+    let path = write(
+        &fixture.workspace,
+        "observations/_inbox/obs.md",
+        &observation(
+            "Releases ship on Thursdays",
+            &["cadence", "weekly_train"],
+            &["shipday"],
+            None,
+        ),
+    );
+    let recall = fixture.recall(V2RecallConfig::default());
+    let text = "what is the cadence of the weekly train shipday";
+    let asked_by = |session_id| V2RecallQuery {
+        text,
+        focus: Some(text),
+        session_id: Some(session_id),
+        conversation_start: None,
+    };
+
+    // The observation fixture names this session as its source.
+    let own = recall
+        .recall(asked_by("sess-zebrafish-4471"), None, &HashSet::new())
+        .await
+        .unwrap();
+    assert!(
+        own.hits.is_empty(),
+        "a note captured from this conversation repeats it: {:?}",
+        own.hits
+    );
+
+    let other = recall
+        .recall(asked_by("sess-another"), None, &HashSet::new())
+        .await
+        .unwrap();
+    assert_eq!(top(&other).path, path);
+}
+
+#[tokio::test]
+async fn a_topic_written_since_the_conversation_began_is_never_returned() {
+    let fixture = fixture();
+    seed_topics(&fixture.workspace);
+    let text = "keep my trailing newline rule";
+    let asked_since = |conversation_start| V2RecallQuery {
+        text,
+        focus: Some(text),
+        session_id: Some("sess-asking"),
+        conversation_start: Some(conversation_start),
+    };
+    let recall = fixture.recall(V2RecallConfig::default());
+    let before_the_write = SystemTime::now() - Duration::from_secs(60);
+
+    // Consolidation writes this topic from the conversation's own observations. It names no session.
+    let path = write(
+        &fixture.workspace,
+        "topics/trailing-newline.md",
+        "# Trailing newline rule\nEvery text file ends with a trailing newline.\n",
+    );
+
+    let same_conversation = recall
+        .recall(asked_since(before_the_write), None, &HashSet::new())
+        .await
+        .unwrap();
+    assert!(
+        same_conversation.hits.is_empty(),
+        "the topic repeats what this conversation just said: {:?}",
+        same_conversation.hits
+    );
+
+    let later_conversation = recall
+        .recall(
+            asked_since(SystemTime::now() + Duration::from_secs(60)),
+            None,
+            &HashSet::new(),
+        )
+        .await
+        .unwrap();
+    assert_eq!(top(&later_conversation).path, path);
+}
+
+#[tokio::test]
+async fn words_that_only_the_body_shares_do_not_recall_a_note() {
+    let fixture = fixture();
+    seed_topics(&fixture.workspace);
+    let path = write(
+        &fixture.workspace,
+        "topics/fonts.md",
+        "# Glyph shaping\nThe harfbuzz shaper renders ligatures through the freetype rasterizer.\n",
+    );
+    let recall = fixture.recall(V2RecallConfig::default());
+
+    let body_only = lexical(&recall, "harfbuzz freetype rasterizer ligatures").await;
+    assert!(body_only.hits.is_empty(), "{:?}", body_only.hits);
+
+    let names_subject = lexical(&recall, "glyph shaping with harfbuzz").await;
+    assert_eq!(top(&names_subject).path, path);
+}
+
+/// Notes the way a repository's memory holds them: a title, headings, and facts in the body.
+fn seed_repository_notes(fixture: &Fixture) {
+    for (name, content) in [
+        (
+            "build",
+            "# Build\n\n## Prerequisites\nA Linux build needs mold and protoc. Install both before the first cargo check.\n\n\
+             ## Compile cache\nCI has no compile cache, so every job compiles the whole dependency graph.\n",
+        ),
+        (
+            "testing",
+            "# Testing\n\n## Integration tests\nThe integration tests of a crate build as one binary. Run them with nextest and select a test by module path.\n",
+        ),
+        (
+            "release",
+            "# Release\n\n## Version stamping\nThe release version is stamped at link time. The darwin binary is compiled on Linux and linked on macOS.\n",
+        ),
+        (
+            "sandbox",
+            "# Sandbox jail\n\n## Landlock\nThe jail denies every write but /dev/null. Landlock on Linux, sandbox-exec on macOS. Fix a failing write by adding the path to the allow list.\n",
+        ),
+    ] {
+        write(&fixture.workspace, &format!("topics/{name}.md"), content);
+    }
+    for (name, content) in [
+        (
+            "preferences",
+            "# Preferences\n\n## Code style\nThe user wants tabs for indentation and short comments in present tense. Rename a function only when asked.\n\n\
+             ## Workflow\nThe user wants a commit and a push after every change, and never a force push. Undo a change with a revert.\n",
+        ),
+        (
+            "git",
+            "# Git workflow\n\n## Branches\nOne branch for each session. Pull requests are squashed on merge. Run the checks before a push.\n",
+        ),
+    ] {
+        write(&fixture.global, &format!("topics/{name}.md"), content);
+    }
+}
+
+#[tokio::test]
+async fn everyday_prompts_recall_no_note() {
+    let fixture = fixture();
+    seed_repository_notes(&fixture);
+    let recall = fixture.recall(V2RecallConfig::default());
+
+    for prompt in [
+        "yes, go ahead",
+        "continue",
+        "why is this failing?",
+        "fix it and run it again",
+        "make it faster",
+        "undo that last change",
+        "what does this function do?",
+        "add a test for that function",
+        "rename this function to something better",
+        "ok, commit and push the change",
+        "fix the failing write in the parser",
+        "the binary crashes on Linux after the last change",
+    ] {
+        let outcome = lexical(&recall, prompt).await;
+        assert!(
+            outcome.hits.is_empty(),
+            "`{prompt}` names no note's subject, and recalled {:?}",
+            outcome
+                .hits
+                .iter()
+                .map(|hit| (&hit.title, &hit.matched_terms))
+                .collect::<Vec<_>>()
+        );
+    }
+}
+
+#[tokio::test]
+async fn a_prompt_that_names_a_notes_subject_recalls_that_note() {
+    let fixture = fixture();
+    seed_repository_notes(&fixture);
+    let recall = fixture.recall(V2RecallConfig::default());
+
+    for (prompt, file) in [
+        ("run the integration tests with nextest", "testing.md"),
+        ("the landlock sandbox denies my write", "sandbox.md"),
+        ("where is the release version stamped?", "release.md"),
+        (
+            "what is my preferred code style for indentation?",
+            "preferences.md",
+        ),
+    ] {
+        let outcome = lexical(&recall, prompt).await;
+        let first = outcome.hits.first().map(|hit| hit.path.clone());
+        assert!(
+            first.as_ref().is_some_and(|path| path.ends_with(file)),
+            "`{prompt}` must recall {file} first, got {:?}",
+            outcome.hits
+        );
+    }
+}
+
+#[tokio::test]
+async fn a_file_is_returned_one_time_for_a_conversation() {
+    let fixture = fixture();
+    seed_topics(&fixture.workspace);
+    let filler = "The mirror keeps one bucket for each region. ".repeat(30);
+    let path = write(
+        &fixture.workspace,
+        "topics/mirror.md",
+        &format!(
+            "# Sccache mirror\n\n## Upload\nThe zanzibar walrus uploads objects. {filler}\n\n\
+             ## Eviction\nThe quokka pelican names each object. {filler}\n"
+        ),
+    );
+    let recall = fixture.recall(V2RecallConfig {
+        max_hits: 8,
+        ..V2RecallConfig::default()
+    });
+    // Each section holds words of its own, so more than one chunk of the file qualifies.
+    let query = "sccache mirror zanzibar walrus quokka pelican";
+
+    let first = lexical(&recall, query).await;
+    assert!(first.corpus_chunks > 4, "the file must hold several chunks");
+    let from_file: Vec<&V2RecallHit> = first.hits.iter().filter(|hit| hit.path == path).collect();
+    assert_eq!(from_file.len(), 1, "{:?}", first.hits);
+
+    let seen: HashSet<String> = first.hits.iter().map(|hit| hit.key.clone()).collect();
+    let second = recall.recall(query, None, &seen).await.unwrap();
+    assert!(
+        second.hits.iter().all(|hit| hit.path != path),
+        "the first reminder named the file: {:?}",
+        second.hits
+    );
+}
+
+#[tokio::test]
 async fn observation_hit_has_statement_title_and_real_line_range() {
     let fixture = fixture();
     seed_topics(&fixture.workspace);
@@ -213,7 +444,7 @@ async fn snippet_is_cut_on_a_char_boundary() {
         ..V2RecallConfig::default()
     });
 
-    let outcome = lexical(&recall, "harfbuzz shaper").await;
+    let outcome = lexical(&recall, "glyphs harfbuzz shaper").await;
 
     assert_eq!(outcome.hits.len(), 1);
     assert_eq!(top(&outcome).snippet, "# Glyphs\nÆt…");
@@ -227,7 +458,7 @@ async fn seen_keys_are_skipped_without_using_up_max_hits() {
     write(
         &fixture.workspace,
         "topics/build2.md",
-        "# Remote cache\nThe sccache bucket shares artifacts; rustc upgrades invalidate it.\n",
+        "# Remote sccache\nThe sccache bucket shares artifacts; rustc upgrades invalidate it.\n",
     );
     let recall = fixture.recall(V2RecallConfig {
         max_hits: 1,
@@ -258,7 +489,7 @@ async fn edited_file_gets_a_new_key_and_deleted_file_leaves_the_corpus() {
     );
     let recall = fixture.recall(V2RecallConfig::default());
 
-    let before = lexical(&recall, "canary helm").await;
+    let before = lexical(&recall, "deploy canary helm").await;
     assert_eq!(before.hits.len(), 1);
     assert_eq!(before.corpus_chunks, 4);
 
@@ -267,13 +498,13 @@ async fn edited_file_gets_a_new_key_and_deleted_file_leaves_the_corpus() {
         "# Deploy\nThe blue green rollout now uses kustomize overlays and argocd.\n",
     )
     .unwrap();
-    let after = lexical(&recall, "kustomize argocd").await;
+    let after = lexical(&recall, "deploy kustomize argocd").await;
     assert_eq!(after.hits.len(), 1);
     assert_ne!(top(&after).key, top(&before).key);
-    assert!(lexical(&recall, "canary helm").await.hits.is_empty());
+    assert!(lexical(&recall, "deploy canary helm").await.hits.is_empty());
 
     std::fs::remove_file(&path).unwrap();
-    let gone = lexical(&recall, "kustomize argocd").await;
+    let gone = lexical(&recall, "deploy kustomize argocd").await;
     assert!(gone.hits.is_empty());
     assert_eq!(gone.corpus_chunks, 3);
 }
@@ -534,6 +765,124 @@ async fn failing_provider_falls_back_to_lexical_hits() {
     assert!(!top(&outcome).is_semantic);
 }
 
+/// Fails one request, by its position, and answers the others as `TestProvider` does.
+struct FlakyProvider {
+    inner: TestProvider,
+    requests: AtomicUsize,
+    failing_request: usize,
+}
+
+#[async_trait]
+impl crate::embedding::EmbeddingProvider for FlakyProvider {
+    async fn embed_batch(
+        &self,
+        texts: &[&str],
+    ) -> Result<Vec<Vec<f32>>, Box<dyn std::error::Error>> {
+        if self.requests.fetch_add(1, Ordering::SeqCst) + 1 == self.failing_request {
+            return Err("embedding service timed out".into());
+        }
+        self.inner.embed_batch(texts).await
+    }
+
+    fn model_name(&self) -> &str {
+        self.inner.model_name()
+    }
+
+    fn dimensions(&self) -> usize {
+        self.inner.dimensions()
+    }
+}
+
+#[tokio::test]
+async fn a_failed_request_keeps_the_vectors_of_the_requests_before_it() {
+    let fixture = fixture();
+    seed_topics(&fixture.workspace);
+    let path = write(
+        &fixture.global,
+        "topics/coast.md",
+        "# Lighthouse\nThe keeper trims the lamp wick nightly.\n",
+    );
+    let provider = FlakyProvider {
+        inner: TestProvider {
+            texts: AtomicUsize::new(0),
+        },
+        requests: AtomicUsize::new(0),
+        failing_request: 2,
+    };
+    let config = V2RecallConfig::default();
+    let batch = config.embed_batch_size;
+    let recall = fixture.recall(config);
+    let query = "a beacon guiding ships";
+
+    let failed = recall
+        .recall(query, Some(&provider), &HashSet::new())
+        .await
+        .unwrap();
+
+    assert!(
+        matches!(failed.mode, V2RecallMode::EmbeddingFailed(_)),
+        "{:?}",
+        failed.mode
+    );
+    assert_eq!(provider.inner.texts.load(Ordering::SeqCst), batch);
+
+    let outcome = recall
+        .recall(query, Some(&provider), &HashSet::new())
+        .await
+        .unwrap();
+
+    assert_eq!(outcome.mode, V2RecallMode::Hybrid);
+    assert_eq!(top(&outcome).path, path);
+    assert!(top(&outcome).is_semantic);
+    // The second recall embeds only what the first one did not store.
+    assert_eq!(
+        provider.inner.texts.load(Ordering::SeqCst),
+        BASELINE_NOTES.len() + 4 + 1
+    );
+}
+
+#[tokio::test]
+async fn a_model_slower_than_the_time_budget_finishes_over_several_recalls() {
+    let fixture = fixture();
+    seed_topics(&fixture.workspace);
+    let path = write(
+        &fixture.global,
+        "topics/coast.md",
+        "# Lighthouse\nThe keeper trims the lamp wick nightly.\n",
+    );
+    let provider = TestProvider {
+        texts: AtomicUsize::new(0),
+    };
+    let config = V2RecallConfig {
+        embed_time_budget: Duration::ZERO,
+        ..V2RecallConfig::default()
+    };
+    let batch = config.embed_batch_size;
+    let recall = fixture.recall(config);
+    let query = "a beacon guiding ships";
+
+    // One request for each recall. No chunk is judged before the baseline has its vectors.
+    let baseline_recalls = BASELINE_NOTES.len().div_ceil(batch);
+    for done in 1..=baseline_recalls {
+        let outcome = recall
+            .recall(query, Some(&provider), &HashSet::new())
+            .await
+            .unwrap();
+        assert_eq!(outcome.mode, V2RecallMode::Hybrid);
+        assert!(outcome.hits.is_empty(), "{:?}", outcome.hits);
+        let embedded = provider.texts.load(Ordering::SeqCst);
+        assert!(embedded >= (done * batch).min(BASELINE_NOTES.len()));
+    }
+
+    let outcome = recall
+        .recall(query, Some(&provider), &HashSet::new())
+        .await
+        .unwrap();
+
+    assert_eq!(top(&outcome).path, path);
+    assert!(top(&outcome).is_semantic);
+}
+
 #[tokio::test]
 async fn both_scopes_are_searched() {
     let fixture = fixture();
@@ -545,7 +894,7 @@ async fn both_scopes_are_searched() {
     );
     let recall = fixture.recall(V2RecallConfig::default());
 
-    let global = lexical(&recall, "tabs makefiles").await;
+    let global = lexical(&recall, "style tabs makefiles").await;
     assert_eq!(global.corpus_chunks, 4);
     assert_eq!(global.hits.len(), 1);
     assert_eq!(top(&global).scope, V2MemoryScope::Global);
@@ -622,6 +971,7 @@ async fn a_long_query_matches_on_its_most_distinctive_terms() {
 
     let every_term = fixture.recall(V2RecallConfig {
         max_query_terms: usize::MAX,
+        max_hits: 8,
         ..V2RecallConfig::default()
     });
     assert_eq!(

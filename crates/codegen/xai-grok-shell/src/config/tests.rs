@@ -245,6 +245,33 @@ fn memory_config_toml_sentinels_beat_remote_values() {
     });
 }
 #[test]
+fn an_embedding_endpoint_of_its_own_asks_for_no_size_unless_one_is_set() {
+    without_grok_memory(|| {
+        let embedding = |toml: &str| {
+            let config: toml::Value = toml::from_str(toml).unwrap();
+            MemoryConfig::resolve(false, false, &config, None).embedding
+        };
+
+        let chat_endpoint = embedding("[memory.embedding]\nmodel = \"embed\"");
+        assert_eq!(chat_endpoint.base_url, None);
+        assert!(chat_endpoint.request_dimensions);
+
+        let own = embedding(
+            "[memory.embedding]\nmodel = \"nomic-embed-text\"\nbase_url = \"http://127.0.0.1:11434/v1/\"\napi_key_env = \" EMBED_KEY \"",
+        );
+        assert_eq!(own.base_url.as_deref(), Some("http://127.0.0.1:11434/v1"));
+        assert_eq!(own.api_key_env.as_deref(), Some("EMBED_KEY"));
+        assert!(!own.request_dimensions);
+
+        let own_sized = embedding(
+            "[memory.embedding]\nmodel = \"embed\"\nbase_url = \"http://127.0.0.1:11434/v1\"\ndimensions = 256",
+        );
+        assert!(own_sized.request_dimensions);
+        assert_eq!(own_sized.dimensions, 256);
+    });
+}
+
+#[test]
 fn memory_config_toml_disabled() {
     without_grok_memory(|| {
         let config: toml::Value = toml::from_str("[memory]\nenabled = false").unwrap();

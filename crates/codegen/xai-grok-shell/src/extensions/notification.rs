@@ -639,6 +639,8 @@ pub enum SessionUpdate {
     },
     /// Recall found stored memory notes that match the conversation and showed them to the model.
     MemoryRecalled { notes: Vec<MemoryRecalledNote> },
+    /// The embedding lookup cannot run, so recall matches on words only. Sent one time for a session.
+    MemoryRecallDegraded { reason: String },
     /// A memory model call ended. Carries the memory totals and the new session total.
     MemoryCost {
         totals: MemoryCostTotals,
@@ -2308,6 +2310,17 @@ mod tests {
         };
         let json = serde_json::to_value(&update).unwrap();
         assert_eq!(json["sessionUpdate"], "memory_recalled");
+        let parsed: SessionUpdate = serde_json::from_value(json).unwrap();
+        assert_eq!(update, parsed);
+    }
+
+    #[test]
+    fn memory_recall_degraded_roundtrips() {
+        let update = SessionUpdate::MemoryRecallDegraded {
+            reason: "embedding API error 404".into(),
+        };
+        let json = serde_json::to_value(&update).unwrap();
+        assert_eq!(json["sessionUpdate"], "memory_recall_degraded");
         let parsed: SessionUpdate = serde_json::from_value(json).unwrap();
         assert_eq!(update, parsed);
     }

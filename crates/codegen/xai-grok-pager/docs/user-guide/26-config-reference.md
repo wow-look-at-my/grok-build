@@ -253,7 +253,7 @@ User-level configuration lives in `$GROK_HOME/config.json` (default `~/.grok/con
 | `memory.v2.file_writes_enabled` | `boolean` | — | `user` | Enables all memory-v2 file mutation; `false` fails closed before scaffold creation. Default: `true`. |
 | `memory.v2.job_retention_days` | `number` | — | `user` | Retains terminal memory-v2 capture-job metadata for this many days. Default: `14`. |
 | `memory.v2.manual_dream_enabled` | `boolean` | — | `user` | Enables explicitly requested memory-v2 Dream. Default: `true`. |
-| `memory.v2.recall_enabled` | `boolean` | — | `user` | Searches stored memory with each new stretch of conversation and shows the model the notes that match, each note one time. Uses word matching, plus vectors when `memory.embedding.model` is set. Default: `true`. |
+| `memory.v2.recall_enabled` | `boolean` | — | `user` | Searches stored memory with each prompt you send and shows the model the notes that match it, each memory file one time for a conversation. Uses word matching, plus vectors when `memory.embedding.model` is set. Default: `true`. |
 
 ### `models`
 

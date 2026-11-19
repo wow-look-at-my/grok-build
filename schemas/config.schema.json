@@ -4699,6 +4699,22 @@
 					"format": "uint",
 					"minimum": 0,
 					"default": null
+				},
+				"base_url": {
+					"type": [
+						"string",
+						"null"
+					],
+					"description": "OpenAI-style base URL for embedding calls. Unset sends them to the chat model's endpoint.",
+					"default": null
+				},
+				"api_key_env": {
+					"type": [
+						"string",
+						"null"
+					],
+					"description": "Name of the environment variable that holds the key for `base_url`.",
+					"default": null
 				}
 			}
 		},
@@ -4985,7 +5001,7 @@
 						"boolean",
 						"null"
 					],
-					"description": "Search stored memory with each new stretch of conversation and show the model the notes that match.",
+					"description": "Search stored memory with each prompt the user sends and show the model the notes that match it.",
 					"default": null
 				},
 				"file_writes_enabled": {
