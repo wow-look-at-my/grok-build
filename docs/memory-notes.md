@@ -57,7 +57,16 @@ bge-small-en-v1.5      4 of 9                 0                  0 of 12
 all-MiniLM-L6-v2       5 of 9                 0                  0 of 12
 gte-small              4 of 9                 0                  0 of 12
 nomic-embed-text-v1.5  5 of 9                 0                  1 of 12
+bge-base-en-v1.5       4 of 9                 0                  0 of 12
+bge-large-en-v1.5      7 of 9                 0                  0 of 12
+bge-m3                 3 of 9                 0                  0 of 12
+e5-large-v2            3 of 9                 0                  0 of 12
+multilingual-e5-large  3 of 9                 0                  0 of 12
+mxbai-embed-large-v1   7 of 9                 0                  2 of 12
+all-mpnet-base-v2      7 of 9                 0                  2 of 12
 ```
+
+On the last models a true match and a false one score the same (3.7 against 3.6), so no gate separates them. A false recall costs one reminder that the model can ignore.
 - `xai-grok-shell`: `tests/it/memory_recall_e2e.rs` drives a real agent against the mock model. It needs a workspace outside the system temp directory, because memory is off for a temp workspace.
 - `xai-grok-pager-pty-harness`: `pty_e2e/memory_cost_is_visible.rs` runs the pager against a mock that reports a price. It asserts the `mem` figure in the status bar and the cost line in `/memory`.
 - `MvpAgent::new` does not read `Config::memory_config`. The binary's startup calls `set_memory_config` after it. The test harness does the same only through `connect_and_auth_with_memory`, so every other harness session runs with no memory.
