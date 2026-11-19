@@ -219,6 +219,102 @@ async fn words_that_only_the_body_shares_do_not_recall_a_note() {
     assert_eq!(top(&names_subject).path, path);
 }
 
+/// Notes the way a repository's memory holds them: a title, headings, and facts in the body.
+fn seed_repository_notes(fixture: &Fixture) {
+    for (name, content) in [
+        (
+            "build",
+            "# Build\n\n## Prerequisites\nA Linux build needs mold and protoc. Install both before the first cargo check.\n\n\
+             ## Compile cache\nCI has no compile cache, so every job compiles the whole dependency graph.\n",
+        ),
+        (
+            "testing",
+            "# Testing\n\n## Integration tests\nThe integration tests of a crate build as one binary. Run them with nextest and select a test by module path.\n",
+        ),
+        (
+            "release",
+            "# Release\n\n## Version stamping\nThe release version is stamped at link time. The darwin binary is compiled on Linux and linked on macOS.\n",
+        ),
+        (
+            "sandbox",
+            "# Sandbox jail\n\n## Landlock\nThe jail denies every write but /dev/null. Landlock on Linux, sandbox-exec on macOS. Fix a failing write by adding the path to the allow list.\n",
+        ),
+    ] {
+        write(&fixture.workspace, &format!("topics/{name}.md"), content);
+    }
+    for (name, content) in [
+        (
+            "preferences",
+            "# Preferences\n\n## Code style\nThe user wants tabs for indentation and short comments in present tense. Rename a function only when asked.\n\n\
+             ## Workflow\nThe user wants a commit and a push after every change, and never a force push. Undo a change with a revert.\n",
+        ),
+        (
+            "git",
+            "# Git workflow\n\n## Branches\nOne branch for each session. Pull requests are squashed on merge. Run the checks before a push.\n",
+        ),
+    ] {
+        write(&fixture.global, &format!("topics/{name}.md"), content);
+    }
+}
+
+#[tokio::test]
+async fn everyday_prompts_recall_no_note() {
+    let fixture = fixture();
+    seed_repository_notes(&fixture);
+    let recall = fixture.recall(V2RecallConfig::default());
+
+    for prompt in [
+        "yes, go ahead",
+        "continue",
+        "why is this failing?",
+        "fix it and run it again",
+        "make it faster",
+        "undo that last change",
+        "what does this function do?",
+        "add a test for that function",
+        "rename this function to something better",
+        "ok, commit and push the change",
+        "fix the failing write in the parser",
+        "the binary crashes on Linux after the last change",
+    ] {
+        let outcome = lexical(&recall, prompt).await;
+        assert!(
+            outcome.hits.is_empty(),
+            "`{prompt}` names no note's subject, and recalled {:?}",
+            outcome
+                .hits
+                .iter()
+                .map(|hit| (&hit.title, &hit.matched_terms))
+                .collect::<Vec<_>>()
+        );
+    }
+}
+
+#[tokio::test]
+async fn a_prompt_that_names_a_notes_subject_recalls_that_note() {
+    let fixture = fixture();
+    seed_repository_notes(&fixture);
+    let recall = fixture.recall(V2RecallConfig::default());
+
+    for (prompt, file) in [
+        ("run the integration tests with nextest", "testing.md"),
+        ("the landlock sandbox denies my write", "sandbox.md"),
+        ("where is the release version stamped?", "release.md"),
+        (
+            "what is my preferred code style for indentation?",
+            "preferences.md",
+        ),
+    ] {
+        let outcome = lexical(&recall, prompt).await;
+        let first = outcome.hits.first().map(|hit| hit.path.clone());
+        assert!(
+            first.as_ref().is_some_and(|path| path.ends_with(file)),
+            "`{prompt}` must recall {file} first, got {:?}",
+            outcome.hits
+        );
+    }
+}
+
 #[tokio::test]
 async fn a_file_is_returned_one_time_for_a_conversation() {
     let fixture = fixture();
