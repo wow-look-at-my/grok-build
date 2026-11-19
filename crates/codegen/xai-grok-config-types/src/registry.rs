@@ -271,6 +271,7 @@ pub const FEATURES: &[FeatureSpec] = &[
         env: "GROK_COMPACT_ON_MODEL_SWITCH",
         default_enabled: false,
         remote: None,
+        capability: None,
     },
     FeatureSpec {
         id: Feature::BackendTools,
