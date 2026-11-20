@@ -515,7 +515,8 @@ const MEMORY_PROMPTS: [&str; 5] = [
 /// The topic the session stores next to the release note. No prompt is about it.
 const EDITOR_NOTE: &str = "files.md";
 
-/// The observations and topics the session itself wrote under `grok_home`.
+/// The observations and topics the session itself wrote under `grok_home`. A Dream moves the observations it
+/// consumed to `archive/`, so a path there is capture output and a path in `topics/` is Dream output.
 fn notes_written_by_the_session(grok_home: &Path) -> Vec<PathBuf> {
     let mut found = Vec::new();
     let mut pending = vec![grok_home.join("memory-v2")];
@@ -525,7 +526,9 @@ fn notes_written_by_the_session(grok_home: &Path) -> Vec<PathBuf> {
             let text = path.to_string_lossy().into_owned();
             if path.is_dir() {
                 pending.push(path);
-            } else if (text.contains("/observations/") || text.contains("/topics/"))
+            } else if (text.contains("/observations/")
+                || text.contains("/topics/")
+                || text.contains("/archive/"))
                 && text.ends_with(".md")
                 && !text.ends_with(RELEASE_NOTE)
                 && !text.ends_with(EDITOR_NOTE)
