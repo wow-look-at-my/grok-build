@@ -394,8 +394,9 @@ const EXTRACTION_SYSTEM_PROMPT: &str = "You maintain the long-term memory of a c
     Do not record secrets or credentials, a log of what this turn did, the progress of the \
     current task, or guesses. A limit that the user set for this one request (\"do not run it \
     now\", \"leave that file alone this time\") is not a preference and is not a fact: do not \
-    record it, also not as a clause, a note or a reason inside another observation. Record \
-    the other fact without it. Do not repeat a fact that `recorded_memory_index` already lists. \
+    record it, also not as a clause, a note or a reason inside another observation. Put each \
+    such limit in `request_only_limits`, which nothing stores, and record the other fact \
+    without it. Do not repeat a fact that `recorded_memory_index` already lists. \
     When the turn changes or contradicts a listed fact, record the new fact and name what it \
     replaces. \
     The user may have stopped the turn before it finished: treat a partial answer or \

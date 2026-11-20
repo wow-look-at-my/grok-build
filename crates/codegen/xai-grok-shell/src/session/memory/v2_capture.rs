@@ -11,7 +11,7 @@ use xai_grok_memory::{
     V2CaptureError,
 };
 
-pub(crate) const PROMPT_VERSION: &str = "memory-v2-capture-4";
+pub(crate) const PROMPT_VERSION: &str = "memory-v2-capture-5";
 pub(crate) const FLUSH_TIMEOUT: std::time::Duration = std::time::Duration::from_secs(4 * 60);
 
 #[derive(Debug, Clone, Copy, PartialEq, Eq)]
@@ -72,6 +72,10 @@ pub(crate) fn missing_range(
 struct ModelOutcome {
     outcome: ModelOutcomeKind,
     observations: Option<Vec<ModelObservation>>,
+    /// Limits the user set for one request. Nothing stores them.
+    #[serde(default)]
+    #[allow(dead_code)]
+    request_only_limits: Vec<String>,
 }
 
 #[derive(Deserialize)]
@@ -274,7 +278,7 @@ pub(crate) fn extraction_schema() -> serde_json::Value {
     serde_json::json!({
         "type": "object",
         "additionalProperties": false,
-        "required": ["outcome", "observations"],
+        "required": ["outcome", "observations", "request_only_limits"],
         "properties": {
             "outcome": { "type": "string", "enum": ["noop", "observations"] },
             "observations": {
@@ -293,7 +297,8 @@ pub(crate) fn extraction_schema() -> serde_json::Value {
                         "body": { "type": ["string", "null"] }
                     }
                 }
-            }
+            },
+            "request_only_limits": { "type": "array", "items": { "type": "string" } }
         }
     })
 }
@@ -309,7 +314,7 @@ mod tests {
         let mut expected = serde_json::json!({
             "type": "object",
             "additionalProperties": false,
-            "required": ["outcome", "observations"],
+            "required": ["outcome", "observations", "request_only_limits"],
             "properties": {
                 "outcome": { "type": "string", "enum": ["noop", "observations"] },
                 "observations": {
@@ -328,7 +333,8 @@ mod tests {
                             "body": { "type": ["string", "null"] }
                         }
                     }
-                }
+                },
+                "request_only_limits": { "type": "array", "items": { "type": "string" } }
             }
         });
         expected["properties"]["observations"]["items"]["properties"]["statement"]["description"] =
@@ -338,6 +344,23 @@ mod tests {
             &extraction_schema(),
         );
         assert_eq!(sent, expected);
+    }
+
+    /// A limit for one request goes to `request_only_limits`, and nothing in the outcome keeps it.
+    #[test]
+    fn request_only_limits_are_dropped() {
+        let output = r#"{"outcome":"observations","request_only_limits":["do not create or run the deploy script"],
+            "observations":[{"type":"reference","scope":"workspace","topic_hint":"deploy",
+            "statement":"The deploy script lives at tools/ship/quokka.sh.","keywords":["deploy"],"aliases":[],"body":null}]}"#;
+        let outcome = parse_scoped_model_outcome(output, "test", 1).unwrap();
+        assert_eq!(outcome.observation_count(), 1);
+        assert!(
+            !format!("{outcome:?}").contains("do not create"),
+            "{outcome:?}"
+        );
+
+        let without = r#"{"outcome":"noop","observations":[]}"#;
+        assert!(parse_scoped_model_outcome(without, "test", 1).is_ok());
     }
 
     #[test]
