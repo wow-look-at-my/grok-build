@@ -785,7 +785,7 @@ fn live_a_note_is_recalled_again_after_a_compaction() {
     harness.update(Duration::from_millis(500));
     harness.inject_keys(b"\r").expect("run /compact");
     harness
-        .wait_for_text("Context compacted", Duration::from_secs(300))
+        .wait_for_text("Compaction completed", Duration::from_secs(300))
         .unwrap_or_else(|e| panic!("compaction: {e:#}\nscreen:\n{}", harness.screen_contents()));
     harness.update(Duration::from_secs(2));
 
