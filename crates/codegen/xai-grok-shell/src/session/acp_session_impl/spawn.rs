@@ -943,7 +943,16 @@ pub(crate) async fn spawn_session_actor(
         .as_ref()
         .is_some_and(|mc| mc.root_dir_override.is_none() && mc.v2.can_run_maintenance());
     let mut memory_v2_access = None;
-    // Recall adds vectors only when an embedding model is configured. Without one it matches words.
+    // With no embedding model in the config, recall takes one from a configured local runtime.
+    let recall_auto_embedding = memory_config
+        .as_ref()
+        .filter(|config| config.mode.is_v2() && config.v2.can_recall())
+        .filter(|config| config.embedding.model.as_ref().is_none_or(String::is_empty))
+        .map(|_| crate::session::memory_state::AutoEmbedding {
+            auth_manager: auth_manager.clone(),
+            api_key_provider: api_key_provider.clone(),
+            usage_sink: crate::session::billed_client::session_usage_sink(&chat_state_handle),
+        });
     let recall_embedding = memory_config
         .as_ref()
         .filter(|config| config.mode.is_v2() && config.v2.can_recall())
@@ -1956,6 +1965,7 @@ pub(crate) async fn spawn_session_actor(
             token_totals: Default::default(),
             recall: crate::session::memory_state::SessionRecall {
                 embedding: recall_embedding,
+                auto_embedding: recall_auto_embedding,
                 ..Default::default()
             },
         },
@@ -2976,8 +2986,7 @@ impl crate::session::mcp_restart::RestartActions for SessionRestartActions {
             .end_restart(server);
     }
 }
-/// The key sent to an embedding endpoint that names no `api_key_env`. A local runtime reads none.
-const KEYLESS_EMBEDDING_KEY: &str = "none";
+use crate::session::memory_state::KEYLESS_EMBEDDING_KEY;
 
 /// Where embedding calls go, and with which key. `[memory.embedding].base_url` names its own
 /// endpoint and takes its key from `api_key_env`. The chat model's key never goes there.

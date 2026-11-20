@@ -83,6 +83,13 @@ const ALL_SETTINGS_EXERCISED: &[&str] = &[
     "contextual_hints.ssh_wrap",
     // The "Slow output" group; its Int children are listed above.
     "output_rate_floor",
+    // The Memory group and the rows of its sub-sheet.
+    "memory",
+    "memory.v2.recall_enabled",
+    "memory.embedding.model",
+    "memory.embedding.base_url",
+    "memory.embedding.api_key_env",
+    "memory.embedding.dimensions",
 ];
 
 #[test]
@@ -801,6 +808,96 @@ fn mouse_click_on_slow_output_group_opens_a_child_stepper() {
         s.mode(),
         SettingsModalMode::PickingGroup { child_idx: 3, .. }
     ));
+}
+
+/// The Memory group: Enter opens the sub-sheet on the recall toggle. Space flips
+/// it through the generic memory setter, and a String child opens its editor.
+#[test]
+fn enter_on_memory_group_opens_sub_sheet_and_edits_children() {
+    let mut s = make_state();
+    navigate_to(&mut s, "memory");
+
+    let out = handle_settings_key(&mut s, &press(KeyCode::Enter));
+    assert!(matches!(out, SettingsKeyOutcome::Changed));
+    assert!(matches!(
+        s.mode(),
+        SettingsModalMode::PickingGroup { child_idx: 0, .. }
+    ));
+
+    // The first child: recall. Default ON, so Space toggles it off in place.
+    let out = handle_settings_key(&mut s, &press(KeyCode::Char(' ')));
+    match out {
+        SettingsKeyOutcome::Action(Action::SetMemorySetting { key, value }) => {
+            assert_eq!(key, "memory.v2.recall_enabled");
+            assert_eq!(value, SettingValue::Bool(false));
+        }
+        other => panic!("Space on recall must dispatch SetMemorySetting, got {other:?}"),
+    }
+    assert!(matches!(
+        s.mode(),
+        SettingsModalMode::PickingGroup { child_idx: 0, .. }
+    ));
+
+    // The next child is the embedding model, a String: Enter opens its editor.
+    let _ = handle_settings_key(&mut s, &press(KeyCode::Char('j')));
+    let out = handle_settings_key(&mut s, &press(KeyCode::Enter));
+    assert!(matches!(out, SettingsKeyOutcome::Changed));
+    assert!(
+        matches!(
+            s.mode(),
+            SettingsModalMode::EditingValue {
+                key: "memory.embedding.model"
+            }
+        ),
+        "Enter on the model child must open its editor, got {:?}",
+        s.mode(),
+    );
+}
+
+/// Mouse parity for Memory: clicking the group row's value column opens the
+/// sub-sheet, and clicking the recall child toggles it in one click.
+#[test]
+fn mouse_click_on_memory_group_opens_sub_sheet_and_toggles_child() {
+    let mut s = make_state();
+    synth_rects(&mut s);
+    let group_row = row_idx_for(&s, "memory") as u16;
+
+    let out = handle_settings_mouse(
+        &mut s,
+        MouseEventKind::Down(crossterm::event::MouseButton::Left),
+        72,
+        group_row,
+    );
+    assert!(matches!(out, SettingsKeyOutcome::Changed));
+    assert!(
+        matches!(s.mode(), SettingsModalMode::PickingGroup { .. }),
+        "click on the group value column must open the sub-sheet, got {:?}",
+        s.mode(),
+    );
+
+    // Synthesize child hit-rects (the renderer doesn't run in tests) and click
+    // the recall child, which toggles off in one click.
+    s.picker_choice_rects = (0..5)
+        .map(|i| Rect {
+            x: 0,
+            y: i as u16,
+            width: 80,
+            height: 1,
+        })
+        .collect();
+    let out = handle_settings_mouse(
+        &mut s,
+        MouseEventKind::Down(crossterm::event::MouseButton::Left),
+        1,
+        0,
+    );
+    match out {
+        SettingsKeyOutcome::Action(Action::SetMemorySetting { key, value }) => {
+            assert_eq!(key, "memory.v2.recall_enabled");
+            assert_eq!(value, SettingValue::Bool(false));
+        }
+        other => panic!("click on the recall child must toggle it off, got {other:?}"),
+    }
 }
 
 // ---------------------------------------------------------------------------
@@ -2042,6 +2139,7 @@ fn registry_kind_membership_through_pr_14() {
             "two_pass_compaction",
             "compact_on_model_switch",
             "session_recap",
+            "memory.v2.recall_enabled",
             "show_tips",
             "voice_keybind_enabled",
             // Per-tip contextual-hint children (hidden from the top-level list, toggled inside the group sub-sheet) are still Bool settings
@@ -2086,9 +2184,14 @@ fn registry_kind_membership_through_pr_14() {
 
     // `default_model` migrated to DynamicEnum and must not come back as String.
     let string_keys = by_kind.remove("String").unwrap_or_default();
-    assert!(
-        string_keys.is_empty(),
-        "String kind membership drift: {string_keys:?}",
+    assert_eq!(
+        string_keys,
+        vec![
+            "memory.embedding.api_key_env",
+            "memory.embedding.base_url",
+            "memory.embedding.model",
+        ],
+        "String kind membership drift",
     );
 
     // Every harness model slot is a DynamicEnum too.
@@ -2115,6 +2218,7 @@ fn registry_kind_membership_through_pr_14() {
         sorted_int,
         vec![
             "max_thoughts_width",
+            "memory.embedding.dimensions",
             "min_output_tokens_per_sec",
             "output_rate_max_retries",
             "output_rate_sustained_secs",
@@ -2132,7 +2236,7 @@ fn registry_kind_membership_through_pr_14() {
     group_keys.sort();
     assert_eq!(
         group_keys,
-        vec!["contextual_hints", "output_rate_floor"],
+        vec!["contextual_hints", "memory", "output_rate_floor"],
         "Group kind membership drift",
     );
 
@@ -2229,6 +2333,12 @@ fn defaults_round_trip_through_registry() {
             "two_pass_compaction" => SettingValue::Bool(true),
             "compact_on_model_switch" => SettingValue::Bool(false),
             "session_recap" => SettingValue::Bool(true),
+            // A session reads the memory rows when it starts.
+            "memory.v2.recall_enabled" => SettingValue::Bool(true),
+            "memory.embedding.model" => SettingValue::String(String::new()),
+            "memory.embedding.base_url" => SettingValue::String(String::new()),
+            "memory.embedding.api_key_env" => SettingValue::String(String::new()),
+            "memory.embedding.dimensions" => SettingValue::Int(0),
             "keep_text_selection" => SettingValue::Enum("flash"),
             "theme" => SettingValue::Enum("groknight"),
             "auto_dark_theme" => SettingValue::Enum("groknight"),

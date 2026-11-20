@@ -383,10 +383,12 @@ To edit memory from the shell, open the files in your editor directly -- for exa
 | Key | Default | Description |
 |-----|---------|-------------|
 | `provider` | `"api"` | Embedding provider (currently `"api"`) |
-| `model` | unset | Embedding model name. Unset or `""` uses full-text-only retrieval. |
+| `model` | unset | Embedding model name. Unset or `""` uses an embedding model that a configured Ollama or LM Studio provider lists. With none, recall matches words alone. |
 | `dimensions` | `1024` | Embedding vector dimensions. With `base_url` set, leave it unset to take the model's own size. |
 | `base_url` | unset | OpenAI-style base URL for embedding calls, for example a local runtime. Unset sends them to the chat model's endpoint. |
 | `api_key_env` | unset | Name of the environment variable that holds the key for `base_url`. Leave it unset for an endpoint that takes no key. |
+
+These options, and `memory.v2.recall_enabled`, are also in `/settings` → **Memory**. A change there applies after a restart. `/memory` shows what recall matches with in the running session: word matching alone, or the embedding model and its endpoint.
 
 The embedding endpoint is separate from the chat endpoint. A chat provider that speaks the Anthropic Messages API serves no embedding route, so point `base_url` at an endpoint that does. For a local Ollama:
 

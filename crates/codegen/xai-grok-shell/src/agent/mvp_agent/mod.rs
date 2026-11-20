@@ -805,6 +805,8 @@ pub struct MvpAgent {
     /// The detached initialize re-check, the awaited authenticate-path checks, and the pager's 5s poll can never run it concurrently.
     /// A second concurrent check would double IdP/HTTP traffic for the same verdict and race the gate writes. Cleared by [`TierRecheckInFlightGuard`] on exit (including panic/abort).
     tier_recheck_in_flight: Arc<std::sync::atomic::AtomicBool>,
+    /// Wakes [`MvpAgent::wait_for_tier_recheck`] when the claimed re-check ends.
+    tier_recheck_done: Arc<tokio::sync::Notify>,
     /// Local workspace ops, built lazily via [`Self::ensure_local_workspace_ops`].
     /// The agent never opens Computer Hub as a harness/client; remote cloud sandboxes are gateway-owned (`gateway_bridge` / `computer_sessions`).
     workspace_ops: RefCell<Option<xai_grok_workspace::WorkspaceOps>>,
@@ -1467,6 +1469,23 @@ impl MvpAgent {
             self.retry_subscription_check().await;
         }
     }
+    /// Wait until no tier re-check is in flight. A caller that lost the single-flight claim reads the gate
+    /// after this. Its answer follows a finished check and not one that is still on the wire.
+    pub(crate) async fn wait_for_tier_recheck(&self) {
+        loop {
+            let finished = self.tier_recheck_done.notified();
+            tokio::pin!(finished);
+            // Registered before the flag is read, so a re-check that ends in between still wakes this.
+            finished.as_mut().enable();
+            if !self
+                .tier_recheck_in_flight
+                .load(std::sync::atomic::Ordering::Acquire)
+            {
+                return;
+            }
+            finished.await;
+        }
+    }
     /// Single-shot subscription check called by the pager's "Check subscription" button (`example.invalid/auth/check_subscription`). The pager calls this every 5s while the paywall is shown, acting as the poller.
     /// Queries `/user?include=subscription` for the live tier from the subscription API. If a qualifying tier is found, does a best-effort JWT refresh and settings re-fetch, then lifts the gate.
     /// The match test is [`jwt_claim_matches_user_subscription_tier`]; a bare `refresh_chain` Ok or any older paid claim is not enough. Catalog refresh is not awaited so gate lift / auth meta are not blocked on `/v1/models`.
@@ -1482,6 +1501,7 @@ impl MvpAgent {
         }
         let _in_flight_guard = TierRecheckInFlightGuard {
             flag: self.tier_recheck_in_flight.clone(),
+            done: self.tier_recheck_done.clone(),
         };
         #[cfg(test)]
         self.tier_recheck_run_count.set(self.tier_recheck_run_count.get() + 1);
@@ -2299,10 +2319,12 @@ impl Drop for PostUnblockJwtRetryInFlightGuard {
 /// So the single-flight flag cannot wedge `true` for the rest of the process.
 struct TierRecheckInFlightGuard {
     flag: Arc<std::sync::atomic::AtomicBool>,
+    done: Arc<tokio::sync::Notify>,
 }
 impl Drop for TierRecheckInFlightGuard {
     fn drop(&mut self) {
         self.flag.store(false, std::sync::atomic::Ordering::Release);
+        self.done.notify_waiters();
     }
 }
 /// Background retry when post-unblock JWT lacks a tier claim that matches the live `/user` tier. Each attempt first re-checks the current JWT (the bounded refresh's detached mint may have landed a matching claim already).
@@ -2439,11 +2461,11 @@ fn spawn_post_unblock_jwt_and_catalog_retry(
         }
     });
 }
-/// `allow_access` from remote settings. Fail-open unless explicitly `false`.
+/// Always true: this build has no paywall. A remote `allow_access = false` blocks nothing.
 pub(crate) fn settings_allow_access(
-    rs: Option<&crate::util::config::RemoteSettings>,
+    _rs: Option<&crate::util::config::RemoteSettings>,
 ) -> bool {
-    !matches!(rs.and_then(|s| s.allow_access), Some(false))
+    true
 }
 mod replay;
 #[cfg(test)]

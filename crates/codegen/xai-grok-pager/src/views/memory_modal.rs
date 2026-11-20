@@ -265,6 +265,10 @@ pub struct MemoryModalState {
     pub status: Option<MemoryStatusLine>,
     /// What memory spent in this run, from the session's tracker when the modal opened.
     memory_cost: Option<MemoryCostTotals>,
+    /// What recall matches with, from the memory options the pager started with.
+    recall_line: Option<std::sync::Arc<str>>,
+    /// The embedding model the session's recall matches with, as the shell reports it.
+    recall_embedding: Option<xai_grok_shell::extensions::memory::MemoryRecallEmbedding>,
     /// Whether the modal is rendered in fullscreen mode (persisted to config).
     pub fullscreen: bool,
     /// Cached filtered indices.
@@ -315,6 +319,8 @@ impl MemoryModalState {
             pending_toggle: None,
             status: None,
             memory_cost: None,
+            recall_line: None,
+            recall_embedding: None,
             fullscreen: load_fullscreen_pref(),
             filtered_cache,
             content_cache: HashMap::new(),
@@ -347,6 +353,12 @@ impl MemoryModalState {
         self
     }
 
+    /// An empty line shows nothing.
+    pub fn with_recall_line(mut self, line: std::sync::Arc<str>) -> Self {
+        self.recall_line = (!line.is_empty()).then_some(line);
+        self
+    }
+
     #[cfg(test)]
     fn with_enabled(mut self, enabled: bool, reason: Option<MemoryDisabledReason>) -> Self {
         self.memory_enabled = enabled;
@@ -371,6 +383,7 @@ impl MemoryModalState {
         };
         self.capture_enabled = listing.capture_enabled;
         self.dream_enabled = listing.dream_enabled;
+        self.recall_embedding = listing.recall_embedding;
         self.entries = build_entries(listing.files);
         self.pending_delete = None;
         self.content_cache.clear();
@@ -1066,26 +1079,62 @@ fn memory_cost_line(totals: MemoryCostTotals) -> Option<String> {
     Some(format!("Memory cost: {total} ({})", parts.join(" · ")))
 }
 
-/// Draws the memory cost on the last row of `area`, over the full width, so the list column
-/// cannot cut it. Returns the rows it took.
+/// What recall matches with, for the memory browser. It names the embedding model when one is
+/// set, and the settings screen when none is.
+pub(crate) fn recall_status_line(
+    settings: &xai_grok_shell::util::config::MemorySettingsMirror,
+) -> String {
+    if settings.recall_enabled == Some(false) {
+        return "Recall: off. Turn it on in /settings \u{2192} Memory.".to_owned();
+    }
+    match settings.embedding_model.as_deref() {
+        Some(model) => {
+            let endpoint = settings
+                .embedding_base_url
+                .as_deref()
+                .unwrap_or("the chat endpoint");
+            recall_embedding_line(model, endpoint)
+        }
+        None => {
+            "Recall: words only. /settings \u{2192} Memory sets an embedding model for meaning."
+                .to_owned()
+        }
+    }
+}
+
+/// The endpoint is last, so a narrow modal cuts it and keeps the model.
+fn recall_embedding_line(model: &str, endpoint: &str) -> String {
+    format!("Recall: words and meaning \u{00B7} {model} \u{00B7} {endpoint}")
+}
+
+/// Draws the recall line and the memory cost on the last rows of `area`, over the full width,
+/// so the list column cannot cut them. Returns the rows it took.
 fn render_cost_line(buf: &mut Buffer, area: Rect, state: &MemoryModalState, theme: &Theme) -> u16 {
-    if area.height < 4 {
+    let recall = state
+        .recall_embedding
+        .as_ref()
+        .map(|embedding| recall_embedding_line(&embedding.model, &embedding.endpoint))
+        .or_else(|| state.recall_line.as_deref().map(str::to_owned))
+        .filter(|_| state.memory_enabled);
+    let cost = state.memory_cost.and_then(memory_cost_line);
+    let lines: Vec<String> = recall.into_iter().chain(cost).collect();
+    let rows = lines.len() as u16;
+    if area.height < rows + 3 {
         return 0;
     }
-    let Some(line) = state.memory_cost.and_then(memory_cost_line) else {
-        return 0;
-    };
-    let text = crate::render::line_utils::truncate_str(&line, area.width as usize);
-    buf.set_span(
-        area.x,
-        area.y + area.height - 1,
-        &Span::styled(
-            text.as_str(),
-            Style::default().fg(theme.gray_dim).bg(theme.bg_base),
-        ),
-        area.width,
-    );
-    1
+    for (index, line) in lines.iter().enumerate() {
+        let text = crate::render::line_utils::truncate_str(line, area.width as usize);
+        buf.set_span(
+            area.x,
+            area.y + area.height - rows + index as u16,
+            &Span::styled(
+                text.as_str(),
+                Style::default().fg(theme.gray_dim).bg(theme.bg_base),
+            ),
+            area.width,
+        );
+    }
+    rows
 }
 
 /// Returns the number of rows used (0 or 1).
@@ -2832,6 +2881,93 @@ mod tests {
     }
 
     #[test]
+    fn recall_line_names_what_recall_matches_with() {
+        use xai_grok_shell::util::config::MemorySettingsMirror;
+        assert_eq!(
+            recall_status_line(&MemorySettingsMirror::default()),
+            "Recall: words only. /settings \u{2192} Memory sets an embedding model for meaning."
+        );
+        let local = MemorySettingsMirror {
+            embedding_model: Some("nomic-embed-text".into()),
+            embedding_base_url: Some("http://localhost:11434/v1".into()),
+            ..MemorySettingsMirror::default()
+        };
+        assert_eq!(
+            recall_status_line(&local),
+            "Recall: words and meaning \u{00B7} nomic-embed-text \u{00B7} http://localhost:11434/v1"
+        );
+        let shared = MemorySettingsMirror {
+            embedding_model: Some("embed-large".into()),
+            ..MemorySettingsMirror::default()
+        };
+        assert_eq!(
+            recall_status_line(&shared),
+            "Recall: words and meaning \u{00B7} embed-large \u{00B7} the chat endpoint"
+        );
+        let off = MemorySettingsMirror {
+            recall_enabled: Some(false),
+            ..local
+        };
+        assert_eq!(
+            recall_status_line(&off),
+            "Recall: off. Turn it on in /settings \u{2192} Memory."
+        );
+    }
+
+    #[test]
+    fn the_embedding_model_the_shell_reports_wins_over_the_config_line() {
+        use xai_grok_shell::extensions::memory::MemoryRecallEmbedding;
+        let listing = MemoryListing {
+            files: Vec::new(),
+            enabled: true,
+            disabled_reason: None,
+            capture_enabled: true,
+            dream_enabled: true,
+            recall_embedding: Some(MemoryRecallEmbedding {
+                model: "nomic-embed-text:latest".into(),
+                endpoint: "http://localhost:11434/v1".into(),
+            }),
+        };
+        let mut state = MemoryModalState::from_listing(listing)
+            .with_recall_line("Recall: words only. Set an embedding model".into());
+        let text = render_full(&mut state);
+        assert!(
+            text.contains(
+                "Recall: words and meaning \u{00B7} nomic-embed-text:latest \u{00B7} http://localhost:11434/v1"
+            ),
+            "{text}"
+        );
+        assert!(!text.contains("Set an embedding model"), "{text}");
+    }
+
+    #[test]
+    fn recall_line_renders_above_the_memory_cost() {
+        let totals = MemoryCostTotals {
+            recall_usd_ticks: 11_000_000,
+            ..MemoryCostTotals::default()
+        };
+        let mut state = MemoryModalState::new(Vec::new())
+            .with_memory_cost(Some(totals))
+            .with_recall_line("Recall: word matching".into());
+        let text = render_full(&mut state);
+        let recall_row = text
+            .lines()
+            .position(|line| line.contains("Recall: word matching"));
+        let cost_row = text.lines().position(|line| line.contains("Memory cost:"));
+        assert!(
+            recall_row.is_some() && recall_row < cost_row,
+            "recall row {recall_row:?}, cost row {cost_row:?}\n{text}"
+        );
+
+        let mut none = MemoryModalState::new(Vec::new()).with_recall_line("".into());
+        assert!(!render_full(&mut none).contains("Recall:"));
+        let mut disabled =
+            MemoryModalState::new(Vec::new()).with_recall_line("Recall: word matching".into());
+        disabled.memory_enabled = false;
+        assert!(!render_full(&mut disabled).contains("Recall:"));
+    }
+
+    #[test]
     fn memory_cost_takes_the_full_width_under_the_two_panes() {
         let totals = MemoryCostTotals {
             capture_usd_ticks: 310_000_000,
@@ -3024,6 +3160,7 @@ mod tests {
                 disabled_reason: None,
                 capture_enabled: true,
                 dream_enabled: true,
+                recall_embedding: None,
             }),
         }));
         assert!(!state.shows_notice());
@@ -3112,6 +3249,7 @@ mod tests {
                 disabled_reason: Some(MemoryDisabledReason::SessionToggle),
                 capture_enabled: true,
                 dream_enabled: true,
+                recall_embedding: None,
             }),
         }));
         assert!(state.shows_notice());
