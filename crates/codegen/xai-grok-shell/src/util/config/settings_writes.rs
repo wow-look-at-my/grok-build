@@ -865,3 +865,184 @@ pub async fn set_cancel_subagents_on_turn_cancel(value: String) -> Result<()> {
 pub async fn set_show_tips(value: bool) -> Result<()> {
     update_config(|cfg| cfg.cli.show_tips = Some(value)).await
 }
+
+/// The largest embedding size the settings modal accepts.
+pub const MAX_MEMORY_EMBEDDING_DIMENSIONS: i64 = 65_536;
+
+/// A memory option that the settings modal edits.
+#[derive(Debug, Clone, Copy, PartialEq, Eq)]
+pub enum MemorySetting {
+    RecallEnabled,
+    EmbeddingModel,
+    EmbeddingBaseUrl,
+    EmbeddingApiKeyEnv,
+    EmbeddingDimensions,
+}
+
+impl MemorySetting {
+    pub const ALL: [MemorySetting; 5] = [
+        MemorySetting::RecallEnabled,
+        MemorySetting::EmbeddingModel,
+        MemorySetting::EmbeddingBaseUrl,
+        MemorySetting::EmbeddingApiKeyEnv,
+        MemorySetting::EmbeddingDimensions,
+    ];
+
+    /// The settings key, which is the JSON config path.
+    pub fn key(self) -> &'static str {
+        match self {
+            MemorySetting::RecallEnabled => "memory.v2.recall_enabled",
+            MemorySetting::EmbeddingModel => "memory.embedding.model",
+            MemorySetting::EmbeddingBaseUrl => "memory.embedding.base_url",
+            MemorySetting::EmbeddingApiKeyEnv => "memory.embedding.api_key_env",
+            MemorySetting::EmbeddingDimensions => "memory.embedding.dimensions",
+        }
+    }
+
+    pub fn from_key(key: &str) -> Option<Self> {
+        Self::ALL.into_iter().find(|setting| setting.key() == key)
+    }
+
+    /// The internal table path of the key, and the key name in the last table.
+    fn location(self) -> (&'static [&'static str], &'static str) {
+        match self {
+            MemorySetting::RecallEnabled => (&["memory_v2"], "recall_enabled"),
+            MemorySetting::EmbeddingModel => (&["memory", "embedding"], "model"),
+            MemorySetting::EmbeddingBaseUrl => (&["memory", "embedding"], "base_url"),
+            MemorySetting::EmbeddingApiKeyEnv => (&["memory", "embedding"], "api_key_env"),
+            MemorySetting::EmbeddingDimensions => (&["memory", "embedding"], "dimensions"),
+        }
+    }
+}
+
+/// A value for a [`MemorySetting`].
+#[derive(Debug, Clone, PartialEq, Eq)]
+pub enum MemorySettingValue {
+    Bool(bool),
+    Text(String),
+    Int(i64),
+}
+
+/// The memory options as the config holds them. `None` means the key is absent.
+#[derive(Debug, Clone, Default, PartialEq, Eq)]
+pub struct MemorySettingsMirror {
+    pub recall_enabled: Option<bool>,
+    pub embedding_model: Option<String>,
+    pub embedding_base_url: Option<String>,
+    pub embedding_api_key_env: Option<String>,
+    pub embedding_dimensions: Option<i64>,
+}
+
+/// Read the memory options from a config root in the internal layout.
+pub fn read_memory_settings(root: &toml::Value) -> MemorySettingsMirror {
+    let embedding = root
+        .get("memory")
+        .and_then(|memory| memory.get("embedding"));
+    let text = |key: &str| {
+        embedding
+            .and_then(|table| table.get(key))
+            .and_then(toml::Value::as_str)
+            .map(str::to_owned)
+    };
+    MemorySettingsMirror {
+        recall_enabled: root
+            .get("memory_v2")
+            .and_then(|table| table.get("recall_enabled"))
+            .and_then(toml::Value::as_bool),
+        embedding_model: text("model"),
+        embedding_base_url: text("base_url"),
+        embedding_api_key_env: text("api_key_env"),
+        embedding_dimensions: embedding
+            .and_then(|table| table.get("dimensions"))
+            .and_then(toml::Value::as_integer),
+    }
+}
+
+/// Persist a memory option in the user `config.json`.
+pub async fn set_memory_setting(setting: MemorySetting, value: MemorySettingValue) -> Result<()> {
+    rewrite_user_config_locked(setting.key(), move |path| {
+        write_memory_setting(
+            path,
+            setting,
+            &value,
+            crate::util::config::persist::atomic_write_follow_bound,
+        )
+    })
+    .await
+}
+
+pub(super) fn write_memory_setting(
+    path: &Path,
+    setting: MemorySetting,
+    value: &MemorySettingValue,
+    write: impl FnOnce(&Path, &BoundDest, &str) -> std::io::Result<()>,
+) -> Result<()> {
+    rewrite_user_config_table(path, setting.key(), write, |root| {
+        apply_memory_setting(root, setting, value)
+    })
+}
+
+/// The TOML edit of [`set_memory_setting`], apart from the disk.
+/// A removal also removes the tables that it leaves empty.
+pub(crate) fn apply_memory_setting(
+    root: &mut toml::map::Map<String, toml::Value>,
+    setting: MemorySetting,
+    value: &MemorySettingValue,
+) -> Result<()> {
+    let new_value = match (setting, value) {
+        (MemorySetting::RecallEnabled, MemorySettingValue::Bool(enabled)) => {
+            Some(toml::Value::Boolean(*enabled))
+        }
+        (
+            MemorySetting::EmbeddingModel
+            | MemorySetting::EmbeddingBaseUrl
+            | MemorySetting::EmbeddingApiKeyEnv,
+            MemorySettingValue::Text(text),
+        ) => {
+            let text = text.trim();
+            (!text.is_empty()).then(|| toml::Value::String(text.to_owned()))
+        }
+        (MemorySetting::EmbeddingDimensions, MemorySettingValue::Int(size)) => {
+            if !(0..=MAX_MEMORY_EMBEDDING_DIMENSIONS).contains(size) {
+                anyhow::bail!(
+                    "embedding size {size} is outside 0..={MAX_MEMORY_EMBEDDING_DIMENSIONS}"
+                );
+            }
+            (*size != 0).then_some(toml::Value::Integer(*size))
+        }
+        (setting, value) => {
+            anyhow::bail!("`{}` does not take the value {value:?}", setting.key())
+        }
+    };
+    let (tables, key) = setting.location();
+    match new_value {
+        Some(new_value) => {
+            let mut table = root;
+            for name in tables {
+                table = table
+                    .entry((*name).to_owned())
+                    .or_insert_with(|| toml::Value::Table(toml::map::Map::new()))
+                    .as_table_mut()
+                    .with_context(|| format!("`{name}` is not an object"))?;
+            }
+            table.insert(key.to_owned(), new_value);
+        }
+        None => remove_and_prune(root, tables, key),
+    }
+    Ok(())
+}
+
+/// Remove `key` under the `tables` path, then each table on that path that is left empty.
+fn remove_and_prune(root: &mut toml::map::Map<String, toml::Value>, tables: &[&str], key: &str) {
+    let Some((first, rest)) = tables.split_first() else {
+        root.remove(key);
+        return;
+    };
+    let Some(child) = root.get_mut(*first).and_then(toml::Value::as_table_mut) else {
+        return;
+    };
+    remove_and_prune(child, rest, key);
+    if child.is_empty() {
+        root.remove(*first);
+    }
+}

@@ -8,14 +8,15 @@ use super::setters::{
     set_display_refresh_auto_cadence_inner, set_follow_up_behavior_inner,
     set_group_tool_verbs_inner, set_harness_model_inner, set_hunk_tracker_mode_inner,
     set_invert_scroll_inner, set_keep_awake_inner, set_keep_text_selection_inner,
-    set_max_thoughts_width_inner, set_min_output_tokens_per_sec_inner, set_model_group_model_inner,
-    set_multiline_mode, set_output_rate_max_retries_inner, set_output_rate_sustained_secs_inner,
-    set_output_rate_window_secs_inner, set_page_flip_on_send_inner, set_prompt_suggestions_inner,
-    set_remember_tool_approvals_inner, set_render_mermaid_inner, set_respect_manual_folds_inner,
-    set_scroll_lines_inner, set_scroll_mode_inner, set_scroll_speed_inner,
-    set_show_thinking_blocks_inner, set_show_tips_inner, set_split_and_tee_commands_inner,
-    set_stop_gate_ci_failing_inner, set_stop_gate_unfinished_todos_inner, set_subagent_model_inner,
-    set_theme_inner, set_thinking_summaries_inner, set_thinking_summary_history_min_count_inner,
+    set_max_thoughts_width_inner, set_memory_setting_inner, set_min_output_tokens_per_sec_inner,
+    set_model_group_model_inner, set_multiline_mode, set_output_rate_max_retries_inner,
+    set_output_rate_sustained_secs_inner, set_output_rate_window_secs_inner,
+    set_page_flip_on_send_inner, set_prompt_suggestions_inner, set_remember_tool_approvals_inner,
+    set_render_mermaid_inner, set_respect_manual_folds_inner, set_scroll_lines_inner,
+    set_scroll_mode_inner, set_scroll_speed_inner, set_show_thinking_blocks_inner,
+    set_show_tips_inner, set_split_and_tee_commands_inner, set_stop_gate_ci_failing_inner,
+    set_stop_gate_unfinished_todos_inner, set_subagent_model_inner, set_theme_inner,
+    set_thinking_summaries_inner, set_thinking_summary_history_min_count_inner,
     set_thinking_summary_history_window_secs_inner, set_timeline_inner, set_timestamps,
     set_timestamps_inner, set_ttft_timeout_secs_inner, set_voice_capture_mode_inner,
     set_voice_keybind_enabled_inner, set_voice_stt_language_inner,
@@ -64,6 +65,7 @@ pub(crate) fn refresh_open_settings_modals(app: &mut AppView) {
     let session_recap_from_app = app.session_recap;
     let keep_awake_from_app = app.notification_service.sleep_inhibitor.mode();
     let context_limits_from_app = app.model_context_limits.clone();
+    let memory_settings_from_app = app.memory_settings.clone();
     for agent in app.agents.values_mut() {
         // Walk both `Settings` and `ResetSettingsConfirm`
         // The confirm dialog embeds settings state that must stay fresh through async persist failures
@@ -117,6 +119,7 @@ pub(crate) fn refresh_open_settings_modals(app: &mut AppView) {
                     .map(|id| id.0.to_string()),
                 context_limits: context_limits_from_app.clone(),
                 keep_awake: keep_awake_from_app,
+                memory_settings: memory_settings_from_app.clone(),
             };
             if coding_data_sharing_lock_from_app.is_some()
                 && matches!(
@@ -225,6 +228,7 @@ pub(in crate::app::dispatch) fn dispatch_open_settings(
     let compact_on_model_switch_from_app = app.compact_on_model_switch;
     let session_recap_from_app = app.session_recap;
     let keep_awake_from_app = app.notification_service.sleep_inhibitor.mode();
+    let memory_settings_from_app = app.memory_settings.clone();
 
     let Some(agent) = app.agents.get_mut(&id) else {
         return effects;
@@ -286,6 +290,7 @@ pub(in crate::app::dispatch) fn dispatch_open_settings(
             .map(|id| id.0.to_string()),
         context_limits: context_limits_from_app,
         keep_awake: keep_awake_from_app,
+        memory_settings: memory_settings_from_app,
     };
     let mut state = Box::new(SettingsModalState::new(
         registry,
@@ -643,6 +648,7 @@ pub(crate) fn build_pager_snapshot(app: &AppView) -> crate::settings::PagerLocal
         current_model_id: agent_current_model_id(app),
         context_limits: app.model_context_limits.clone(),
         keep_awake: app.notification_service.sleep_inhibitor.mode(),
+        memory_settings: app.memory_settings.clone(),
     }
 }
 
@@ -741,6 +747,12 @@ pub(in crate::app::dispatch) fn action_for_reset(
         }
         ("toolset.ask_user_question.timeout_enabled", SettingValue::Bool(b)) => {
             Some(Action::SetAskUserQuestionTimeoutEnabled(*b))
+        }
+        (key, value) if xai_grok_shell::util::config::MemorySetting::from_key(key).is_some() => {
+            Some(Action::SetMemorySetting {
+                key,
+                value: value.clone(),
+            })
         }
         ("subagent_model_inheritance", SettingValue::Bool(_)) => {
             Some(Action::ClearSubagentModelInheritance)
@@ -1179,6 +1191,9 @@ pub(in crate::app::dispatch) fn apply_setting_rollback(
             } else {
                 set_ask_user_question_timeout_enabled_inner(app, *b);
             }
+        }
+        (key, value) if xai_grok_shell::util::config::MemorySetting::from_key(key).is_some() => {
+            set_memory_setting_inner(app, key, value);
         }
         ("show_thinking_blocks", SettingValue::Bool(b)) => set_show_thinking_blocks_inner(app, *b),
         ("group_tool_verbs", SettingValue::Bool(b)) => set_group_tool_verbs_inner(app, *b),

@@ -822,6 +822,8 @@ fn rows_contain_categories_and_settings_through_pr_14() {
         "two_pass_compaction",
         "compact_on_model_switch",
         "session_recap",
+        // SHELL-owned memory options, one group row (Agent category, registered right after session_recap).
+        "memory",
         // SHELL-owned coding_data_sharing (Privacy category).
         "coding_data_sharing",
         // SHELL-owned default_model (Models category).

@@ -726,6 +726,7 @@ impl SessionActor {
                             disabled_reason: listing.disabled_reason,
                             capture_enabled: listing.capture_enabled,
                             dream_enabled: listing.dream_enabled,
+                            recall_embedding: listing.recall_embedding,
                         })
                         .await;
                     }

@@ -353,6 +353,11 @@ Every one of those is the test doing its job. Making them pass there means weake
 
 - `WorkflowHostParams.agent_slots` is a semaphore owned by `WorkflowManager` and shared by every run it launches (`session/workflow/manager.rs`), not one fresh semaphore per run. Up to `WORKFLOW_MAX_ACTIVE_RUNS_PER_SESSION` runs can be active at once. A per-run semaphore will let total live agent-spawned LLM requests scale with active run count instead of staying under the configured cap (`GROK_WORKFLOW_MAX_CONCURRENT_AGENTS` / `workflow_max_concurrent_agents`). The knob operators lower to stay under a hard per-host concurrent-request limit.
 
+## No paywall
+
+- This build never shows a subscription gate. The shell's `settings_allow_access` is always true, so a remote `allow_access = false` blocks nothing and the auth meta carries no gate.
+- The pager's `impose_gate` logs a gate and drops it, and `apply_auth_meta` clears one that an older shell sent. `settings_that_deny_access_show_no_paywall` runs the real pager against settings that deny access.
+
 ## Endpoint allowlist notes
 
 - The pricing catalog is the one compiled-in endpoint (`DEFAULT_PRICING_CATALOG_URL`, modelinfo), and its request skips the allowlist (`check_catalog_url`). Nothing else prices an Anthropic model: the wire carries no cost and `/v1/models` lists no price. The proxy, the xAI API, the grok.invalid clients, the env crate's hosts and voice all resolve to BLANK when unconfigured. A blank URL builds no request.
