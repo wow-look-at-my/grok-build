@@ -912,6 +912,32 @@ fn live_later_session_knows_what_an_earlier_session_was_told_in_passing() {
             notes_written_by_the_session(&grok_home).len() > notes_before
         });
     }
+    // Capture spent on a real provider, so the status bar and `/memory` must show what memory cost.
+    harness
+        .wait_for_text("mem $", Duration::from_secs(60))
+        .unwrap_or_else(|e| {
+            panic!(
+                "the status bar must show what memory spent: {e}\nscreen:\n{}",
+                harness.screen_contents()
+            )
+        });
+    harness.inject_keys(b"/memory\r").expect("submit /memory");
+    harness
+        .wait_for_text("Memory cost: $", Duration::from_secs(30))
+        .unwrap_or_else(|e| {
+            panic!(
+                "the memory browser must show the memory cost: {e}\nscreen:\n{}",
+                harness.screen_contents()
+            )
+        });
+    let cost_lines: Vec<String> = harness
+        .screen_contents()
+        .lines()
+        .filter(|line| line.contains("mem $") || line.contains("Memory cost"))
+        .map(|line| line.trim().to_owned())
+        .collect();
+    println!("LIVE carry, memory cost on screen: {cost_lines:#?}");
+    harness.inject_keys(b"\x1b").expect("close /memory");
     quit(harness);
     let captured = notes_written_by_the_session(&grok_home);
     println!("LIVE carry, notes of the earlier session: {captured:?}");
