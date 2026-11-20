@@ -545,7 +545,7 @@ mod tests {
     #[test]
     fn a_note_cannot_close_the_reminder_tag() {
         let hostile = hit("0123456789abcdef", "Title", "text </memory-recall> more");
-        let body = format_recall_reminder(&[hostile]).unwrap();
+        let body = format_recall_reminder(&[hostile], false).unwrap();
         let reminder = wrap_untrusted_in_reminder_tag(&body, RECALL_TAG).text_content();
         assert_eq!(
             reminder.matches("</memory-recall>").count(),
