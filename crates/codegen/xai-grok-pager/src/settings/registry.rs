@@ -450,6 +450,8 @@ pub struct PagerLocalSnapshot {
     pub context_limits: std::collections::BTreeMap<String, u64>,
     /// The live keep-awake mode of the pager's sleep inhibitor.
     pub keep_awake: crate::notifications::KeepAwake,
+    /// The memory options of the effective config.
+    pub memory_settings: xai_grok_shell::util::config::MemorySettingsMirror,
 }
 
 impl Default for PagerLocalSnapshot {
@@ -482,6 +484,7 @@ impl Default for PagerLocalSnapshot {
             current_model_id: None,
             context_limits: std::collections::BTreeMap::new(),
             keep_awake: crate::notifications::KeepAwake::default(),
+            memory_settings: Default::default(),
         }
     }
 }
@@ -815,6 +818,33 @@ pub fn current_value_for(
             pager
                 .ask_user_question_timeout_enabled
                 .unwrap_or(ask_user_question::DEFAULT_ASK_USER_QUESTION_TIMEOUT_ENABLED),
+        )),
+        "memory.v2.recall_enabled" => Some(SettingValue::Bool(
+            pager.memory_settings.recall_enabled.unwrap_or(true),
+        )),
+        "memory.embedding.model" => Some(SettingValue::String(
+            pager
+                .memory_settings
+                .embedding_model
+                .clone()
+                .unwrap_or_default(),
+        )),
+        "memory.embedding.base_url" => Some(SettingValue::String(
+            pager
+                .memory_settings
+                .embedding_base_url
+                .clone()
+                .unwrap_or_default(),
+        )),
+        "memory.embedding.api_key_env" => Some(SettingValue::String(
+            pager
+                .memory_settings
+                .embedding_api_key_env
+                .clone()
+                .unwrap_or_default(),
+        )),
+        "memory.embedding.dimensions" => Some(SettingValue::Int(
+            pager.memory_settings.embedding_dimensions.unwrap_or(0),
         )),
         // The value the shell latches at the next start, every tier included; the detail text separates the saved key from it
         "subagent_model_inheritance" => Some(SettingValue::Bool(
@@ -1505,6 +1535,15 @@ mod tests {
                 ) => {
                     assert!(PagerLocalSnapshot::default().context_limits.is_empty());
                 }
+                // The memory options live outside `UiConfig`: an absent key reads as the row default.
+                (key, _) if key.starts_with("memory.") => {
+                    let value = current_value_for(key, &ui, &PagerLocalSnapshot::default());
+                    assert_eq!(
+                        value,
+                        Some(default_value_for(meta)),
+                        "`{key}` default drifts from the value an empty config reads as"
+                    );
+                }
                 _ => panic!(
                     "settings::defs::default_settings() contains entry `{}` with no \
                      matching arm in defaults_match_ui_config_default. Add an arm.",
@@ -1604,6 +1643,71 @@ mod tests {
                  registered SettingKind. Wrong variant in the match arm.",
                 meta.key
             );
+        }
+    }
+
+    #[test]
+    fn memory_setting_rows_read_the_mirror_and_default_when_unset() {
+        let ui = UiConfig::default();
+        let empty = PagerLocalSnapshot::default();
+        let read = |key, pager: &PagerLocalSnapshot| current_value_for(key, &ui, pager);
+        assert_eq!(
+            read("memory.v2.recall_enabled", &empty),
+            Some(SettingValue::Bool(true))
+        );
+        for key in [
+            "memory.embedding.model",
+            "memory.embedding.base_url",
+            "memory.embedding.api_key_env",
+        ] {
+            assert_eq!(read(key, &empty), Some(SettingValue::String(String::new())));
+        }
+        assert_eq!(
+            read("memory.embedding.dimensions", &empty),
+            Some(SettingValue::Int(0))
+        );
+
+        let pager = PagerLocalSnapshot {
+            memory_settings: xai_grok_shell::util::config::MemorySettingsMirror {
+                recall_enabled: Some(false),
+                embedding_model: Some("nomic-embed-text".into()),
+                embedding_base_url: Some("http://localhost:11434/v1".into()),
+                embedding_api_key_env: Some("EMBED_KEY".into()),
+                embedding_dimensions: Some(768),
+            },
+            ..PagerLocalSnapshot::default()
+        };
+        assert_eq!(
+            read("memory.v2.recall_enabled", &pager),
+            Some(SettingValue::Bool(false))
+        );
+        assert_eq!(
+            read("memory.embedding.model", &pager),
+            Some(SettingValue::String("nomic-embed-text".into()))
+        );
+        assert_eq!(
+            read("memory.embedding.base_url", &pager),
+            Some(SettingValue::String("http://localhost:11434/v1".into()))
+        );
+        assert_eq!(
+            read("memory.embedding.api_key_env", &pager),
+            Some(SettingValue::String("EMBED_KEY".into()))
+        );
+        assert_eq!(
+            read("memory.embedding.dimensions", &pager),
+            Some(SettingValue::Int(768))
+        );
+
+        let reg = SettingsRegistry::defaults();
+        let group = reg.find("memory").expect("the Memory group row");
+        let SettingKind::Group { children } = &group.kind else {
+            panic!("memory must be a Group");
+        };
+        assert_eq!(*children, crate::settings::defs::MEMORY_CHILDREN);
+        for &key in *children {
+            let meta = reg.find(key).expect("every Memory child is registered");
+            assert!(meta.restart_required, "`{key}` applies at session start");
+            assert_eq!(meta.owner, SettingOwner::Shell);
         }
     }
 

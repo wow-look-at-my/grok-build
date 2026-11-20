@@ -251,6 +251,16 @@ pub struct MemoryListing {
     pub disabled_reason: Option<MemoryDisabledReason>,
     pub capture_enabled: bool,
     pub dream_enabled: bool,
+    /// The embedding model recall matches with in this session. `None` is word matching alone.
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    pub recall_embedding: Option<MemoryRecallEmbedding>,
+}
+
+/// An embedding model and the endpoint that serves it.
+#[derive(Debug, Clone, PartialEq, Eq, Serialize, Deserialize)]
+pub struct MemoryRecallEmbedding {
+    pub model: String,
+    pub endpoint: String,
 }
 
 #[derive(Debug, Clone, Serialize, Deserialize)]

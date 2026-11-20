@@ -1272,6 +1272,21 @@ pub(crate) async fn persist_setting(
                 .await
                 .map_err(|e| e.to_string())
         }
+        key if xai_grok_shell::util::config::MemorySetting::from_key(key).is_some() => {
+            use xai_grok_shell::util::config::{MemorySetting, MemorySettingValue};
+            let Some(setting) = MemorySetting::from_key(key) else {
+                return Err(format!("persist_setting({key}) is not a memory setting"));
+            };
+            let value = match value {
+                SettingValue::Bool(b) => MemorySettingValue::Bool(b),
+                SettingValue::String(s) => MemorySettingValue::Text(s),
+                SettingValue::Int(i) => MemorySettingValue::Int(i),
+                SettingValue::Enum(_) => return Err(kind_mismatch(key, "Bool, String or Int", &value)),
+            };
+            xai_grok_shell::util::config::set_memory_setting(setting, value)
+                .await
+                .map_err(|e| e.to_string())
+        }
         "show_thinking_blocks" => {
             let SettingValue::Bool(b) = value else {
                 return Err(kind_mismatch("show_thinking_blocks", "Bool", &value));

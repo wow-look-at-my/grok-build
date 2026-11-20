@@ -206,7 +206,8 @@ impl SessionActor {
                 )
             })
             .clone();
-        let provider = match self.memory.recall.embedding.as_ref() {
+        let embedding = self.memory.recall.active_embedding();
+        let provider = match embedding.as_ref() {
             Some(params) => {
                 let mut params = params.clone();
                 params.usage_sink = crate::session::billed_client::memory_usage_sink(
@@ -222,7 +223,7 @@ impl SessionActor {
             None => None,
         };
         if provider.is_none()
-            && let Some(params) = self.memory.recall.embedding.as_ref()
+            && let Some(params) = embedding.as_ref()
             && self
                 .memory
                 .recall

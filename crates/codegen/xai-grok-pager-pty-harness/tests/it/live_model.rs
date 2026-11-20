@@ -560,6 +560,298 @@ fn recalled_notes_by_prompt(history: &[Value]) -> Vec<Vec<String>> {
     by_prompt
 }
 
+/// The real pager with a real Ollama as a provider and no embedding config. A prompt that shares no word with
+/// a stored topic must recall it, and `/memory` must name the model. `GROK_LIVE_OLLAMA_URL` is the runtime's
+/// OpenAI-compatible base URL. `GROK_LIVE_OLLAMA_EMBEDDING_MODEL` is the embedding model it lists first.
+#[cfg(unix)]
+#[tokio::test(flavor = "multi_thread", worker_threads = 2)]
+#[ignore = "needs a running Ollama: GROK_LIVE_OLLAMA_URL and GROK_LIVE_OLLAMA_EMBEDDING_MODEL"]
+async fn live_recall_matches_by_meaning_through_a_real_ollama() {
+    let url = required_env("GROK_LIVE_OLLAMA_URL");
+    let model = required_env("GROK_LIVE_OLLAMA_EMBEDDING_MODEL");
+    crate::pty_e2e_smoke::memory_recall_uses_a_local_embedding_model::recall_by_meaning_with_no_embedding_config(
+        &url, &model,
+    )
+    .await;
+}
+
+/// A marker word that only the earlier session's facts hold.
+const SCRATCH_PREFIX: &str = "zz_";
+const DEPLOY_SCRIPT: &str = "tools/ship/quokka.sh";
+
+/// The earlier session. Each prompt is a task that states a fact in passing. None asks the model to remember.
+const EARLIER_PROMPTS: [&str; 2] = [
+    "Create a file named zz_first.txt that holds the single line hello. I always prefix my scratch files with zz_ so that they sort last.",
+    "For context, the deploy script of this project lives at tools/ship/quokka.sh. Do not create it or run it. Tell me how many characters that path has.",
+];
+
+/// The later session. The first prompt asks where a thing is. The second is a task that the preference applies to.
+const LATER_PROMPTS: [&str; 2] = [
+    "Where does the deploy script of this project live? Answer with the path. Run nothing.",
+    "Create a scratch file in the current directory that holds the single line bye. Choose the name yourself.",
+];
+
+/// Words a note holds when it stored the "do not create it or run it" of the second earlier prompt.
+const ONE_REQUEST_LIMIT_PHRASES: [&str; 8] = [
+    "forbade",
+    "forbid",
+    "not create",
+    "not be created",
+    "not to create",
+    "not run",
+    "not be run",
+    "created or run",
+];
+
+/// The history of the session that holds `prompt`, or nothing before that session wrote one.
+fn history_holding(grok_home: &Path, prompt: &str) -> Vec<Value> {
+    let sessions = grok_home.join("sessions");
+    for cwd_dir in std::fs::read_dir(&sessions).into_iter().flatten().flatten() {
+        for session in std::fs::read_dir(cwd_dir.path())
+            .into_iter()
+            .flatten()
+            .flatten()
+        {
+            let file = session.path().join("chat_history.jsonl");
+            if !file.is_file() {
+                continue;
+            }
+            let history = read_jsonl(&file);
+            if history
+                .iter()
+                .any(|item| item["type"] == "user" && item.to_string().contains(prompt))
+            {
+                return history;
+            }
+        }
+    }
+    Vec::new()
+}
+
+/// Send `prompt` and wait for the answer that ends its turn. Returns that answer.
+fn ask_and_wait(harness: &mut PtyHarness, grok_home: &Path, prompt: &str) -> String {
+    harness.inject_keys(prompt.as_bytes()).expect("type prompt");
+    harness.update(Duration::from_millis(500));
+    harness.inject_keys(b"\r").expect("submit prompt");
+    let mut stable_since: Option<(usize, std::time::Instant)> = None;
+    let mut answer = String::new();
+    let answered = wait_until(Duration::from_secs(600), || {
+        harness.update(Duration::from_millis(500));
+        let history = history_holding(grok_home, prompt);
+        let Some(last) = history.last() else {
+            return false;
+        };
+        let text = last["content"].as_str().unwrap_or_default().trim();
+        if last["type"] != "assistant" || !tool_call_names(last).is_empty() || text.is_empty() {
+            stable_since = None;
+            return false;
+        }
+        match stable_since {
+            Some((len, since)) if len == history.len() => {
+                answer = text.to_owned();
+                since.elapsed() >= Duration::from_secs(4)
+            }
+            _ => {
+                stable_since = Some((history.len(), std::time::Instant::now()));
+                false
+            }
+        }
+    });
+    assert!(
+        answered,
+        "the live model must finish `{prompt}`\nscreen:\n{}",
+        harness.screen_contents()
+    );
+    answer
+}
+
+/// The recall note lines that follow `prompt` in its session.
+fn notes_recalled_for(grok_home: &Path, prompt: &str) -> Vec<String> {
+    let history = history_holding(grok_home, prompt);
+    let mut after_prompt = false;
+    let mut notes = Vec::new();
+    for item in history.iter().filter(|item| item["type"] == "user") {
+        let text = item.to_string();
+        if text.contains(RECALL_OPEN_TAG) {
+            if after_prompt {
+                notes.extend(
+                    text.split("\\n")
+                        .filter(|line| line.trim_start().starts_with("- ") && line.contains("ref "))
+                        .map(|line| line.trim().to_owned()),
+                );
+            }
+        } else {
+            after_prompt = text.contains(prompt);
+        }
+    }
+    notes
+}
+
+/// Every memory manifest under `grok_home`, for the test output.
+fn manifests(grok_home: &Path) -> String {
+    let mut out = String::new();
+    let mut pending = vec![grok_home.join("memory-v2")];
+    while let Some(dir) = pending.pop() {
+        for entry in std::fs::read_dir(&dir).into_iter().flatten().flatten() {
+            let path = entry.path();
+            if path.is_dir() {
+                pending.push(path);
+            } else if path.file_name().is_some_and(|name| name == "MEMORY.md") {
+                let text = std::fs::read_to_string(&path).unwrap_or_default();
+                out.push_str(&format!("--- {}\n{text}\n", path.display()));
+            }
+        }
+    }
+    out
+}
+
+/// One session states a preference and a location in passing. A later session, in a new process, is asked where
+/// the thing is and is given a task that the preference applies to. Nothing but memory carries both facts over.
+#[cfg(unix)]
+#[test]
+#[ignore = "live model; needs GROK_LIVE_BASE_URL, GROK_LIVE_MODEL and GROK_LIVE_KEY_ENV"]
+fn live_later_session_knows_what_an_earlier_session_was_told_in_passing() {
+    let base_url = required_env("GROK_LIVE_BASE_URL");
+    let model = required_env("GROK_LIVE_MODEL");
+    let key_env = required_env("GROK_LIVE_KEY_ENV");
+    let key = required_env(&key_env);
+
+    let sandbox = TestSandbox::new();
+    let grok_home = sandbox.grok_home().to_path_buf();
+    // Memory is off for a workspace in the system temp directory.
+    let workspace = Path::new(env!("CARGO_TARGET_TMPDIR"))
+        .join(format!("live-memory-carry-{}", std::process::id()));
+    std::fs::create_dir_all(&workspace).expect("create the workspace");
+    let config = json!({
+        "models": {
+            "default": "live",
+            "providers": {
+                "live": { "base_url": base_url, "env_key": key_env, "models_autodetect": false }
+            },
+            "definitions": {
+                "live": { "model_provider": "live", "model": model, "context_window": 200_000 }
+            }
+        }
+    });
+    std::fs::write(grok_home.join("config.json"), config.to_string()).expect("write config");
+
+    let mut env: Vec<(String, String)> = vec![
+        (key_env.clone(), key),
+        ("TERM".into(), "xterm-256color".into()),
+        ("COLORTERM".into(), "truecolor".into()),
+    ];
+    for name in NETWORK_ENV {
+        if let Ok(value) = std::env::var(name) {
+            env.push((name.to_owned(), value));
+        }
+    }
+    let env_refs: Vec<(&str, &str)> = env.iter().map(|(k, v)| (k.as_str(), v.as_str())).collect();
+    let binary = pager_binary().expect("resolve pager binary");
+    let spawn = || {
+        let mut harness = PtyHarness::new_in_sandbox(
+            &binary,
+            160,
+            140,
+            &["--yolo", "--trust"],
+            &sandbox,
+            &env_refs,
+            Some(&workspace),
+        )
+        .expect("spawn pager");
+        harness
+            .wait_for_text(WELCOME, Duration::from_secs(30))
+            .unwrap_or_else(|e| panic!("welcome: {e:#}\nscreen:\n{}", harness.screen_contents()));
+        harness
+    };
+    let quit = |mut harness: PtyHarness| {
+        harness.inject_keys(b"\x11").expect("ctrl-q once");
+        harness.update(Duration::from_millis(300));
+        harness.inject_keys(b"\x11").expect("ctrl-q confirm");
+        let _ = harness.quit();
+    };
+
+    let mut harness = spawn();
+    for prompt in EARLIER_PROMPTS {
+        let notes_before = notes_written_by_the_session(&grok_home).len();
+        ask_and_wait(&mut harness, &grok_home, prompt);
+        // Capture runs after the turn.
+        wait_until(Duration::from_secs(90), || {
+            harness.update(Duration::from_millis(500));
+            notes_written_by_the_session(&grok_home).len() > notes_before
+        });
+    }
+    quit(harness);
+    let captured = notes_written_by_the_session(&grok_home);
+    println!("LIVE carry, notes of the earlier session: {captured:?}");
+    let mut one_request_limits = Vec::new();
+    for note in &captured {
+        let text = std::fs::read_to_string(note).unwrap_or_default();
+        println!("--- {}\n{text}", note.display());
+        let lower = text.to_lowercase();
+        if let Some(phrase) = ONE_REQUEST_LIMIT_PHRASES
+            .into_iter()
+            .find(|phrase| lower.contains(phrase))
+        {
+            one_request_limits.push(format!("`{phrase}` in {}", note.display()));
+        }
+    }
+    println!("LIVE carry, manifests:\n{}", manifests(&grok_home));
+    // The later session must not learn the prefix from the file.
+    for entry in std::fs::read_dir(&workspace)
+        .into_iter()
+        .flatten()
+        .flatten()
+    {
+        let _ = std::fs::remove_file(entry.path());
+    }
+
+    let mut harness = spawn();
+    let where_answer = ask_and_wait(&mut harness, &grok_home, LATER_PROMPTS[0]);
+    let task_answer = ask_and_wait(&mut harness, &grok_home, LATER_PROMPTS[1]);
+    quit(harness);
+    let task_calls: Vec<String> = history_holding(&grok_home, LATER_PROMPTS[1])
+        .iter()
+        .filter(|item| item["type"] == "assistant")
+        .map(|item| format!("{:?} {}", tool_call_names(item), item["content"]))
+        .collect();
+    println!(
+        "LIVE carry, answer to the task prompt: {task_answer}\nassistant items: {task_calls:#?}"
+    );
+
+    let created: Vec<String> = std::fs::read_dir(&workspace)
+        .into_iter()
+        .flatten()
+        .flatten()
+        .map(|entry| entry.file_name().to_string_lossy().into_owned())
+        .collect();
+    for prompt in LATER_PROMPTS {
+        println!(
+            "LIVE carry, `{prompt}` recalled {:?}",
+            notes_recalled_for(&grok_home, prompt)
+        );
+    }
+    println!("LIVE carry, answer to the location prompt: {where_answer}");
+    println!("LIVE carry, files the later session created: {created:?}");
+    let _ = std::fs::remove_dir_all(&workspace);
+
+    assert!(
+        !captured.is_empty(),
+        "the earlier session must write a note with no request to remember"
+    );
+    assert!(
+        one_request_limits.is_empty(),
+        "\"do not create it or run it\" was a limit for one request, and it was stored: {one_request_limits:?}"
+    );
+    assert!(
+        where_answer.contains(DEPLOY_SCRIPT),
+        "the later session must know where the deploy script is: {where_answer}"
+    );
+    assert!(
+        created.iter().any(|name| name.starts_with(SCRATCH_PREFIX)),
+        "the later session must name its scratch file with the stated prefix: {created:?}"
+    );
+}
+
 /// A live model works through prompts with tools while capture writes notes from the same conversation. One prompt
 /// asks about a stored note. That note is recalled for it, and nothing is recalled for any other prompt.
 #[cfg(unix)]

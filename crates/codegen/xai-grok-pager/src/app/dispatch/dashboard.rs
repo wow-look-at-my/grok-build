@@ -1244,6 +1244,7 @@ pub(super) fn dispatch_dashboard_dispatch_slash(app: &mut AppView, text: String)
                 current_model_id: app.models.current.as_ref().map(|id| id.0.to_string()),
                 context_limits: app.model_context_limits.clone(),
                 keep_awake: keep_awake_from_app,
+                memory_settings: app.memory_settings.clone(),
             },
         };
         command.run_with_token(&mut ctx, invocation.token, invocation.args)

@@ -1091,6 +1091,9 @@ pub enum SessionUpdate {
         /// Notes become topics automatically in this session.
         #[serde(default = "default_true")]
         dream_enabled: bool,
+        /// The embedding model recall matches with. An older shell omits it.
+        #[serde(default, skip_serializing_if = "Option::is_none")]
+        recall_embedding: Option<crate::extensions::memory::MemoryRecallEmbedding>,
     },
     WorkflowUpdated {
         run_id: String,
@@ -2446,6 +2449,7 @@ mod tests {
             disabled_reason: None,
             capture_enabled: true,
             dream_enabled: true,
+            recall_embedding: None,
         };
         let json_str = serde_json::to_string(&update).unwrap();
         let parsed: SessionUpdate = serde_json::from_str(&json_str).unwrap();
@@ -2481,6 +2485,7 @@ mod tests {
             disabled_reason: None,
             capture_enabled: true,
             dream_enabled: true,
+            recall_embedding: None,
         };
         let json = serde_json::to_value(&update).unwrap();
         assert_eq!(
@@ -2509,6 +2514,7 @@ mod tests {
                 disabled_reason: None,
                 capture_enabled: true,
                 dream_enabled: true,
+                recall_embedding: None,
             }
         );
         // A reason from a newer shell must not reject the whole update.

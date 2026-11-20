@@ -87,7 +87,7 @@ use super::settings::setters::{
     set_default_model, set_default_selected_permission, set_display_refresh_auto_cadence,
     set_follow_up_behavior, set_group_tool_verbs, set_harness_model, set_hunk_tracker_mode,
     set_invert_scroll, set_keep_awake, set_keep_text_selection, set_max_thoughts_width,
-    set_min_output_tokens_per_sec, set_model_group_model, set_multiline_mode,
+    set_memory_setting, set_min_output_tokens_per_sec, set_model_group_model, set_multiline_mode,
     set_output_rate_max_retries, set_output_rate_sustained_secs, set_output_rate_window_secs,
     set_page_flip_on_send, set_prompt_suggestions, set_remember_tool_approvals, set_render_mermaid,
     set_respect_manual_folds, set_scroll_lines, set_scroll_mode, set_scroll_speed,
@@ -1150,6 +1150,7 @@ fn dispatch_inner(action: Action, app: &mut AppView) -> Vec<Effect> {
         Action::SetAskUserQuestionTimeoutEnabled(v) => {
             set_ask_user_question_timeout_enabled(app, v)
         }
+        Action::SetMemorySetting { key, value } => set_memory_setting(app, key, value),
         Action::SetSubagentModelInheritance(v) => set_subagent_model_inheritance(app, v),
         Action::ClearSubagentModelInheritance => clear_subagent_model_inheritance(app),
         Action::SetTwoPassCompaction(v) => set_two_pass_compaction(app, v),

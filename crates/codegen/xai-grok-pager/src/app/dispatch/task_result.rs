@@ -1200,6 +1200,7 @@ pub(super) fn dispatch_task_result(result: TaskResult, app: &mut AppView) -> Vec
             handle_plugins_list_loaded(app, agent_id, result)
         }
         TaskResult::MemoryListLoaded { agent_id, result } => {
+            let recall_line = app.memory_recall_line.clone();
             if let Some(agent) = app.agents.get_mut(&agent_id) {
                 match result {
                     Ok(_)
@@ -1215,7 +1216,8 @@ pub(super) fn dispatch_task_result(result: TaskResult, app: &mut AppView) -> Vec
                                     crate::views::memory_modal::MemoryModalState::from_listing(
                                         listing,
                                     )
-                                    .with_memory_cost(memory_cost),
+                                    .with_memory_cost(memory_cost)
+                                    .with_recall_line(recall_line),
                                 ),
                             });
                     }

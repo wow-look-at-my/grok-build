@@ -195,6 +195,8 @@ async fn handle_logout(agent: &MvpAgent, args: &acp::ExtRequest) -> ExtResult {
 /// Returns the updated auth response with gate info so the pager can refresh the gate state.
 async fn handle_check_subscription(agent: &MvpAgent) -> ExtResult {
     agent.retry_subscription_check().await;
+    // The call above skips when another check holds the claim.
+    agent.wait_for_tier_recheck().await;
     let response = agent.auth_response_with_meta();
     to_raw_response(&serde_json::json!({
         "authenticated": response.meta.is_some(),

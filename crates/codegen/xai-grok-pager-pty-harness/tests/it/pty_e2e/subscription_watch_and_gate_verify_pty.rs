@@ -288,47 +288,60 @@ async fn subscription_watch_polls_free_tier_then_goes_dormant_after_upgrade() {
     oidc.abort();
 }
 
-/// A genuinely-free user gated at startup still gets the paywall, but only after a live subscription check confirmed the block.
-/// The gate is never painted straight from the stale source.
+/// This build has no paywall. Settings that deny access and carry gate copy put nothing on the screen, and the
+/// session takes a prompt.
 #[tokio::test(flavor = "multi_thread", worker_threads = 2)]
 #[ignore = "PTY e2e; run with cargo test -p xai-grok-pager-pty-harness --test it -- --ignored"]
-async fn startup_gate_shows_paywall_for_free_user_after_live_check() {
+async fn settings_that_deny_access_show_no_paywall() {
     let content = ContentController::start().await.expect("start content");
-    // Explicit deny and gate copy. An absent allow_access fails open.
     content.server().set_settings(json!({
         "allow_access": false,
         "gate_message": GATE_MSG,
         "gate_url": "https://grok.invalid/supergrok?referrer=grok-build",
         "gate_label": "Subscribe",
     }));
+    content.set_response(format!("{MOCK_RESPONSE_SENTINEL} no paywall."));
 
     let mut harness = spawn_subscription_pager(&content, "pty-subgate-free", &[]);
-
     harness
         .wait_for_text(WELCOME_SCREEN_SENTINEL, WELCOME_TIMEOUT)
         .expect("welcome text");
-    // The verified gate renders. Normally the check response resolves the
-    // deferral within seconds.
     harness
-        .wait_for_text(GATE_MSG, Duration::from_secs(45))
-        .expect("gate copy renders for a genuinely-free user");
-
+        .wait_until(
+            "the settings reach the pager",
+            Duration::from_secs(20),
+            |_| settings_count(&content) >= 1,
+        )
+        .expect("the settings are fetched");
+    // Long enough for a paywall to be drawn from those settings.
+    harness.update(Duration::from_secs(3));
     assert!(
-        user_check_count(&content) >= 1,
-        "a live subscription check must run before the paywall is shown; requests: {:?}",
-        content
-            .requests()
-            .iter()
-            .map(|e| e.path.clone())
-            .collect::<Vec<_>>()
+        !harness.contains_text(GATE_MSG),
+        "no paywall on the welcome screen\nscreen:\n{}",
+        harness.screen_contents()
     );
 
+    harness
+        .inject_keys(format!("{PROMPT}\r").as_bytes())
+        .expect("submit prompt");
+    harness
+        .wait_for_text(MOCK_RESPONSE_SENTINEL, Duration::from_secs(30))
+        .unwrap_or_else(|error| {
+            panic!(
+                "the session must take a prompt: {error}\nscreen:\n{}",
+                harness.screen_contents()
+            )
+        });
+    assert!(
+        !harness.contains_text(GATE_MSG),
+        "no paywall after a turn\nscreen:\n{}",
+        harness.screen_contents()
+    );
     harness.quit().expect("clean quit");
 }
 
-/// Verify-before-paywall: a user who ALREADY subscribed never sees a paywall flash when a stale
-/// gated settings snapshot reaches the client. The stale snapshot is delivered via the `/new`
-/// settings refresh, the only active `/v1/settings` consumer at that point.
+/// A gated settings snapshot that reaches a running session shows no paywall. The snapshot is delivered via the
+/// `/new` settings refresh, the only active `/v1/settings` consumer at that point.
 #[tokio::test(flavor = "multi_thread", worker_threads = 2)]
 #[ignore = "PTY e2e; run with cargo test -p xai-grok-pager-pty-harness --test it -- --ignored"]
 async fn stale_gate_push_never_flashes_paywall_for_subscribed_user() {
@@ -349,7 +362,6 @@ async fn stale_gate_push_never_flashes_paywall_for_subscribed_user() {
 
     // Let startup fetches fully settle so the scripted one-shot below can only be consumed by the /new refresh
     harness.update(Duration::from_secs(2));
-    let checks_before = user_check_count(&content);
 
     // One stale gated snapshot simulates remote settings going stale
     content.enqueue_response(
@@ -372,17 +384,7 @@ async fn stale_gate_push_never_flashes_paywall_for_subscribed_user() {
         );
     }
 
-    // Positive anchors: the deferral's live check ran, and the session is
-    // fully usable (prompt round-trips)
-    assert!(
-        user_check_count(&content) > checks_before,
-        "expected a live subscription check for the deferred gate; requests: {:?}",
-        content
-            .requests()
-            .iter()
-            .map(|e| e.path.clone())
-            .collect::<Vec<_>>()
-    );
+    // The session stays fully usable: a prompt round-trips.
     content.set_response(format!("{MOCK_RESPONSE_SENTINEL} still usable."));
     harness
         .inject_keys(format!("{PROMPT}\r").as_bytes())

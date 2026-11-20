@@ -215,6 +215,15 @@ impl SessionActor {
             disabled_reason,
             capture_enabled,
             dream_enabled,
+            recall_embedding: self
+                .memory
+                .can_recall_v2()
+                .then(|| self.memory.recall.active_embedding())
+                .flatten()
+                .map(|params| crate::extensions::memory::MemoryRecallEmbedding {
+                    model: params.config.model.unwrap_or_default(),
+                    endpoint: params.base_url,
+                }),
         })
     }
 

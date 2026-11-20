@@ -1722,6 +1722,18 @@ fn move_setting_away_from_default(app: &mut AppView, key: crate::settings::Setti
         "toolset.ask_user_question.timeout_enabled" => {
             let _ = dispatch(Action::SetAskUserQuestionTimeoutEnabled(false), app);
         }
+        "memory.v2.recall_enabled" => {
+            let value = crate::settings::SettingValue::Bool(false);
+            let _ = dispatch(Action::SetMemorySetting { key, value }, app);
+        }
+        "memory.embedding.model" | "memory.embedding.base_url" | "memory.embedding.api_key_env" => {
+            let value = crate::settings::SettingValue::String("http://localhost:11434/v1".into());
+            let _ = dispatch(Action::SetMemorySetting { key, value }, app);
+        }
+        "memory.embedding.dimensions" => {
+            let value = crate::settings::SettingValue::Int(768);
+            let _ = dispatch(Action::SetMemorySetting { key, value }, app);
+        }
         "subagent_model_inheritance" => {
             let _ = dispatch(Action::SetSubagentModelInheritance(true), app);
         }
@@ -3809,4 +3821,49 @@ fn clear_model_context_windows_removes_every_limit() {
         cleared,
         [("a", None, Some(100_000)), ("b", None, Some(200_000))]
     );
+}
+
+#[test]
+fn set_memory_setting_updates_the_mirror_and_persists() {
+    use crate::settings::SettingValue;
+    let mut app = test_app_with_agent();
+    let url = "http://localhost:11434/v1";
+    let effects = dispatch(
+        Action::SetMemorySetting {
+            key: "memory.embedding.base_url",
+            value: SettingValue::String(url.into()),
+        },
+        &mut app,
+    );
+    assert_eq!(app.memory_settings.embedding_base_url.as_deref(), Some(url));
+    assert!(
+        matches!(
+            effects.as_slice(),
+            [Effect::PersistSetting {
+                key: "memory.embedding.base_url",
+                value: SettingValue::String(value),
+                rollback_value: SettingValue::String(previous),
+            }] if value == url && previous.is_empty()
+        ),
+        "expected one PersistSetting(memory.embedding.base_url), got {effects:?}",
+    );
+
+    let effects = dispatch(
+        Action::SetMemorySetting {
+            key: "memory.embedding.base_url",
+            value: SettingValue::String(url.into()),
+        },
+        &mut app,
+    );
+    assert!(effects.is_empty(), "an unchanged value writes nothing");
+
+    let effects = dispatch(
+        Action::SetMemorySetting {
+            key: "memory.embedding.base_url",
+            value: SettingValue::String(String::new()),
+        },
+        &mut app,
+    );
+    assert_eq!(app.memory_settings.embedding_base_url, None);
+    assert_eq!(effects.len(), 1, "a clear persists the empty value");
 }

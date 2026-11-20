@@ -158,6 +158,8 @@ pub(crate) fn test_app() -> AppView {
         coding_data_write_seq: 0,
         show_tips: None,
         ask_user_question_timeout_enabled: None,
+        memory_settings: Default::default(),
+        memory_recall_line: "".into(),
         subagent_model_inheritance: crate::settings::FeatureOverrideState::new(
             xai_grok_shell::agent::config::Feature::SubagentModelInheritance,
         ),
@@ -2307,7 +2309,7 @@ fn apply_auth_meta_clears_gate_on_subscription() {
     assert!(app.has_access());
 }
 #[test]
-fn apply_auth_meta_gate_unchanged_when_still_gated() {
+fn apply_auth_meta_never_keeps_a_gate() {
     let mut app = test_app();
     let gate = xai_grok_login::GateInfo {
         message: "Subscribe".into(),
@@ -2320,8 +2322,8 @@ fn apply_auth_meta_gate_unchanged_when_still_gated() {
         ..Default::default()
     };
     app.apply_auth_meta(&meta);
-    assert!(app.gate.is_some());
-    assert!(app.is_access_blocked());
+    assert!(app.gate.is_none());
+    assert!(!app.is_access_blocked());
 }
 #[test]
 fn welcome_ctrl_q_requires_confirmation() {

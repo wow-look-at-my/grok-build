@@ -1064,6 +1064,10 @@ pub(super) fn action_for_bool(key: SettingKey, new: bool) -> Option<Action> {
         "toolset.ask_user_question.timeout_enabled" => {
             Some(Action::SetAskUserQuestionTimeoutEnabled(new))
         }
+        "memory.v2.recall_enabled" => Some(Action::SetMemorySetting {
+            key,
+            value: crate::settings::SettingValue::Bool(new),
+        }),
         "subagent_model_inheritance" => Some(Action::SetSubagentModelInheritance(new)),
         "two_pass_compaction" => Some(Action::SetTwoPassCompaction(new)),
         "compact_on_model_switch" => Some(Action::SetCompactOnModelSwitch(new)),
@@ -1174,6 +1178,12 @@ pub(super) fn action_for_string(
     snapshot: &PagerLocalSnapshot,
 ) -> Option<Action> {
     match key {
+        "memory.embedding.model" | "memory.embedding.base_url" | "memory.embedding.api_key_env" => {
+            Some(Action::SetMemorySetting {
+                key,
+                value: crate::settings::SettingValue::String(value),
+            })
+        }
         "default_model" => {
             if value.is_empty() {
                 Some(Action::ClearDefaultModel)
@@ -1236,6 +1246,10 @@ pub(super) fn action_for_int(key: SettingKey, value: i64) -> Option<Action> {
         "output_rate_window_secs" => Some(Action::SetOutputRateWindowSecs(value)),
         "output_rate_max_retries" => Some(Action::SetOutputRateMaxRetries(value)),
         "ttft_timeout_secs" => Some(Action::SetTtftTimeoutSecs(value)),
+        "memory.embedding.dimensions" => Some(Action::SetMemorySetting {
+            key,
+            value: crate::settings::SettingValue::Int(value),
+        }),
         "thinking_summary_history_window_secs" => {
             Some(Action::SetThinkingSummaryHistoryWindowSecs(value))
         }

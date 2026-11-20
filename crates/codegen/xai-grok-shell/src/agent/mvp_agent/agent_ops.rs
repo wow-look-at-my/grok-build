@@ -2602,6 +2602,7 @@ impl MvpAgent {
                 std::sync::atomic::AtomicBool::new(false),
             ),
             tier_recheck_in_flight: Arc::new(std::sync::atomic::AtomicBool::new(false)),
+            tier_recheck_done: Arc::new(tokio::sync::Notify::new()),
             workspace_ops: RefCell::new(None),
             #[cfg(all(feature = "local-workspace", unix))]
             local_workspace_supervisors: Rc::new(RefCell::new(HashMap::new())),

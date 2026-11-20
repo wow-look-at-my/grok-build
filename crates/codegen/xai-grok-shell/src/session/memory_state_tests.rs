@@ -2,9 +2,26 @@ use std::sync::Arc;
 use std::sync::atomic::{AtomicBool, Ordering};
 
 use super::{
-    CaptureWorker, EmbeddingFailures, FlushLockGuard, V2DreamWorkers,
+    CaptureWorker, EmbeddingFailures, FlushLockGuard, RecallState, V2DreamWorkers,
     run_v2_initialization_blocking,
 };
+
+/// A compaction calls this. Every note can then be shown again, and the conversation gets a new start time.
+#[test]
+fn a_reset_forgets_what_the_conversation_was_shown() {
+    let mut state = RecallState {
+        cursor: 12,
+        seeded: true,
+        conversation_start: Some(std::time::SystemTime::now()),
+        ..RecallState::default()
+    };
+    state.seen.insert("ref-of-a-shown-note".to_owned());
+    state.reset();
+    assert_eq!(state.cursor, 0);
+    assert!(state.seen.is_empty());
+    assert!(!state.seeded);
+    assert!(state.conversation_start.is_none());
+}
 
 #[test]
 fn one_missed_embedding_call_is_not_reported_and_a_second_in_a_row_is_reported_once() {

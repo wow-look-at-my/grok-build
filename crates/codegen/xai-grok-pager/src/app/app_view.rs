@@ -969,6 +969,10 @@ pub struct AppView {
     /// Persisted `[toolset.ask_user_question].timeout_enabled` mirror, seeded from the effective TOML merge like `show_tips`.
     /// `None` means unset in TOML (default `true`); toggles write the user layer.
     pub ask_user_question_timeout_enabled: Option<bool>,
+    /// The memory options of the effective config, seeded at startup; settings writes update it.
+    pub memory_settings: xai_grok_shell::util::config::MemorySettingsMirror,
+    /// What recall matches with, from the memory options at startup. The memory browser shows it.
+    pub memory_recall_line: std::sync::Arc<str>,
     /// `[features].subagent_model_inheritance` as the settings modal shows it: the saved user key plus the tiers seeded at startup.
     pub subagent_model_inheritance: crate::settings::FeatureOverrideState,
     /// `[features].two_pass_compaction` as the settings modal shows it.
@@ -1240,7 +1244,8 @@ impl AppView {
         self.can_administer_team = meta.can_administer_team;
         self.coding_data_retention_opt_out = meta.coding_data_retention_opt_out;
         self.shell_feedback_trace_offer = meta.feedback_trace_offer;
-        self.gate = meta.gate.clone();
+        // No paywall in this build: a gate in the meta of an older shell is dropped.
+        self.gate = None;
         if was_gated && self.gate.is_none() {
             self.paywall_check_started = None;
             xai_grok_telemetry::session_ctx::log_event(
@@ -1506,6 +1511,8 @@ impl AppView {
             coding_data_write_seq: 0,
             show_tips: None,
             ask_user_question_timeout_enabled: None,
+            memory_settings: Default::default(),
+            memory_recall_line: "".into(),
             subagent_model_inheritance: crate::settings::FeatureOverrideState::new(
                 xai_grok_shell::agent::config::Feature::SubagentModelInheritance,
             ),
