@@ -540,6 +540,24 @@ fn notes_written_by_the_session(grok_home: &Path) -> Vec<PathBuf> {
     found
 }
 
+/// Every file under `dir`, relative to it.
+fn files_under(dir: &Path) -> Vec<String> {
+    let mut found = Vec::new();
+    let mut pending = vec![dir.to_path_buf()];
+    while let Some(next) = pending.pop() {
+        for entry in std::fs::read_dir(&next).into_iter().flatten().flatten() {
+            let path = entry.path();
+            if path.is_dir() {
+                pending.push(path);
+            } else if let Ok(relative) = path.strip_prefix(dir) {
+                found.push(relative.display().to_string());
+            }
+        }
+    }
+    found.sort();
+    found
+}
+
 /// The note lines of every recall reminder, grouped by the prompt they followed.
 fn recalled_notes_by_prompt(history: &[Value]) -> Vec<Vec<String>> {
     let mut by_prompt: Vec<Vec<String>> = vec![Vec::new(); MEMORY_PROMPTS.len()];
@@ -910,6 +928,10 @@ fn live_later_session_knows_what_an_earlier_session_was_told_in_passing() {
         }
     }
     println!("LIVE carry, manifests:\n{}", manifests(&grok_home));
+    println!(
+        "LIVE carry, memory files:\n{}",
+        files_under(&grok_home.join("memory-v2")).join("\n")
+    );
     // The later session must not learn the prefix from the file.
     for entry in std::fs::read_dir(&workspace)
         .into_iter()
