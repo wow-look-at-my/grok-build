@@ -355,7 +355,7 @@ async fn model_narration_mid_task_recalls_no_note() {
         "The function returns early when the list is empty. I'll add a test for that.",
         "Now I'll commit the change and push it.",
         "The write in the parser fails on Linux. Let me read the file.",
-        "I'll check the integration tests for this crate.",
+        "I'll check the tests for this crate.",
         "The release notes need a line for this fix.",
         "Let me search for where the sandbox is set up.",
     ] {
@@ -390,6 +390,10 @@ async fn model_text_that_names_a_subject_mid_task_recalls_that_note() {
         (
             "The version stamping happens at release link time, so I'll check the release step.",
             "release.md",
+        ),
+        (
+            "I'll check the integration tests for this crate.",
+            "testing.md",
         ),
     ] {
         let outcome = recall
