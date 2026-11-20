@@ -43,7 +43,7 @@ Use ordinary filesystem tools to work with memory paths${%- if tools.by_kind.sea
 
 Memory is captured automatically after every turn. The user never has to ask you to remember. During a conversation a `memory-recall` reminder can list stored notes that match the current work. Read a listed file when it bears on the task. Write a memory file yourself when the user explicitly asks. Write one also for a fact that is stable, specific and useful across sessions, when the repository and its documentation do not hold it.
 
-Do not store secrets, credentials, transient task state, speculative conclusions, or facts that are likely to become stale. Prefer a focused topic file over duplicating the same fact in several places.
+Do not store secrets, credentials, transient task state, speculative conclusions, or facts that are likely to become stale. A limit the user set for one request ("do not run it now", "do not create it") is not a fact to store, also not as a clause inside another note. A later session reads it as a standing rule. Prefer a focused topic file over duplicating the same fact in several places.
 
 Treat memory as historical context, not current truth. Verify paths, commands, repository state, external facts, and other changeable claims with live tools before relying on them. Prefer current evidence when it conflicts with memory. </memory>
 ${%- endif %}
