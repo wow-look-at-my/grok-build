@@ -182,6 +182,7 @@ async fn an_observation_of_the_asking_session_is_never_returned() {
         focus: Some(text),
         session_id: Some(session_id),
         conversation_start: None,
+        mid_task: false,
     };
 
     // The observation fixture names this session as its source.
@@ -212,6 +213,7 @@ async fn a_topic_written_since_the_conversation_began_is_never_returned() {
         focus: Some(text),
         session_id: Some("sess-asking"),
         conversation_start: Some(conversation_start),
+        mid_task: false,
     };
     let recall = fixture.recall(V2RecallConfig::default());
     let before_the_write = SystemTime::now() - Duration::from_secs(60);
@@ -329,6 +331,76 @@ async fn everyday_prompts_recall_no_note() {
                 .iter()
                 .map(|hit| (&hit.title, &hit.matched_terms))
                 .collect::<Vec<_>>()
+        );
+    }
+}
+
+fn mid_task(text: &str) -> V2RecallQuery<'_> {
+    V2RecallQuery {
+        mid_task: true,
+        ..V2RecallQuery::from(text)
+    }
+}
+
+/// What a model writes between tool calls. It shares the repository's words with every note.
+#[tokio::test]
+async fn model_narration_mid_task_recalls_no_note() {
+    let fixture = fixture();
+    seed_repository_notes(&fixture);
+    let recall = fixture.recall(V2RecallConfig::default());
+
+    for text in [
+        "Let me look at the failing test first.",
+        "I'll run the build again to check the change.",
+        "The function returns early when the list is empty. I'll add a test for that.",
+        "Now I'll commit the change and push it.",
+        "The write in the parser fails on Linux. Let me read the file.",
+        "I'll check the integration tests for this crate.",
+        "The release notes need a line for this fix.",
+        "Let me search for where the sandbox is set up.",
+    ] {
+        let outcome = recall
+            .recall(mid_task(text), None, &HashSet::new())
+            .await
+            .unwrap();
+        assert!(
+            outcome.hits.is_empty(),
+            "`{text}` is narration, and recalled {:?}",
+            outcome
+                .hits
+                .iter()
+                .map(|hit| (&hit.title, &hit.matched_terms))
+                .collect::<Vec<_>>()
+        );
+    }
+}
+
+/// Model text that names a note's subject in a couple of words of its title or headings recalls that note, and only it.
+#[tokio::test]
+async fn model_text_that_names_a_subject_mid_task_recalls_that_note() {
+    let fixture = fixture();
+    seed_repository_notes(&fixture);
+    let recall = fixture.recall(V2RecallConfig::default());
+
+    for (text, file) in [
+        (
+            "The Landlock sandbox jail denies this write. I need the allow list.",
+            "sandbox.md",
+        ),
+        (
+            "The version stamping happens at release link time, so I'll check the release step.",
+            "release.md",
+        ),
+    ] {
+        let outcome = recall
+            .recall(mid_task(text), None, &HashSet::new())
+            .await
+            .unwrap();
+        assert_eq!(outcome.hits.len(), 1, "`{text}`: {:?}", outcome.hits);
+        assert!(
+            top(&outcome).path.ends_with(file),
+            "`{text}`: {:?}",
+            outcome.hits
         );
     }
 }

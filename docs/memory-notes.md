@@ -18,8 +18,8 @@ Memory-v2 needs no command. It has none for saving or consolidating. There is no
 
 ## Recall
 
-- `inject_memory_recall` (`acp_session_impl/memory_recall.rs`) is not a tool. It searches only when the conversation holds a prompt it has not read (`recall_prompt`): a person's message, an interjection or another agent's message. A model round with no new prompt searches nothing.
-- The query is that newest prompt and nothing else. The model's own text and its tool-call arguments stay out: they share words with every note of the same repository. With them in the query, a note matches on almost every round.
+- `inject_memory_recall` (`acp_session_impl/memory_recall.rs`) is not a tool. It runs before each model round on the conversation items it has not read. A new prompt (`recall_prompt`: a person's message, an interjection or another agent's message) is the whole query.
+- A round with no new prompt queries the model's own new prose (`recall_model_text`), with `V2RecallQuery::mid_task` set. Tool-call arguments and tool results stay out: they hold paths and code that share words with every note. Mid-task gates are stricter. A word match needs matched terms that name the note's subject and one more matched term. A semantic hit needs `MID_TASK_EXTRA_STANDARD_SCORE` more, and at most one note comes back. Without those gates a note matched on almost every round.
 - An observation that the asking session captured is never returned (`V2RecallQuery::session_id`). Capture writes it from the conversation, so a reminder of it repeats what was just said.
 - A file written since the live conversation began is never returned (`V2RecallQuery::conversation_start`, kept in `RecallState`). Consolidation turns the session's observations into a topic within minutes, and a topic names no session. A compaction clears the start time, because the conversation no longer holds what those files say.
 - A subagent runs no recall. Its prompt is a brief its parent wrote.
