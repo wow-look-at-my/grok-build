@@ -932,6 +932,12 @@ fn live_later_session_knows_what_an_earlier_session_was_told_in_passing() {
         "LIVE carry, memory files:\n{}",
         files_under(&grok_home.join("memory-v2")).join("\n")
     );
+    let memory_writes: Vec<String> = history_holding(&grok_home, EARLIER_PROMPTS[1])
+        .iter()
+        .filter(|item| item["type"] == "assistant" && item.to_string().contains("memory-v2"))
+        .map(|item| item.to_string())
+        .collect();
+    println!("LIVE carry, earlier assistant items that name memory-v2: {memory_writes:#?}");
     // The later session must not learn the prefix from the file.
     for entry in std::fs::read_dir(&workspace)
         .into_iter()
