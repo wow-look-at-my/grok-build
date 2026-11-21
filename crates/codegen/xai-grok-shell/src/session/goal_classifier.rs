@@ -112,8 +112,8 @@ pub(crate) fn skeptic0_model_changed(
     previous.first().map(|p| p.model.as_str()) != current.first().map(|p| p.model.as_str())
 }
 
-/// Per-skeptic JSON verdict FILE NAME template (rooted under the per-goal scratch root like [`GOAL_CLASSIFIER_DETAILS_PATH_TEMPLATE`]).
-/// scratch root like [`GOAL_CLASSIFIER_DETAILS_PATH_TEMPLATE`]).
+/// Per-skeptic JSON verdict FILE NAME template, rooted under the per-goal
+/// scratch root like [`GOAL_CLASSIFIER_DETAILS_PATH_TEMPLATE`].
 pub(crate) const GOAL_VERIFIER_VERDICT_PATH_TEMPLATE: &str =
     "goal-verdict-{verifier_id}-{attempt}-{skeptic_idx}.json";
 
@@ -166,7 +166,7 @@ pub(crate) const USER_CANCELLED_VERIFICATION_NOTE: &str = "The user cancelled th
 /// Subagent spawn abstraction. Production uses [`ChannelSpawner`]; tests use [`MockSpawner`].
 #[async_trait::async_trait]
 pub(crate) trait GoalClassifierSpawner: Send + Sync {
-    /// Spawn under `id` and return the final reply when the subagent
+    /// Spawn under `id` and return the final reply when the subagent finishes.
     /// `resume_from`, when `Some`, names a previously-completed subagent session whose transcript, tool state, and model the new child inherits.
     /// Used to resume skeptic 0 across attempts.
     async fn spawn_classifier(

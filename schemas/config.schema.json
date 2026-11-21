@@ -2054,6 +2054,13 @@
 					],
 					"description": "Gate the model's turn end on red CI for the branch it pushed."
 				},
+				"split_and_tee_commands": {
+					"type": [
+						"boolean",
+						"null"
+					],
+					"description": "Experimental split-and-tee mode."
+				},
 				"min_output_tokens_per_sec": {
 					"type": [
 						"integer",

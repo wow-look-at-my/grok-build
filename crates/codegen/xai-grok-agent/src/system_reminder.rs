@@ -18,6 +18,8 @@ pub struct ReminderPolicy {
     pub stop_gate_unfinished_todos: bool,
     /// Master switch for the built-in CI-stop gate.
     pub stop_gate_ci_failing: bool,
+    /// Experimental split-and-tee mode: a `;`/`&&` chain in one bash call runs as separate tool calls.
+    pub split_joined_commands: bool,
 }
 
 impl Default for ReminderPolicy {
@@ -28,6 +30,7 @@ impl Default for ReminderPolicy {
             todo_gate: TodoGateConfig::default(),
             stop_gate_unfinished_todos: true,
             stop_gate_ci_failing: true,
+            split_joined_commands: false,
         }
     }
 }
