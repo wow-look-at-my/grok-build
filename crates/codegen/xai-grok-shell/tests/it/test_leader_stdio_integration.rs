@@ -629,8 +629,15 @@ async fn test_runtime_profile_finalizes_on_graceful_shutdown() {
         }
 
         handle.cancel.cancel();
-        tokio::time::sleep(Duration::from_millis(200)).await;
-        assert!(output_path.exists());
+        // The shutdown writes the profile on its own schedule.
+        let deadline = tokio::time::Instant::now() + Duration::from_secs(30);
+        while !output_path.exists() {
+            assert!(
+                tokio::time::Instant::now() < deadline,
+                "the shutdown never wrote the profile"
+            );
+            tokio::time::sleep(Duration::from_millis(20)).await;
+        }
     } else {
         let error = client
             .send_control(ControlCommand::StartCpuProfile {
