@@ -27,6 +27,10 @@ const BOTH_PATHS_BONUS: f64 = 0.1;
 const KEY_HEX_CHARS: usize = 16;
 /// A standard score at or above this ranks as a full semantic match.
 const FULL_MATCH_STANDARD_SCORE: f64 = 8.0;
+/// A mid-task semantic hit needs this much more standard score than a hit for a prompt.
+const MID_TASK_EXTRA_STANDARD_SCORE: f64 = 1.0;
+/// A mid-task word match needs this many matched terms that name the note's subject.
+const MID_TASK_SUBJECT_TERMS: usize = 2;
 /// Fewer baseline vectors than this give no usable spread.
 const MIN_BASELINE_VECTORS: usize = 8;
 /// Keeps a near-constant baseline from turning a small difference into a large standard score.
@@ -172,6 +176,8 @@ pub struct V2RecallQuery<'a> {
     pub session_id: Option<&'a str>,
     /// When the asking conversation began.
     pub conversation_start: Option<SystemTime>,
+    /// The query is the model's own text in the middle of a task, not a prompt a person wrote.
+    pub mid_task: bool,
 }
 
 impl<'a> From<&'a str> for V2RecallQuery<'a> {
@@ -181,6 +187,7 @@ impl<'a> From<&'a str> for V2RecallQuery<'a> {
             focus: Some(text),
             session_id: None,
             conversation_start: None,
+            mid_task: false,
         }
     }
 }
@@ -294,11 +301,12 @@ impl V2Recall {
         let inner = Arc::clone(&self.inner);
         let query_counts = term_counts(query.text);
         let conversation_start = query.conversation_start;
+        let mid_task = query.mid_task;
         let (chunks, lexical, written_since_start) = tokio::task::spawn_blocking(move || {
             let chunks = inner.refresh()?;
             let query_terms =
                 distinctive_terms(&chunks, &query_counts, inner.config.max_query_terms);
-            let lexical = lexical_scores(&chunks, &query_terms, &inner.config);
+            let lexical = lexical_scores(&chunks, &query_terms, &inner.config, mid_task);
             let written_since_start: HashSet<PathBuf> = match conversation_start {
                 Some(start) => inner
                     .files
@@ -317,20 +325,22 @@ impl V2Recall {
         let focus = query.focus.filter(|focus| !focus.trim().is_empty());
         let (mode, semantic) = match provider.zip(focus) {
             None => (V2RecallMode::Lexical, vec![None; chunks.len()]),
-            Some((provider, focus)) => match self.vector_scores(&chunks, focus, provider).await {
-                Ok(scores) => (V2RecallMode::Hybrid, scores),
-                Err(error) => {
-                    tracing::warn!(
-                        target: MEMORY_LOG_TARGET,
-                        error = %error,
-                        "memory recall embedding failed; using lexical hits only"
-                    );
-                    (
-                        V2RecallMode::EmbeddingFailed(error),
-                        vec![None; chunks.len()],
-                    )
+            Some((provider, focus)) => {
+                match self.vector_scores(&chunks, focus, provider, mid_task).await {
+                    Ok(scores) => (V2RecallMode::Hybrid, scores),
+                    Err(error) => {
+                        tracing::warn!(
+                            target: MEMORY_LOG_TARGET,
+                            error = %error,
+                            "memory recall embedding failed; using lexical hits only"
+                        );
+                        (
+                            V2RecallMode::EmbeddingFailed(error),
+                            vec![None; chunks.len()],
+                        )
+                    }
                 }
-            },
+            }
         };
 
         let config = &self.inner.config;
@@ -383,7 +393,7 @@ impl V2Recall {
         });
         let mut files = HashSet::new();
         hits.retain(|hit| files.insert(hit.path.clone()));
-        hits.truncate(config.max_hits);
+        hits.truncate(if mid_task { 1 } else { config.max_hits });
         Ok(V2RecallOutcome {
             hits,
             mode,
@@ -397,6 +407,7 @@ impl V2Recall {
         chunks: &[Arc<CorpusChunk>],
         query: &str,
         provider: &dyn EmbeddingProvider,
+        mid_task: bool,
     ) -> Result<Vec<Option<f64>>, String> {
         if chunks.is_empty() || query.trim().is_empty() {
             return Ok(vec![None; chunks.len()]);
@@ -562,9 +573,12 @@ impl V2Recall {
             .flatten()
             .copied()
             .fold(f64::NEG_INFINITY, f64::max);
-        let floor = config
-            .min_standard_score
-            .max(best * config.runner_up_fraction);
+        let extra = if mid_task {
+            MID_TASK_EXTRA_STANDARD_SCORE
+        } else {
+            0.0
+        };
+        let floor = (config.min_standard_score + extra).max(best * config.runner_up_fraction);
         Ok(standard_scores
             .into_iter()
             .map(|score| score.filter(|score| *score >= floor))
@@ -1028,7 +1042,13 @@ fn lexical_scores(
     chunks: &[Arc<CorpusChunk>],
     query_terms: &BTreeSet<String>,
     config: &V2RecallConfig,
+    mid_task: bool,
 ) -> Vec<LexicalScore> {
+    let (subject_terms, min_matched) = if mid_task {
+        (MID_TASK_SUBJECT_TERMS, config.min_matched_terms + 1)
+    } else {
+        (1, config.min_matched_terms)
+    };
     let total = chunks.len() as f64;
     let idf_max = (1.0 + (total - 0.5) / 1.5).ln();
     let idf: HashMap<&str, f64> = query_terms
@@ -1050,10 +1070,12 @@ fn lexical_scores(
             // Words that only the body shares say the query and the note use the same vocabulary, not that the query is about the note.
             let names_subject = matched
                 .iter()
-                .any(|term| chunk.subject_terms.contains(term));
+                .filter(|term| chunk.subject_terms.contains(*term))
+                .count()
+                >= subject_terms;
             let qualifies = idf_max > 0.0
                 && names_subject
-                && matched.len() >= config.min_matched_terms
+                && matched.len() >= min_matched
                 && weight >= config.min_term_weight * idf_max;
             LexicalScore {
                 score: qualifies.then(|| (weight / (3.0 * idf_max)).min(1.0)),
