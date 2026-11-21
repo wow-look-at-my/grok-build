@@ -1,6 +1,13 @@
+use super::system_prompt::{
+    RequestedSystemPrompt, read_session_or_init_meta_str, requested_system_prompt,
+};
 use super::test_hooks::{AttachPause, with_pause_at};
 use super::*;
+use crate::agent::config::TraceUploadEndpoints;
+use crate::agent::config::{EndpointsConfig, ModelEntry};
+use crate::agent::handlers::model_switch::SwitchContextWindow;
 use crate::extensions::code_nav::CodeNavEligibility;
+use std::num::NonZeroU64;
 /// Build an unsigned JWT with a `tier` claim (header.payload.sig base64url).
 fn jwt_with_tier(tier: u64) -> String {
     use base64::Engine;
@@ -847,9 +854,16 @@ fn parse_session_plugin_dirs_filters_and_dedupes() {
             42,                             // not a string, skipped
         ]
     });
-    assert_eq!(parse_session_plugin_dirs(meta.as_object()), vec![dir]);
-    assert!(parse_session_plugin_dirs(None).is_empty());
-    assert!(parse_session_plugin_dirs(serde_json::json!({}).as_object()).is_empty());
+    assert_eq!(
+        &[dir],
+        parse_session_plugin_dirs(meta.as_object()).as_paths()
+    );
+    assert!(parse_session_plugin_dirs(None).as_paths().is_empty());
+    assert!(
+        parse_session_plugin_dirs(serde_json::json!({}).as_object())
+            .as_paths()
+            .is_empty()
+    );
 }
 #[test]
 fn read_session_or_init_meta_str_returns_none_when_absent() {
@@ -931,6 +945,40 @@ fn system_prompt_override_from_meta_prefers_session_and_rejects_empty() {
         None
     );
     assert_eq!(system_prompt_override_from_meta(None, None), None);
+}
+#[test]
+fn override_wins_over_rules() {
+    let cases = [
+        (
+            serde_json::json!({ "systemPromptOverride": "you are terse", "rules": "keep the marker" }),
+            Some(RequestedSystemPrompt::Override("you are terse")),
+        ),
+        (
+            serde_json::json!({ "systemPromptOverride": "you are terse" }),
+            Some(RequestedSystemPrompt::Override("you are terse")),
+        ),
+        (
+            serde_json::json!({ "rules": "keep the marker" }),
+            Some(RequestedSystemPrompt::Rules("keep the marker")),
+        ),
+        (serde_json::json!({}), None),
+    ];
+    for (init, expected) in cases {
+        assert_eq!(expected, requested_system_prompt(None, init.as_object()));
+    }
+}
+#[test]
+fn blank_override_is_no_override() {
+    let cases = [
+        (
+            serde_json::json!({ "systemPromptOverride": "  ", "rules": "keep the marker" }),
+            Some(RequestedSystemPrompt::Rules("keep the marker")),
+        ),
+        (serde_json::json!({ "systemPromptOverride": "" }), None),
+    ];
+    for (init, expected) in cases {
+        assert_eq!(expected, requested_system_prompt(None, init.as_object()));
+    }
 }
 #[test]
 fn enqueue_replace_system_prompt_override_sends_when_present() {
@@ -1121,7 +1169,7 @@ fn file_toolset_override_invalid_config_returns_error() {
     assert!(err.unwrap_err().contains("unknown"));
 }
 /// Requires a tokio runtime for SessionSignalsHandle::new().
-fn make_test_handle(
+pub(super) fn make_test_handle(
     model: &str,
     yolo: bool,
     client_id: Option<&str>,
@@ -1138,6 +1186,7 @@ fn make_test_handle(
         hunk_cancel,
     );
     crate::session::SessionHandle {
+        context_window_selection: Default::default(),
         cmd_tx,
         persistence_tx,
         registry_write_order: Default::default(),
@@ -1705,6 +1754,103 @@ async fn a_restored_session_with_no_effort_anywhere_still_gets_one() {
         restore_effort_via_load(Some(ReasoningEffort::None), None).await,
         Some(ReasoningEffort::None),
         "an explicit none is kept"
+    );
+}
+#[tokio::test]
+async fn restore_applies_the_saved_context_window_selection() {
+    let agent = build_minimal_agent_for_tests();
+    let mut entry = ModelEntry::fallback("window-model", &EndpointsConfig::default());
+    entry.info.context_window = NonZeroU64::new(256_000).unwrap();
+    entry.info.context_windows = vec![
+        NonZeroU64::new(256_000).unwrap(),
+        NonZeroU64::new(500_000).unwrap(),
+    ];
+    agent
+        .models_manager
+        .insert_test_entry("window-model", entry);
+    agent.models_manager.settle_first_catalog_for_tests(true);
+    let sid = acp::SessionId::new("restore-window-sess");
+    let (handle, _cmd_tx, mut cmd_rx) = make_live_session_handle(&sid, None);
+    let (switch_tx, switch_rx) = tokio::sync::oneshot::channel();
+    tokio::spawn(async move {
+        while let Some(cmd) = cmd_rx.recv().await {
+            if let crate::session::SessionCommand::SetSessionModel {
+                switch,
+                responds_to,
+            } = cmd
+            {
+                let _ = switch_tx.send((
+                    switch.context_window_selection,
+                    switch
+                        .supported_context_windows
+                        .contains(&NonZeroU64::new(500_000).unwrap()),
+                ));
+                let _ = responds_to.send(Ok(acp::ModelId::new(switch.sampling_config.model)));
+                break;
+            }
+        }
+    });
+    agent.insert_resident(&sid, handle);
+    let info = crate::session::info::Info {
+        id: sid.clone(),
+        cwd: "/tmp".to_string(),
+    };
+    let mut summary =
+        crate::session::persistence::Summary::new(&info, acp::ModelId::new("window-model"))
+            .unwrap();
+    summary.context_window = NonZeroU64::new(500_000);
+    agent.restore_persisted_model(&sid, &summary, None).await;
+    assert_eq!(
+        (SwitchContextWindow::Set(NonZeroU64::new(500_000)), true),
+        switch_rx.await.expect("restore switches the model")
+    );
+}
+#[tokio::test]
+async fn restore_keeps_the_saved_context_window_selection_without_a_catalog() {
+    let agent = build_minimal_agent_for_tests();
+    let mut entry = ModelEntry::fallback("bundled-model", &EndpointsConfig::default());
+    entry.info.context_window = NonZeroU64::new(256_000).unwrap();
+    agent
+        .models_manager
+        .insert_test_entry("bundled-model", entry);
+    agent.models_manager.settle_first_catalog_for_tests(false);
+    let sid = acp::SessionId::new("restore-no-catalog-sess");
+    let (handle, _cmd_tx, mut cmd_rx) = make_live_session_handle(&sid, None);
+    let selection = handle.context_window_selection.clone();
+    let (switch_tx, switch_rx) = tokio::sync::oneshot::channel();
+    tokio::spawn(async move {
+        while let Some(cmd) = cmd_rx.recv().await {
+            if let crate::session::SessionCommand::SetSessionModel {
+                switch,
+                responds_to,
+            } = cmd
+            {
+                let _ = switch_tx.send((
+                    switch.context_window_selection,
+                    switch.sampling_config.context_window,
+                ));
+                let _ = responds_to.send(Ok(acp::ModelId::new(switch.sampling_config.model)));
+                break;
+            }
+        }
+    });
+    agent.insert_resident(&sid, handle);
+    let info = crate::session::info::Info {
+        id: sid.clone(),
+        cwd: "/tmp".to_string(),
+    };
+    let mut summary =
+        crate::session::persistence::Summary::new(&info, acp::ModelId::new("bundled-model"))
+            .unwrap();
+    summary.context_window = NonZeroU64::new(500_000);
+    agent.restore_persisted_model(&sid, &summary, None).await;
+    assert_eq!(
+        (SwitchContextWindow::Preserve, 256_000),
+        switch_rx.await.expect("restore switches the model")
+    );
+    assert_eq!(
+        500_000,
+        selection.load(std::sync::atomic::Ordering::Relaxed)
     );
 }
 /// A session persisted under a routing *slug* (not the catalog map key) must still get reasoning modes and a selected model.
@@ -2931,9 +3077,9 @@ fn write_plugin_manifest(dir: &std::path::Path, name: &str) {
     std::fs::write(dir.join("plugin.json"), format!(r#"{{"name": "{name}"}}"#)).unwrap();
 }
 /// Kill-switch ordering through the production session-less `example.invalid/plugins/reload` path (no resident
-/// session, so the rebuild targets the launch dir). `resolve_effective_plugins_config` consults the
-/// folder-trust gate, whose cold-key backstop resolves WITHOUT remote settings and records a durable
-/// verdict; if the disk read ran before the real-remote resolve, a cold launch dir under an org
+/// session, so the rebuild targets the launch dir). The folder-trust gate's cold-key backstop
+/// resolves WITHOUT remote settings and records a durable verdict. If it ran before the real-remote
+/// resolve, a cold launch dir under an org
 /// kill-switch (`folder_trust_enabled = Some(false)`) would be stamped with a kill-switch-blind deny
 /// that the store-only reconcile can never lift. Mirrors
 /// `kill_switched_cold_cwd_stays_allowed_through_plugins_config_read` for the shared rebuild.
@@ -2973,7 +3119,7 @@ async fn plugins_reload_resolves_real_remote_trust_before_reading_disk_config() 
         "kill-switched folder counts trusted, so the project [plugins].paths plugin must be discovered"
     );
 }
-/// A session-less `example.invalid/plugins/reload` must re-resolve the launch dir's folder trust rather than
+/// A session-less `example.invalid/plugins/reload` must re-resolve the launch dir's folder trust.
 /// reuse the startup primer's memoized verdict. The primer records a point-in-time answer, and a
 /// no-configs launch dir yields a non-durable "trusted" allow; if repo-local plugin configs appear
 /// afterwards, a reload that reused that allow would grant them executable trust with no check.
@@ -6514,6 +6660,30 @@ fn disconnect_unloads_idle_session_without_finalize() {
         );
     });
 }
+#[test]
+fn evict_sessions_refuses_the_next_prompt() {
+    use acp::Agent as _;
+    run_local_for_bridge_test(|| async {
+        let agent = build_minimal_agent_for_tests();
+        let sid = acp::SessionId::new("sess-evict-prompt");
+        let (handle, _cmd_tx, cmd_rx) = make_live_session_handle(&sid, None);
+        agent.insert_resident(&sid, handle);
+        drop(spawn_fake_actor(cmd_rx, false));
+        drive_disconnect(&agent, &sid).await;
+        let err = agent
+            .prompt(acp::PromptRequest::new(
+                sid,
+                vec![acp::ContentBlock::from("next")],
+            ))
+            .await
+            .expect_err("an evicted session must refuse the next prompt");
+        assert_eq!(acp::Error::invalid_params().code, err.code);
+        assert_eq!(
+            Some("unknown session id"),
+            err.data.as_ref().and_then(|data| data.as_str())
+        );
+    });
+}
 /// The `IsBusy` keep-resident path. A between-turns session (`current_prompt_id = None`) whose actor answers `IsBusy = true` must be kept resident. True here means inputs are queued at the turn boundary.
 /// It must NOT be unloaded and must receive no `Shutdown`. This exercises the async round-trip that the sync fast-path tests skip.
 #[test]
@@ -7124,7 +7294,7 @@ fn gated_reconnect_recheck_lifts_gate_clearing_paywall_flash() {
     });
 }
 /// Agent with pre-loaded auth, a gateway receiver (to assert emitted notifications), and the proxy URL pointed at a mock `/v1/settings`.
-fn build_agent_with_auth_and_proxy(
+pub(super) fn build_agent_with_auth_and_proxy(
     auth: xai_grok_login::GrokAuth,
     proxy_url: String,
     mode: crate::agent::config::AgentMode,

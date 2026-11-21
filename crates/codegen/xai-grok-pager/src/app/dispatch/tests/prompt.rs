@@ -3492,10 +3492,7 @@ fn switch_model_holds_prompt_until_complete() {
     let model_id = acp::ModelId::new(std::sync::Arc::from("grok-4.5"));
 
     dispatch(
-        Action::SwitchModel {
-            model_id: model_id.clone(),
-            effort: None,
-        },
+        Action::SwitchModel(ModelChoice::new(model_id.clone())),
         &mut app,
     );
     assert!(agent_ref(&app, id).session.model_switch_pending);
@@ -3510,8 +3507,7 @@ fn switch_model_holds_prompt_until_complete() {
     let effects = dispatch(
         Action::TaskComplete(TaskResult::SwitchModelComplete {
             agent_id: id,
-            model_id,
-            effort: None,
+            choice: ModelChoice::new(model_id),
             result: Ok(()),
             prev_model_id: None,
         }),
@@ -3531,6 +3527,7 @@ fn slash_compact_enqueues_command() {
     let id = AgentId(0);
 
     let effects = dispatch(Action::SendPrompt("/compact".into()), &mut app);
+
     // /compact enqueues as Command and drains immediately (agent was idle).
     assert_eq!(effects.len(), 1);
     assert!(matches!(

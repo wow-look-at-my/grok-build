@@ -43,6 +43,8 @@ struct BlockState {
     args_acc: String,
     thinking_acc: String,
     signature: String,
+    /// The first `SignatureDelta` replaces a start-seeded signature (no doubling); later deltas append.
+    signature_delta_seen: bool,
 }
 
 #[derive(Debug, Clone, Copy, PartialEq, Eq)]
@@ -101,8 +103,8 @@ pub fn stream_messages<'a>(
         let mut final_stop_sequence: Option<String> = None;
 
         // Assistant-response accumulators (built up as ContentBlockStop events fire)
-        // Reasoning is collected into a synthesized `rs::ReasoningItem`
-        // It is emitted as a sibling `ConversationItem::Reasoning` before the trailing Assistant
+        // Each thinking block becomes its own `rs::ReasoningItem`, emitted as sibling `ConversationItem::Reasoning`s before the trailing Assistant
+        // Keeping every block matters: a narration block after real reasoning must not evict it from passback
         let mut assistant_text = String::new();
         let mut assistant_tool_calls: Vec<ToolCall> = Vec::new();
         let mut assistant_reasoning: Vec<rs::ReasoningItem> = Vec::new();
@@ -186,6 +188,7 @@ pub fn stream_messages<'a>(
                                 args_acc: String::new(),
                                 thinking_acc: thinking.clone(),
                                 signature: signature.clone(),
+                                signature_delta_seen: false,
                             },
                         );
                         if !first_token_emitted {
@@ -216,6 +219,7 @@ pub fn stream_messages<'a>(
                                 args_acc: String::new(),
                                 thinking_acc: String::new(),
                                 signature: String::new(),
+                                signature_delta_seen: false,
                             },
                         );
                         if !first_token_emitted {
@@ -254,6 +258,7 @@ pub fn stream_messages<'a>(
                                 args_acc: String::new(),
                                 thinking_acc: String::new(),
                                 signature: String::new(),
+                                signature_delta_seen: false,
                             },
                         );
 
@@ -303,7 +308,13 @@ pub fn stream_messages<'a>(
                                 }
                             }
                             StreamDelta::SignatureDelta { signature } => {
-                                state.signature = signature;
+                                // The first delta replaces any start-seeded signature so a gateway sending both never doubles it
+                                // Later deltas append: a signature split across deltas must survive whole
+                                if !state.signature_delta_seen {
+                                    state.signature_delta_seen = true;
+                                    state.signature.clear();
+                                }
+                                state.signature.push_str(&signature);
                             }
                             // A delta kind this client does not read (e.g. `citations_delta`) carries no text to show
                             StreamDelta::Unknown => {}
@@ -361,6 +372,19 @@ pub fn stream_messages<'a>(
                                     yield SamplingEvent::ReasoningCompleted {
                                         request_id: request_id.clone(),
                                         signature: state.signature.clone(),
+                                    };
+                                }
+                                // The block's deltas already streamed on the Reasoning channel
+                                // The reasoning item below carries the text back to the API, not `assistant_text`
+                                if !state.thinking_acc.is_empty()
+                                    && signature_marks_narration(&state.signature)
+                                {
+                                    chunk_index += 1;
+                                    yield SamplingEvent::ChannelToken {
+                                        request_id: request_id.clone(),
+                                        channel: SamplingChannel::Narration,
+                                        text: state.thinking_acc.clone(),
+                                        chunk_index,
                                     };
                                 }
                                 if !state.thinking_acc.is_empty() || !state.signature.is_empty() {
@@ -569,6 +593,30 @@ pub fn stream_messages<'a>(
             metrics,
         };
     }
+}
+
+/// Whether a thinking block's signature marks it as narration, a progress update for the user.
+///
+/// Models that write progress updates over the Anthropic Messages API send those mid-turn notes as thinking blocks.
+/// Under `display: "summarized"` the API gives no documented way to tell them from reasoning.
+/// The signature, however, begins with a readable header naming the block kind, `"thinking"` or `"narration"`, ahead of the opaque payload; this checks the decoded prefix for that word.
+/// If the header layout ever changes, the block falls back to plain reasoning display.
+fn signature_marks_narration(signature: &str) -> bool {
+    use base64::Engine as _;
+    // The kind string sits about 15 bytes into the decoded header
+    // 48 base64 chars decode to 36 bytes, enough to cover the header's variable-width length varints
+    let prefix_len = signature.len().min(48);
+    let Some(prefix) = signature.get(..prefix_len) else {
+        return false;
+    };
+    let aligned_len = prefix.len() - prefix.len() % 4;
+    let Some(aligned) = prefix.get(..aligned_len) else {
+        return false;
+    };
+    let Ok(bytes) = base64::engine::general_purpose::STANDARD_NO_PAD.decode(aligned) else {
+        return false;
+    };
+    bytes.windows(b"narration".len()).any(|w| w == b"narration")
 }
 
 #[cfg(test)]

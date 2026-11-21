@@ -11,45 +11,36 @@
 //! - Cancel button `[stop]` (right-aligned, red on hover)
 //!
 //! The row is hidden when idle (0 height) and appears between scrollback and prompt.
-
-use std::time::{Duration, Instant};
-
-use ratatui::buffer::Buffer;
-use ratatui::layout::Rect;
-use ratatui::style::{Color, Modifier, Style};
-use ratatui::text::{Line, Span};
-use unicode_width::UnicodeWidthStr;
-use xai_grok_workspace::permission::mcp_pretty_name_if_qualified;
-
 use crate::acp::tracker::{TurnActivity, WaitingReason};
 use crate::app::agent::{AgentCommand, AgentState};
 use crate::render::line_utils::truncate_str;
 use crate::theme::Theme;
-
+use ratatui::buffer::Buffer;
+use ratatui::layout::Rect;
+use ratatui::style::{Color, Modifier, Style};
+use ratatui::text::{Line, Span};
+use std::time::{Duration, Instant};
+use unicode_width::UnicodeWidthStr;
+use xai_grok_workspace::permission::mcp_pretty_name_if_qualified;
 /// Show each spinner frame for this many animation ticks.
 /// At ~30fps, 4 ticks is ~133ms per frame, about 7.5 spinner fps.
 pub(crate) const SPINNER_DIVISOR: u64 = 4;
-
 /// Show each monitor-pulse frame for this many animation ticks, twice the [`SPINNER_DIVISOR`] dwell (~3.75 fps).
 /// The idle still-running cue should breathe calmly rather than read like the active turn spinner.
 /// Its `○ ◎ ◉ ◎` cycle therefore runs at roughly half the speed (~1.07s per loop).
 pub(crate) const MONITOR_PULSE_DIVISOR: u64 = 8;
-
 /// Rows narrower than this hide the phase timer, which would sit beside the right-aligned turn
 /// timer and read as one confusing pair of numbers. The turn timer stays.
 pub(crate) const PHASE_TIMER_MIN_WIDTH: u16 = 60;
-
 /// Pulse speed for every "waiting on you" diamond. Always route diamond rendering through
 /// [`pending_diamond_color`] so the three call sites can never silently drift apart.
 pub(crate) const USER_WAITING_PULSE_SPEED: f32 = 0.08;
-
 /// Compute the pulsing diamond color for any "waiting on you" cue.
 pub(crate) fn pending_diamond_color(theme: &Theme, accent: Color, tick: u64) -> Color {
     let brightness = crate::theme::pulse_brightness(tick, USER_WAITING_PULSE_SPEED);
     crate::render::color::blend_color(theme.bg_base, accent, 0.3 + brightness * 0.7)
         .unwrap_or(accent)
 }
-
 #[derive(Debug, Default)]
 pub struct TurnStatusOutput {
     /// Hit area for the cancel button, if rendered.
@@ -61,7 +52,6 @@ pub struct TurnStatusOutput {
     /// `None` on keyboard-only hosts.
     pub watching_cue: Option<Rect>,
 }
-
 /// Hover state for the turn-status row's mouse affordances (`[stop]`, `[↓]`, the still-running watcher cue).
 /// `Some(_)` renders them; `None` marks a keyboard-only host (minimal mode, no mouse capture) and suppresses all.
 #[derive(Debug, Clone, Copy, Default)]
@@ -73,7 +63,6 @@ pub struct MouseButtons {
     /// Whether the mouse is over the still-running watcher cue.
     pub watching_hovered: bool,
 }
-
 /// Counts of "watcher" work: background jobs that can wake the agent for a new turn while it sits
 /// idle. This is broader than the tasks-pane `Watchers` group (monitors and loops only).
 #[derive(Debug, Clone, Copy, Default, PartialEq, Eq)]
@@ -89,19 +78,16 @@ pub struct Watchers {
     pub subagents: usize,
     pub workflows: usize,
 }
-
 impl Watchers {
     pub fn total(self) -> usize {
         self.commands + self.monitors + self.loops + self.subagents + self.workflows
     }
-
     /// The kinds a blocking `wait_tasks` / `get_task_output` wait can resolve on: commands, monitors, and subagents.
     /// Scheduled `/loop` tasks and workflows are not task waits.
     pub fn awaitable_work(self) -> usize {
         self.commands + self.monitors + self.subagents
     }
 }
-
 /// Format a `"… still running"` cue from `(count, noun)` pairs, listing only the non-zero kinds (plain-`s` plurals).
 /// Returns e.g. `"1 command · 2 monitors still running"`, or `None` when every count is zero.
 /// This is the single owner of the format mechanics, so the agent view's idle cue and the dashboard's background-work label cannot drift.
@@ -126,19 +112,20 @@ pub(crate) fn format_still_running<'a>(
     label.push_str(" still running");
     Some(label)
 }
-
 /// The idle watcher cue's label, e.g. `"1 command · 2 monitors · 1 loop · 1 subagent still running"`; `None` when no watchers are live.
 /// It leads with the counts (not an ambient "watching") so a glance under a "Worked for X" marker still reads as unfinished work.
+fn monitor_noun() -> &'static str {
+    "monitor"
+}
 fn still_running_label(watchers: Watchers) -> Option<String> {
     format_still_running([
         (watchers.commands, "command"),
-        (watchers.monitors, "monitor"),
+        (watchers.monitors, monitor_noun()),
         (watchers.loops, "loop"),
         (watchers.subagents, "subagent"),
         (watchers.workflows, "workflow"),
     ])
 }
-
 /// Whether the turn is blocked in a wait the shell aborts as soon as the user sends a message.
 /// Enter therefore sends promptly and pre-wait rows read as held.
 pub fn is_sendable_wait(activity: &Option<TurnActivity>) -> bool {
@@ -152,7 +139,6 @@ pub fn is_sendable_wait(activity: &Option<TurnActivity>) -> bool {
         ))
     )
 }
-
 /// Inputs to [`render_turn_status`]: one frame's worth of turn state.
 #[derive(Debug)]
 pub struct TurnStatusArgs<'a> {
@@ -185,7 +171,6 @@ pub struct TurnStatusArgs<'a> {
     /// The model of the running compaction request, once the shell names it.
     pub compaction_model: Option<&'a str>,
 }
-
 /// Render the turn status line into the given area.
 ///
 /// when false.
@@ -216,17 +201,13 @@ pub fn render_turn_status(
         held_queue_top_sendable,
         compaction_model,
     } = args;
-    // Resolve the mouse affordances: a keyboard-only host (`None`) suppresses both buttons and reports no hover
     let show_buttons = buttons.is_some();
     let cancel_hovered = buttons.is_some_and(|b| b.cancel_hovered);
     let bg_hovered = buttons.is_some_and(|b| b.bg_hovered);
     if area.height == 0 || area.width < 10 {
         return TurnStatusOutput::default();
     }
-
     let theme = Theme::current();
-
-    // Idle with a session create in flight shows "Starting session…" above the prompt
     if state.is_idle()
         && !drain_blocked
         && let Some(started) = session_starting_since
@@ -234,10 +215,7 @@ pub fn render_turn_status(
         render_starting_session(buf, area, started, tick, &theme);
         return TurnStatusOutput::default();
     }
-
-    // Special case: drain is blocked (user editing the front prompt, agent idle); no cancel button in this state
     if drain_blocked && state.is_idle() {
-        // Pulsing diamond in accent_user, blending toward bg.
         let diamond_color = pending_diamond_color(&theme, theme.accent_user, tick);
         let spans = vec![
             Span::styled(
@@ -252,12 +230,7 @@ pub fn render_turn_status(
         buf.set_line(area.x, area.y, &Line::from(spans), area.width);
         return TurnStatusOutput::default();
     }
-
-    // Idle or parked: a persistent cue (not scrollback, it must never scroll away). Parked never falls
-    // through to the running-turn chrome (spinner/timers/[stop]). The wait aborts the moment the user
-    // types, so that chrome would lie.
     if state.is_idle() || parked {
-        // Parked with held queued rows: the queued hint says what Enter does (act on the queue now), so it replaces the generic interrupt copy
         let parked_suffix = if held_queue > 0 && held_queue_top_sendable {
             format!(" \u{00b7} {held_queue} queued, Enter to send now")
         } else if held_queue > 0 {
@@ -272,8 +245,6 @@ pub fn render_turn_status(
             (None, false) => None,
         };
         if let Some(cue) = cue {
-            // Pulsing concentric circle (○ ◎ ◉ ◎) on a calm cadence
-            // The agent is idle, so this breath runs slower than the active turn spinner (see MONITOR_PULSE_DIVISOR)
             let frames = crate::glyphs::monitor_icon_frames();
             let frame_idx = (tick / MONITOR_PULSE_DIVISOR) as usize % frames.len();
             let Some(frame) = frames.get(frame_idx) else {
@@ -291,8 +262,6 @@ pub fn render_turn_status(
                 Span::styled(cue, Style::default().fg(label_fg)),
             ];
             buf.set_line(area.x, area.y, &Line::from(spans), area.width);
-            // The cue opens the tasks pane on click, so the hit area is advertised only when there are tasks to show
-            // A watcherless parked cue has nothing behind it
             return TurnStatusOutput {
                 watching_cue: (show_buttons && watchers.total() > 0)
                     .then(|| Rect::new(area.x, area.y, cue_width, 1)),
@@ -301,8 +270,6 @@ pub fn render_turn_status(
         }
         return TurnStatusOutput::default();
     }
-
-    // [stop] shows while running AND while cancelling (the click routes to the cancel-retry path); hidden when idle or on a keyboard-only host
     let show_cancel = show_buttons
         && matches!(
             state,
@@ -325,9 +292,6 @@ pub fn render_turn_status(
     if matches!(state, AgentState::Idle) {
         return TurnStatusOutput::default();
     }
-
-    // Build right-aligned content first (to know how much space is left)
-    // Format: `1m20s` or `1m20s ⇣12k` (with tokens).
     let turn_timer_str = match (turn_elapsed, total_tokens) {
         (Some(d), Some(tokens)) if tokens > 0 => {
             format!(
@@ -373,10 +337,6 @@ pub fn render_turn_status(
         ""
     };
     let bg_width = bg_str.width();
-
-    // Cancel button: always `[stop]`, with a leading space only when the bg button is not shown (otherwise they're adjacent)
-    // Every arm is a `&'static str` so the per-frame status line never allocates
-    // Hover state is conveyed by color (red on hover, see `cancel_style`), not by swapping the label
     let cancel_str: &str = match (show_cancel, show_bg) {
         (false, _) => "",
         (true, true) => "[stop]",
@@ -399,16 +359,12 @@ pub fn render_turn_status(
         }
     };
     let spinner_width = spinner_str.width();
-
-    // "Ask" tools (AskUserQuestion): suppress the phase timer so the user doesn't feel time-pressured while answering questions
     let is_asking = is_tool
         && matches!(
             activity,
             Some(TurnActivity::ToolRunning { title, .. })
                 if title.starts_with("Ask: ") || title.starts_with("Ask ")
         );
-
-    // Phase timer (gray, same as turn timer); hidden for ask tools and on narrow rows
     let phase_timer_str = if is_asking || area.width < PHASE_TIMER_MIN_WIDTH {
         String::new()
     } else {
@@ -417,9 +373,6 @@ pub fn render_turn_status(
             .unwrap_or_default()
     };
     let phase_timer_width = phase_timer_str.width();
-
-    // Timer style (gray for both phase and turn timers). A Style with bg:None (the default) cannot
-    // restore bg after a reset, and a Style without remove_modifier cannot clear leaked modifiers.
     let timer_bg = if flat_background {
         Color::Reset
     } else {
@@ -429,9 +382,6 @@ pub fn render_turn_status(
         .fg(theme.gray)
         .bg(timer_bg)
         .remove_modifier(Modifier::all());
-
-    // Available width for activity label (only the label truncates)
-    // Layout: spinner + label + phase_timer + queued_hint + gap(1) + turn_timer + cancel
     let min_gap = 1;
     let available_for_label = (area.width as usize)
         .saturating_sub(spinner_width)
@@ -439,12 +389,7 @@ pub fn render_turn_status(
         .saturating_sub(min_gap)
         .saturating_sub(right_width)
         .saturating_sub(2);
-
     let mut left_spans: Vec<Span<'static>> = Vec::with_capacity(5);
-
-    // Spinner color: usually inherits the activity color (green for tools, secondary for thinking/responding, yellow for retries)
-    // While the tool is parked on the user we render `◆` pulsing smoothly from dim to bright in `accent_user`
-    // That matches the drain-blocked and plan-approval indicators, so every "your turn" status has the same visual cadence
     let spinner_style = if is_pending_user_input {
         let diamond_color = pending_diamond_color(&theme, theme.accent_user, tick);
         Style::default().fg(diamond_color)
@@ -452,14 +397,10 @@ pub fn render_turn_status(
         activity_style
     };
     left_spans.push(Span::styled(spinner_str, spinner_style));
-
-    // Activity label (potentially truncated)
     let mut queued_hint: Option<Span<'static>> = None;
     if is_tool {
         if let Some(TurnActivity::ToolRunning { title, description }) = activity {
             if is_asking {
-                // Ask tools render as a unified gray label (like Thinking/Responding), not as a command invocation
-                // Yellow is reserved for shell commands
                 let detail = title
                     .strip_prefix("Ask: ")
                     .or_else(|| title.strip_prefix("Ask "))
@@ -472,13 +413,10 @@ pub fn render_turn_status(
                 .map(str::trim)
                 .filter(|s| !s.is_empty())
             {
-                // Bash (and similar) tools carry a human description; prefer it over the raw command for the status line
-                // A sleep or long-running exec then reads as `{description}…` rather than `Run sleep 5 && …`
                 let msg = crate::acp::tracker::format_waiting_for_subject(desc);
                 let display = truncate_str(&msg, available_for_label);
                 left_spans.push(Span::styled(display, activity_style));
             } else if let Some(query) = title.strip_prefix("Web search: ") {
-                // Web search renders "Search " (muted) then the query (yellow)
                 let prefix = "Search ";
                 let prefix_width = prefix.width();
                 let query = query.trim_matches('"');
@@ -487,7 +425,6 @@ pub fn render_turn_status(
                 left_spans.push(Span::styled(prefix, Style::default().fg(theme.gray)));
                 left_spans.push(Span::styled(display, Style::default().fg(theme.command)));
             } else if let Some(url) = title.strip_prefix("Fetch: ") {
-                // Fetch tools render "Fetch " (muted) then the URL (yellow)
                 let prefix = "Fetch ";
                 let prefix_width = prefix.width();
                 let max_url = available_for_label.saturating_sub(prefix_width).max(5);
@@ -495,8 +432,6 @@ pub fn render_turn_status(
                 left_spans.push(Span::styled(prefix, Style::default().fg(theme.gray)));
                 left_spans.push(Span::styled(display, Style::default().fg(theme.command)));
             } else {
-                // Normal tools render "Run " (muted) then the command (syntax-highlighted). Prettify it to
-                // `(Server) Action` so the spinner doesn't show the raw delimiter form.
                 let prefix = "Run ";
                 let pretty = mcp_pretty_name_if_qualified(title.as_str());
                 let detail = pretty.as_str();
@@ -509,7 +444,6 @@ pub fn render_turn_status(
             }
         }
     } else {
-        // "Enter to send now" is advertised only when Enter would actually send the top row.
         let suffix = if held_queue > 0 && is_sendable_wait(activity) {
             if held_queue_top_sendable {
                 format!(" · {held_queue} queued, Enter to send now")
@@ -527,32 +461,23 @@ pub fn render_turn_status(
             left_spans.push(Span::styled(display, activity_style));
         }
     }
-
-    // Phase timer (gray, never truncates)
     if !phase_timer_str.is_empty() {
         left_spans.push(Span::styled(phase_timer_str, timer_style));
     }
-
-    // After the phase timer, so the elapsed time reads as the wait's, not the hint's.
     if let Some(hint) = queued_hint {
         left_spans.push(hint);
     }
-
     let left_line = Line::from(left_spans);
     buf.set_line(area.x, area.y, &left_line, area.width);
     render_retry_reason(buf, area, state, activity, activity_style);
 
     let right_start_x = area.x + area.width.saturating_sub(right_width as u16);
-
-    // Helper: build a fully-specified right-side style (fg, bg, cleared modifiers)
     let right_style = |fg| {
         Style::default()
             .fg(fg)
             .bg(timer_bg)
             .remove_modifier(Modifier::all())
     };
-
-    // Turn timer (gray)
     let mut x = right_start_x;
     if !turn_timer_str.is_empty() {
         let span = Span::styled(turn_timer_str.clone(), timer_style);
@@ -587,8 +512,6 @@ pub fn render_turn_status(
     } else {
         None
     };
-
-    // Cancel button: accent_error (red) on hover, gray at rest
     let cancel_button_rect = if show_cancel && !cancel_str.is_empty() {
         let cancel_x = x;
         let cancel_style = if cancel_hovered {
@@ -602,7 +525,6 @@ pub fn render_turn_status(
     } else {
         None
     };
-
     TurnStatusOutput {
         cancel_button: cancel_button_rect,
         bg_button: bg_button_rect,
@@ -784,9 +706,6 @@ fn compute_activity(
             false,
         ),
         (AgentState::TurnRunning, Some(TurnActivity::ToolRunning { title, description })) => {
-            // "Ask" tools (AskUserQuestion) use the gray spinner like Thinking; green feels out of place when the user is answering questions
-            // Human descriptions (e.g. bash `description`) also use muted secondary.
-            // They read as a wait subject (`Wait 5s…`), not a green `Run <command>` invocation
             let is_ask = title.starts_with("Ask: ") || title.starts_with("Ask ");
             let has_desc = description
                 .as_deref()
@@ -848,21 +767,16 @@ fn compute_activity(
             false,
         ),
         (AgentState::TurnRunning, Some(TurnActivity::Waiting(reason))) => (
-            // An explicit wait reason (model, subagent, task output, tasks, sleep) names what the agent is blocked on, not a generic "Waiting…"
-            // See `WaitingReason` and `AgentView::resolve_turn_activity`
             Style::default().fg(theme.text_secondary),
             reason.label(),
             false,
         ),
         (AgentState::TurnRunning, None) if is_bash_turn => (
-            // Bash turn: not inference, show generic "Running…".
             Style::default().fg(theme.text_secondary),
             "Running…".to_string(),
             false,
         ),
         (AgentState::TurnRunning, None) => (
-            // Fallback: a running inference turn with no resolved activity
-            // The view resolves this gap into Waiting(Model/Subagent) before render, so this is a rarely-hit safety net
             Style::default().fg(theme.text_secondary),
             "Waiting…".to_string(),
             false,
@@ -890,7 +804,6 @@ fn compute_activity(
         (AgentState::Idle, _) => (Style::default(), String::new(), false),
     }
 }
-
 /// Shown from the session create dispatch until the id binds or the create fails.
 fn render_starting_session(
     buf: &mut Buffer,
@@ -913,7 +826,6 @@ fn render_starting_session(
     ];
     buf.set_line(area.x, area.y, &Line::from(spans), area.width);
 }
-
 /// Whether the turn status line should be visible. A parked turn always shows the row, watchers or
 /// not.
 pub fn should_show(
@@ -928,7 +840,6 @@ pub fn should_show(
     }
     !state.is_idle() || drain_blocked || session_starting_since.is_some() || watchers.total() > 0
 }
-
 /// Format a duration for the turn/phase timer.
 ///
 /// Re-exports [`crate::util::format_duration`] under the old name for backwards compatibility within this module.
@@ -957,24 +868,21 @@ fn format_tokens_short(tokens: u64) -> String {
     if tokens < 1000 {
         format!("{tokens}")
     } else if tokens < 100_000 {
-        // 1k-99.9k: show one or two decimals for precision
         let k = tokens as f64 / 1000.0;
         if tokens < 10_000 {
-            format!("{k:.2}k") // 1.23k
+            format!("{k:.2}k")
         } else {
-            format!("{k:.1}k") // 10.1k
+            format!("{k:.1}k")
         }
     } else if tokens < 1_000_000 {
-        // 100k-999k: whole thousands
         let k = tokens / 1000;
         format!("{k}k")
     } else {
-        // 1m+: show with decimal
         let m = tokens as f64 / 1_000_000.0;
         if tokens < 10_000_000 {
-            format!("{m:.2}m") // 1.23m
+            format!("{m:.2}m")
         } else {
-            format!("{m:.1}m") // 10.1m
+            format!("{m:.1}m")
         }
     }
 }
@@ -1018,9 +926,8 @@ pub(crate) fn render_running_row(
 
 #[cfg(test)]
 mod tests {
-    use std::time::Duration;
-
     use super::*;
+    use std::time::Duration;
 
     /// The header row says how long the wait lasts. The reason goes below it.
     #[test]
@@ -1173,26 +1080,22 @@ mod tests {
         assert!(!is_sendable_wait(&Some(TurnActivity::Thinking)));
         assert!(!is_sendable_wait(&None));
     }
-
     #[test]
     fn format_subsecond() {
         assert_eq!(format_turn_timer(Duration::from_millis(500)), "0.5s");
         assert_eq!(format_turn_timer(Duration::from_millis(120)), "0.1s");
     }
-
     #[test]
     fn format_under_10s_has_decimal() {
         assert_eq!(format_turn_timer(Duration::from_secs_f64(5.2)), "5.2s");
         assert_eq!(format_turn_timer(Duration::from_secs_f64(9.9)), "9.9s");
     }
-
     #[test]
     fn format_10s_plus_no_decimal() {
         assert_eq!(format_turn_timer(Duration::from_secs(10)), "10s");
         assert_eq!(format_turn_timer(Duration::from_secs(32)), "32s");
         assert_eq!(format_turn_timer(Duration::from_secs(59)), "59s");
     }
-
     #[test]
     fn format_minutes() {
         assert_eq!(format_turn_timer(Duration::from_secs(60)), "1m0s");
@@ -1266,7 +1169,6 @@ mod tests {
         assert_eq!(g.tool_calls, Some(3));
         assert_eq!(g.tokens, None, "a zero count is not shown");
     }
-
     #[test]
     fn waiting_reason_renders_specific_label() {
         use crate::acp::tracker::WaitingReason;
@@ -1281,12 +1183,12 @@ mod tests {
                 WaitingReason::Queued(crate::acp::tracker::RequestQueued { ahead: 2, limit: 7 }),
                 "Queued behind 2 more: 7 model requests already running…",
             ),
-            (WaitingReason::subagent(), "Waiting on subagent…"),
+            (WaitingReason::subagent(), "Waiting for subagent…"),
             (
                 WaitingReason::Subagent {
-                    display: Some("fix flaky test: Running: cargo test".into()),
+                    display: Some("Waiting for 2 subagents".into()),
                 },
-                "fix flaky test: Running: cargo test…",
+                "Waiting for 2 subagents…",
             ),
             (WaitingReason::task_output(), "Waiting on task output…"),
             (
@@ -1317,7 +1219,6 @@ mod tests {
             assert!(!is_tool, "waiting is not a tool activity");
         }
     }
-
     #[test]
     fn bash_turn_still_renders_running_not_waiting() {
         let theme = Theme::current();
@@ -1326,7 +1227,6 @@ mod tests {
             compute_activity(&theme, &AgentState::TurnRunning, &None, true, None, None);
         assert_eq!(label, "Running…");
     }
-
     #[test]
     fn compaction_label_names_the_compaction_model() {
         let theme = Theme::current();
@@ -1355,7 +1255,6 @@ mod tests {
         assert_eq!(label, "Switching model…");
         assert!(should_show(&state, false, None, Watchers::default(), false));
     }
-
     #[test]
     fn family_switch_compact_renders_elapsed_timer() {
         let state = AgentState::CommandRunning {
@@ -1375,13 +1274,11 @@ mod tests {
             "family-switch compact must show the elapsed timer like /compact, got: {text:?}"
         );
     }
-
     #[test]
     fn format_hours() {
         assert_eq!(format_turn_timer(Duration::from_secs(3600)), "1h0m");
         assert_eq!(format_turn_timer(Duration::from_secs(3725)), "1h2m");
     }
-
     #[test]
     fn should_show_when_running() {
         assert!(should_show(
@@ -1406,7 +1303,6 @@ mod tests {
             false
         ));
     }
-
     /// Cancelling keeps `[stop]` clickable (the retry affordance for a lost cancel); a revert to the running-only gate strands mouse users.
     #[test]
     fn cancelling_keeps_stop_button_clickable() {
@@ -1447,7 +1343,6 @@ mod tests {
             "got: {text:?}"
         );
     }
-
     #[test]
     fn should_show_when_drain_blocked() {
         assert!(should_show(
@@ -1458,11 +1353,8 @@ mod tests {
             false
         ));
     }
-
     #[test]
     fn should_show_when_watchers_running() {
-        // Idle but a watcher (command, monitor, loop, or subagent) is still running
-        // The row stays visible so the persistent "… still running" cue can show
         for watchers in [
             Watchers {
                 commands: 1,
@@ -1483,7 +1375,6 @@ mod tests {
         ] {
             assert!(should_show(&AgentState::Idle, false, None, watchers, false));
         }
-        // Idle with no watchers and nothing else pending stays hidden
         assert!(!should_show(
             &AgentState::Idle,
             false,
@@ -1492,7 +1383,6 @@ mod tests {
             false
         ));
     }
-
     #[test]
     fn should_show_parked_always() {
         assert!(should_show(
@@ -1513,7 +1403,6 @@ mod tests {
             true
         ));
     }
-
     /// Collect every rendered glyph in `area` into a single string.
     fn buffer_text(buf: &Buffer, area: Rect) -> String {
         (area.y..area.y + area.height)
@@ -1525,7 +1414,6 @@ mod tests {
             .collect::<Vec<_>>()
             .join("\n")
     }
-
     /// Baseline render args: idle agent on a mouse host with the given watchers.
     fn idle_args<'a>(watchers: Watchers) -> TurnStatusArgs<'a> {
         TurnStatusArgs {
@@ -1551,7 +1439,6 @@ mod tests {
             compaction_model: None,
         }
     }
-
     /// Render `args` into a `width`×1 row.
     fn render_row(args: TurnStatusArgs<'_>, width: u16) -> (TurnStatusOutput, Buffer) {
         let area = Rect::new(0, 0, width, 1);
@@ -1559,7 +1446,6 @@ mod tests {
         let output = render_turn_status(&mut buf, area, args);
         (output, buf)
     }
-
     /// Render `args` into a `width`×1 row, returning the visible text.
     fn render_row_text(args: TurnStatusArgs<'_>, width: u16) -> String {
         let (_, buf) = render_row(args, width);
@@ -1714,19 +1600,16 @@ mod tests {
         args.session_starting_since = Some(Instant::now());
         render_row_text(args, 60)
     }
-
     /// Invoke `render_turn_status` for an idle agent with the given watcher counts at animation tick `tick`.
     fn render_idle_with_watchers_at_tick(watchers: Watchers, tick: u64) -> String {
         render_idle_with_watchers_in_width(watchers, tick, 72)
     }
-
     /// [`render_idle_with_watchers_at_tick`] with an explicit row width.
     fn render_idle_with_watchers_in_width(watchers: Watchers, tick: u64, width: u16) -> String {
         let mut args = idle_args(watchers);
         args.tick = tick;
         render_row_text(args, width)
     }
-
     /// Invoke `render_turn_status` for a PARKED running turn (the stopped look) with the given watcher counts.
     fn render_parked_with_watchers(watchers: Watchers) -> String {
         let activity = Some(TurnActivity::Waiting(WaitingReason::TasksComplete));
@@ -1737,12 +1620,10 @@ mod tests {
         args.parked = true;
         render_row_text(args, 72)
     }
-
     /// Invoke `render_turn_status` for an idle agent with the given watcher counts at the first animation tick.
     fn render_idle_with_watchers(watchers: Watchers) -> String {
         render_idle_with_watchers_at_tick(watchers, 0)
     }
-
     /// Invoke `render_turn_status` for an idle agent with `n` running monitors at animation tick `tick`.
     fn render_idle_with_monitors_at_tick(n: usize, tick: u64) -> String {
         render_idle_with_watchers_at_tick(
@@ -1753,30 +1634,27 @@ mod tests {
             tick,
         )
     }
-
     /// Invoke `render_turn_status` for an idle agent with `n` running monitors at the first animation tick.
     fn render_idle_with_monitors(n: usize) -> String {
         render_idle_with_monitors_at_tick(n, 0)
     }
-
     #[test]
     fn idle_with_monitors_renders_still_running_cue() {
         let text = render_idle_with_monitors(2);
         assert!(
-            text.contains("2 monitors still running"),
+            text.contains(&format!("2 {}s still running", monitor_noun())),
             "idle with monitors must render the still-running cue, got: {text:?}"
         );
     }
-
     #[test]
     fn idle_with_one_monitor_uses_singular() {
         let text = render_idle_with_monitors(1);
         assert!(
-            text.contains("1 monitor still running") && !text.contains("monitors"),
+            text.contains(&format!("1 {} still running", monitor_noun()))
+                && !text.contains(&format!("{}s", monitor_noun())),
             "single monitor must use the singular noun, got: {text:?}"
         );
     }
-
     #[test]
     fn idle_with_no_monitors_renders_nothing() {
         let text = render_idle_with_monitors(0);
@@ -1785,7 +1663,6 @@ mod tests {
             "idle with no monitors must render nothing, got: {text:?}"
         );
     }
-
     /// Mouse hosts get a hit rect hugging exactly the rendered cue text, and hover brightens the label; keyboard-only hosts get neither.
     #[test]
     fn watching_cue_is_clickable_on_mouse_hosts_only() {
@@ -1794,15 +1671,12 @@ mod tests {
             monitors: 1,
             ..Watchers::default()
         };
-        // First label cell (after the 2-col icon).
         let label_fg = |buf: &Buffer| buf.cell((2, 0)).map(|c| c.fg);
-
         let (output, buf) = render_row(idle_args(watchers), 60);
         let rect = output.watching_cue.expect("mouse host must get a hit rect");
         let rendered_width = buffer_text(&buf, buf.area).trim_end().width() as u16;
         assert_eq!(rect, Rect::new(0, 0, rendered_width, 1));
         assert_eq!(label_fg(&buf), Some(theme.gray));
-
         let mut args = idle_args(watchers);
         args.buttons = Some(MouseButtons {
             watching_hovered: true,
@@ -1810,13 +1684,11 @@ mod tests {
         });
         let (_, buf) = render_row(args, 60);
         assert_eq!(label_fg(&buf), Some(theme.text_primary));
-
         let mut args = idle_args(watchers);
         args.buttons = None;
         let (output, _) = render_row(args, 60);
         assert!(output.watching_cue.is_none());
     }
-
     #[test]
     fn idle_with_loops_renders_still_running_cue() {
         let text = render_idle_with_watchers(Watchers {
@@ -1828,7 +1700,6 @@ mod tests {
             "idle with loops must render the still-running cue, got: {text:?}"
         );
     }
-
     #[test]
     fn idle_with_one_loop_uses_singular() {
         let text = render_idle_with_watchers(Watchers {
@@ -1840,7 +1711,6 @@ mod tests {
             "single loop must use the singular noun, got: {text:?}"
         );
     }
-
     #[test]
     fn idle_with_subagents_renders_still_running_cue() {
         let text = render_idle_with_watchers(Watchers {
@@ -1852,7 +1722,6 @@ mod tests {
             "idle with subagents must render the still-running cue, got: {text:?}"
         );
     }
-
     #[test]
     fn idle_with_one_subagent_uses_singular() {
         let text = render_idle_with_watchers(Watchers {
@@ -1864,7 +1733,6 @@ mod tests {
             "single subagent must use the singular noun, got: {text:?}"
         );
     }
-
     #[test]
     fn idle_with_one_workflow_counts_run_once() {
         let text = render_idle_with_watchers(Watchers {
@@ -1873,24 +1741,23 @@ mod tests {
         });
         assert!(text.contains("1 workflow still running"), "got: {text:?}");
     }
-
     #[test]
     fn idle_with_monitors_and_loops_lists_both() {
-        // With both watcher kinds present, one cue lists monitors then loops, each with its own count, joined by the middle-dot separator
         let text = render_idle_with_watchers(Watchers {
             monitors: 1,
             loops: 2,
             ..Watchers::default()
         });
         assert!(
-            text.contains("1 monitor \u{00b7} 2 loops still running"),
+            text.contains(&format!(
+                "1 {} \u{00b7} 2 loops still running",
+                monitor_noun()
+            )),
             "both kinds must be listed in one cue, got: {text:?}"
         );
     }
-
     #[test]
     fn idle_with_all_watcher_kinds_lists_all() {
-        // With commands, monitors, loops, and subagents present, one cue lists all four in order, middle-dot separated
         let text = render_idle_with_watchers(Watchers {
             commands: 1,
             monitors: 2,
@@ -1899,17 +1766,15 @@ mod tests {
             workflows: 0,
         });
         assert!(
-            text.contains(
-                "1 command \u{00b7} 2 monitors \u{00b7} 1 loop \u{00b7} 3 subagents still running"
-            ),
+            text.contains(&format!(
+                "1 command \u{00b7} 2 {}s \u{00b7} 1 loop \u{00b7} 3 subagents still running",
+                monitor_noun()
+            )),
             "all kinds must be listed in one cue, got: {text:?}"
         );
     }
-
     #[test]
     fn narrow_area_clips_cue_tail_keeping_counts() {
-        // 40 cols with three kinds: the row clips at the right edge with no ellipsis, so the leading counts survive and the trailing suffix is cut
-        // This pins the tradeoff of leading with the counts on narrow panes
         let watchers = Watchers {
             commands: 1,
             monitors: 2,
@@ -1918,14 +1783,15 @@ mod tests {
         };
         let text = render_idle_with_watchers_in_width(watchers, 0, 40);
         assert!(
-            text.contains("1 command \u{00b7} 2 monitors \u{00b7} 1 loop"),
+            text.contains(&format!(
+                "1 command \u{00b7} 2 {}s \u{00b7} 1 loop",
+                monitor_noun()
+            )),
             "the counts must survive the clip, got: {text:?}"
         );
     }
-
     #[test]
     fn idle_with_commands_renders_still_running_cue() {
-        // Plain background commands (non-monitor bg tasks) count as watchers: they wake the agent with a task-completed turn, so the cue must show
         let text = render_idle_with_watchers(Watchers {
             commands: 2,
             ..Watchers::default()
@@ -1943,10 +1809,8 @@ mod tests {
             "single command must use the singular noun, got: {text:?}"
         );
     }
-
     #[test]
     fn parked_with_watchers_renders_cue_not_running_chrome() {
-        // The wait aborts as soon as the user types, so busy chrome would lie.
         let text = render_parked_with_watchers(Watchers {
             commands: 2,
             ..Watchers::default()
@@ -1960,7 +1824,6 @@ mod tests {
             "parked must not render the running-turn chrome, got: {text:?}"
         );
     }
-
     #[test]
     fn parked_without_watchers_renders_waiting_cue() {
         let text = render_parked_with_watchers(Watchers::default());
@@ -1973,10 +1836,8 @@ mod tests {
             "watcherless parked must not render the running-turn chrome, got: {text:?}"
         );
     }
-
     #[test]
     fn parked_with_held_queue_renders_queued_hint() {
-        // The queued hint replaces the interrupt copy (Enter sends now)
         let activity = Some(TurnActivity::Waiting(WaitingReason::TasksComplete));
         let mut args = idle_args(Watchers {
             commands: 1,
@@ -1997,7 +1858,6 @@ mod tests {
             "queued hint replaces the interrupt copy, got: {text:?}"
         );
     }
-
     #[test]
     fn idle_with_no_watchers_renders_nothing() {
         let text = render_idle_with_watchers(Watchers::default());
@@ -2006,7 +1866,6 @@ mod tests {
             "idle with no watchers must render nothing, got: {text:?}"
         );
     }
-
     #[test]
     fn queued_hint_renders_after_phase_timer() {
         let activity = Some(TurnActivity::Waiting(WaitingReason::subagent()));
@@ -2018,11 +1877,10 @@ mod tests {
         args.held_queue_top_sendable = true;
         let text = render_row_text(args, 80);
         assert!(
-            text.contains("Waiting on subagent… 5m59s · 1 queued, Enter to send now"),
+            text.contains("Waiting for subagent… 5m59s · 1 queued, Enter to send now"),
             "phase timer must sit between the wait label and the queued hint, got: {text:?}"
         );
     }
-
     #[test]
     fn narrow_row_drops_phase_timer_keeping_turn_timer() {
         let activity = Some(TurnActivity::Waiting(WaitingReason::Model));
@@ -2049,7 +1907,6 @@ mod tests {
             "the narrow row must drop the phase timer, got: {narrow:?}"
         );
     }
-
     #[test]
     fn still_running_label_lists_only_nonzero_kinds() {
         assert_eq!(
@@ -2064,7 +1921,7 @@ mod tests {
                 monitors: 2,
                 ..Watchers::default()
             }),
-            Some("2 monitors still running".into())
+            Some(format!("2 {}s still running", monitor_noun()))
         );
         assert_eq!(
             still_running_label(Watchers {
@@ -2086,7 +1943,10 @@ mod tests {
                 loops: 2,
                 ..Watchers::default()
             }),
-            Some("1 monitor \u{00b7} 2 loops still running".into())
+            Some(format!(
+                "1 {} \u{00b7} 2 loops still running",
+                monitor_noun()
+            ))
         );
         assert_eq!(
             still_running_label(Watchers {
@@ -2096,18 +1956,15 @@ mod tests {
                 subagents: 2,
                 workflows: 0,
             }),
-            Some(
-                "1 command \u{00b7} 1 monitor \u{00b7} 1 loop \u{00b7} 2 subagents still running"
-                    .into()
-            )
+            Some(format!(
+                "1 command \u{00b7} 1 {} \u{00b7} 1 loop \u{00b7} 2 subagents still running",
+                monitor_noun()
+            ))
         );
         assert_eq!(still_running_label(Watchers::default()), None);
     }
-
     #[test]
     fn idle_monitor_icon_animates_across_ticks() {
-        // The leading glyph cycles through monitor_icon_frames() as `tick` advances
-        // Two ticks a full frame apart (0 vs MONITOR_PULSE_DIVISOR) must render different icons, proving the cue animates
         let frame0 = render_idle_with_monitors_at_tick(1, 0);
         let frame1 = render_idle_with_monitors_at_tick(1, MONITOR_PULSE_DIVISOR);
         let icon0 = frame0.chars().next();
@@ -2117,7 +1974,6 @@ mod tests {
             "monitor icon must animate between frames, got {frame0:?} vs {frame1:?}"
         );
     }
-
     #[test]
     fn idle_starting_session_renders_the_row() {
         let text = render_idle_starting_session();
@@ -2126,7 +1982,6 @@ mod tests {
             "an unanswered session/new must render 'Starting session…', got: {text:?}"
         );
     }
-
     #[test]
     fn format_tokens_under_1k() {
         assert_eq!(format_tokens_short(0), "0");
@@ -2135,24 +1990,21 @@ mod tests {
         assert_eq!(format_tokens_short(100), "100");
         assert_eq!(format_tokens_short(999), "999");
     }
-
     #[test]
     fn format_tokens_1k_to_10k() {
         assert_eq!(format_tokens_short(1000), "1.00k");
         assert_eq!(format_tokens_short(1230), "1.23k");
         assert_eq!(format_tokens_short(1500), "1.50k");
         assert_eq!(format_tokens_short(9990), "9.99k");
-        assert_eq!(format_tokens_short(9999), "10.00k"); // rounds up
+        assert_eq!(format_tokens_short(9999), "10.00k");
     }
-
     #[test]
     fn format_tokens_10k_to_100k() {
         assert_eq!(format_tokens_short(10000), "10.0k");
         assert_eq!(format_tokens_short(10100), "10.1k");
         assert_eq!(format_tokens_short(12345), "12.3k");
-        assert_eq!(format_tokens_short(99999), "100.0k"); // rounds up
+        assert_eq!(format_tokens_short(99999), "100.0k");
     }
-
     #[test]
     fn format_tokens_100k_to_1m() {
         assert_eq!(format_tokens_short(100000), "100k");
@@ -2160,20 +2012,16 @@ mod tests {
         assert_eq!(format_tokens_short(500000), "500k");
         assert_eq!(format_tokens_short(999000), "999k");
     }
-
     #[test]
     fn format_tokens_millions() {
         assert_eq!(format_tokens_short(1_000_000), "1.00m");
         assert_eq!(format_tokens_short(1_230_000), "1.23m");
-        assert_eq!(format_tokens_short(9_999_000), "10.00m"); // rounds
+        assert_eq!(format_tokens_short(9_999_000), "10.00m");
         assert_eq!(format_tokens_short(10_000_000), "10.0m");
         assert_eq!(format_tokens_short(10_100_000), "10.1m");
     }
-
     #[test]
     fn user_waiting_pulse_speed_is_stable() {
-        // The drain-blocked, pending-user-input, and plan-approval cues all read this one constant via `pending_diamond_color`
-        // The assertion guards against an accidental tweak that would silently change the cadence of every "your turn" cue
         assert_eq!(USER_WAITING_PULSE_SPEED, 0.08);
     }
 }

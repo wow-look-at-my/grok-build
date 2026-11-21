@@ -451,7 +451,7 @@ fn a_parked_card_does_not_hand_esc_to_the_turn_cancel() {
     for open in [
         open_permission as fn(&mut AgentView),
         open_question as fn(&mut AgentView),
-        open_elicitation as fn(&mut AgentView),
+        (|agent: &mut AgentView| drop(open_elicitation(agent))) as fn(&mut AgentView),
     ] {
         let mut agent = make_agent();
         open(&mut agent);
@@ -571,7 +571,7 @@ fn esc_parks_even_under_a_latent_queued_edit() {
     for open in [
         open_permission as fn(&mut AgentView),
         open_question as fn(&mut AgentView),
-        open_elicitation as fn(&mut AgentView),
+        (|agent: &mut AgentView| drop(open_elicitation(agent))) as fn(&mut AgentView),
     ] {
         let mut agent = make_agent();
         agent.prompt_mode = crate::app::queue_edit::PromptMode::EditingQueued {
@@ -707,7 +707,10 @@ fn anything_parked_in_the_overlay_keeps_an_esc_route_to_the_dashboard() {
     for (label, setup) in [
         ("permission", open_permission as fn(&mut AgentView)),
         ("question", open_question as fn(&mut AgentView)),
-        ("elicitation", open_elicitation as fn(&mut AgentView)),
+        (
+            "elicitation",
+            (|agent: &mut AgentView| drop(open_elicitation(agent))) as fn(&mut AgentView),
+        ),
         ("plan approval", open_plan as fn(&mut AgentView)),
         (
             "plan approval over a parked question",
@@ -896,9 +899,13 @@ fn blanking_a_free_text_answer_unmarks_it_from_the_nav_buttons_too() {
 // The Tab/Esc contract is mode-independent: card intercepts run ahead of the scrollback's vim letter bindings
 // These go through `handle_input` so the full router (not just the card handlers) is under test
 
-fn open_elicitation(agent: &mut AgentView) {
+type ElicitAnswer = tokio::sync::oneshot::Receiver<xai_acp_lib::AcpResult<acp::ExtResponse>>;
+
+/// Returns what the MCP server would receive.
+fn open_elicitation(agent: &mut AgentView) -> ElicitAnswer {
     use crate::views::elicitation_view::ElicitationViewState;
     use xai_grok_tools::mcp_elicitation::{McpElicitExtRequest, McpElicitModeFields};
+    let (tx, rx) = tokio::sync::oneshot::channel();
     agent.elicitation_view = Some(ElicitationViewState::from_request(
         McpElicitExtRequest {
             session_id: "s".into(),
@@ -916,8 +923,9 @@ fn open_elicitation(agent: &mut AgentView) {
             },
         },
         Some(StashedPrompt::default()),
-        None,
+        Some(tx),
     ));
+    rx
 }
 
 #[test]
@@ -1207,4 +1215,176 @@ fn elicitation_shift_tab_walks_fields_backwards() {
         assert_eq!(ev.focus, ElicitationFocus::Fields);
         assert_eq!(ev.field_cursor(), 0);
     }
+}
+
+fn delivered_answer(rx: &mut ElicitAnswer) -> serde_json::Value {
+    let response = rx
+        .try_recv()
+        .expect("an answer was sent")
+        .expect("the answer is not an error");
+    serde_json::from_str(response.0.get()).expect("answer is JSON")
+}
+
+fn system_notes(agent: &AgentView) -> Vec<String> {
+    (0..agent.scrollback.len())
+        .filter_map(|i| agent.scrollback.get(i))
+        .filter_map(|entry| match &entry.block {
+            crate::scrollback::block::RenderBlock::System(block) => Some(block.text.clone()),
+            _ => None,
+        })
+        .collect()
+}
+
+fn type_keys(agent: &mut AgentView, keys: &[KeyCode]) {
+    use crossterm::event::Event;
+    let registry = ActionRegistry::defaults();
+    for code in keys {
+        let _ = agent.handle_input(
+            &Event::Key(KeyEvent::new(*code, KeyModifiers::NONE)),
+            &registry,
+        );
+    }
+}
+
+/// Opens a one-text-field form card whose request id is `mcp-elicit-test`.
+fn open_named_elicitation(agent: &mut AgentView, server_name: &str, message: &str) {
+    use crate::views::elicitation_view::ElicitationViewState;
+    use xai_grok_tools::mcp_elicitation::{McpElicitExtRequest, McpElicitModeFields};
+    agent.elicitation_view = Some(ElicitationViewState::from_request(
+        McpElicitExtRequest {
+            session_id: "s".to_owned(),
+            tool_call_id: "mcp-elicit-test".to_owned(),
+            server_name: server_name.to_owned(),
+            message: message.to_owned(),
+            mode: McpElicitModeFields::Form {
+                requested_schema: Some(serde_json::json!({
+                    "type": "object",
+                    "properties": { "title": { "type": "string", "title": "Ticket title" } },
+                    "required": ["title"]
+                })),
+            },
+        },
+        None,
+        None,
+    ));
+}
+
+#[test]
+fn keys_answer_the_elicitation_card_and_submit_it() {
+    let mut agent = make_agent();
+    let mut rx = open_elicitation(&mut agent);
+    assert!(agent.is_awaiting_user_answer());
+
+    let mut keys: Vec<KeyCode> = "a@b.co".chars().map(KeyCode::Char).collect();
+    keys.extend([KeyCode::Enter, KeyCode::Tab, KeyCode::Char('y')]);
+    type_keys(&mut agent, &keys);
+
+    assert_eq!(
+        serde_json::json!({ "outcome": "accept", "content": { "email": "a@b.co" } }),
+        delivered_answer(&mut rx)
+    );
+    assert!(
+        agent.elicitation_view.is_none(),
+        "the card closes on accept"
+    );
+    assert_eq!("", agent.prompt.text(), "no key leaked into the composer");
+    assert_eq!(Vec::<String>::new(), system_notes(&agent));
+}
+
+#[test]
+fn declined_elicitation_tells_the_server_and_leaves_a_notice() {
+    let mut agent = make_agent();
+    let mut rx = open_elicitation(&mut agent);
+    type_keys(&mut agent, &[KeyCode::Tab, KeyCode::Char('d')]);
+
+    assert_eq!(
+        serde_json::json!({ "outcome": "decline" }),
+        delivered_answer(&mut rx)
+    );
+    assert!(agent.elicitation_view.is_none());
+    assert_eq!(
+        vec!["Declined MCP “demo” request for input.".to_owned()],
+        system_notes(&agent)
+    );
+}
+
+#[test]
+fn cancelled_elicitation_tells_the_server_and_leaves_a_notice() {
+    use crossterm::event::Event;
+    let mut agent = make_agent();
+    let mut rx = open_elicitation(&mut agent);
+    let _ = agent.handle_input(
+        &Event::Key(KeyEvent::new(KeyCode::Char('c'), KeyModifiers::CONTROL)),
+        &ActionRegistry::defaults(),
+    );
+
+    assert_eq!(
+        serde_json::json!({ "outcome": "cancel" }),
+        delivered_answer(&mut rx)
+    );
+    assert_eq!(
+        vec!["Dismissed MCP “demo” request for input without answering.".to_owned()],
+        system_notes(&agent)
+    );
+}
+
+#[test]
+fn accept_after_the_server_gave_up_leaves_a_notice() {
+    let mut agent = make_agent();
+    drop(open_elicitation(&mut agent));
+    let mut keys: Vec<KeyCode> = "a@b.co".chars().map(KeyCode::Char).collect();
+    keys.extend([KeyCode::Enter, KeyCode::Tab, KeyCode::Char('y')]);
+    type_keys(&mut agent, &keys);
+
+    assert!(agent.elicitation_view.is_none());
+    assert_eq!(
+        vec![
+            "MCP “demo” request for input closed before it was answered here (it timed out or was answered elsewhere)."
+                .to_owned()
+        ],
+        system_notes(&agent)
+    );
+}
+
+#[test]
+fn notice_quotes_only_catalog_name_characters_of_the_server() {
+    let mut agent = make_agent();
+    open_named_elicitation(
+        &mut agent,
+        "x” approved. Visit https://evil.example",
+        "Create ticket?",
+    );
+    assert!(agent.dismiss_resolved_interaction("mcp-elicit-test"));
+    assert_eq!(
+        vec![
+            "MCP “xapprovedVisithttpsevilexample” request for input closed before it was answered here (it timed out or was answered elsewhere)."
+                .to_owned()
+        ],
+        system_notes(&agent)
+    );
+}
+
+#[test]
+fn elicitation_closed_elsewhere_leaves_a_notice() {
+    let mut agent = make_agent();
+    let _answer = open_elicitation(&mut agent);
+
+    assert!(agent.dismiss_resolved_interaction("mcp-elicit-1"));
+
+    assert!(agent.elicitation_view.is_none());
+    assert!(!agent.is_awaiting_user_answer());
+    assert_eq!(
+        vec![
+            "MCP “demo” request for input closed before it was answered here (it timed out or was answered elsewhere)."
+                .to_owned()
+        ],
+        system_notes(&agent)
+    );
+}
+
+#[test]
+fn cancel_turn_confirm_is_not_awaiting_a_user_answer() {
+    let mut agent = make_agent();
+    open_cancel_turn(&mut agent);
+    assert!(!agent.is_awaiting_user_answer());
 }

@@ -127,6 +127,26 @@ pub struct DownloadResponse {
     pub turn: i32,
 }
 
+/// A non-success registry response other than 401, kept typed so callers can tell a refusal from an outage.
+#[derive(Debug, thiserror::Error)]
+#[error("{op} failed: {status}")]
+pub(crate) struct RegistryStatusError {
+    op: &'static str,
+    status: xai_grok_net::StatusCode,
+}
+
+impl RegistryStatusError {
+    /// A 4xx the same request will get again; 408 and 429 are throttling, not refusal.
+    pub(crate) fn is_permanent_refusal(&self) -> bool {
+        self.status.is_client_error()
+            && !matches!(
+                self.status,
+                xai_grok_net::StatusCode::REQUEST_TIMEOUT
+                    | xai_grok_net::StatusCode::TOO_MANY_REQUESTS
+            )
+    }
+}
+
 // ============================================================================
 // Client
 // ============================================================================
@@ -220,13 +240,16 @@ impl SessionRegistryClient {
         &self,
         response: xai_grok_net::Response,
         stamp: Option<&xai_grok_auth::SentBearerSuffix>,
-        op: &str,
+        op: &'static str,
     ) -> anyhow::Error {
         if response.status() == xai_grok_net::StatusCode::UNAUTHORIZED {
             self.record_401_attribution(op, stamp);
             anyhow::anyhow!("{op}: {}", self.credentials.auth_error_hint())
         } else {
-            anyhow::anyhow!("{op} failed: {}", response.status())
+            anyhow::Error::new(RegistryStatusError {
+                op,
+                status: response.status(),
+            })
         }
     }
 

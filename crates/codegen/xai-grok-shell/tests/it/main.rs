@@ -7,7 +7,7 @@ mod perf_harness;
 mod subagent_sweep_support;
 
 mod config_write_flock;
-mod e2e_grove_worktree;
+mod config_write_symlink;
 mod external_auth_conforming_provider;
 mod external_auth_expired_credential;
 mod external_otel_pin_strip;

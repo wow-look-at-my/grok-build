@@ -44,11 +44,13 @@ pub mod mcp_elicitation;
 pub mod media_gen_limits;
 pub mod normalization;
 pub mod notification;
+mod permission_access;
 pub mod persistence;
 pub mod registry;
 
 pub mod reminders;
 pub mod retry;
+pub mod sandbox_launch;
 pub mod session_output_dirs;
 pub mod tool_taxonomy;
 pub mod types;

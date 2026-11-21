@@ -221,6 +221,22 @@ pub(super) fn dispatch_execute_plan(
     }]
 }
 
+pub(in crate::app::dispatch) const LOAD_FAILED_NOTICE: &str =
+    "This session didn't open. Open it again with /resume, or start a new one with /new.";
+
+/// A tab whose session never opened has nothing to send to, so its prompt or command would queue forever.
+fn refuse_if_load_failed(app: &mut AppView, id: AgentId) -> bool {
+    app.agents.get_mut(&id).is_some_and(refuse_on_failed_tab)
+}
+
+fn refuse_on_failed_tab(agent: &mut AgentView) -> bool {
+    if !agent.load_failed {
+        return false;
+    }
+    agent.show_toast(LOAD_FAILED_NOTICE);
+    true
+}
+
 pub(super) fn dispatch_send_prompt(app: &mut AppView, text: String) -> Vec<Effect> {
     crate::unified_log::info(
         "prompt.enqueue",
@@ -643,6 +659,13 @@ pub(super) fn dispatch_send_prompt_submission(
         }
         return prelude;
     };
+    // A slash command is refused below only if it would queue, so `/new`, `/resume`, and `exit` still run
+    let runs_locally = !literal
+        && (text.trim().starts_with('/')
+            || crate::slash::commands::exit::is_exit_alias(text.trim()));
+    if !runs_locally && refuse_if_load_failed(app, id) {
+        return prelude;
+    }
     // Match the later slash path: only a line that itself starts with `/` is a command.
     // Chip-stripped text can look like `/feedback` after a leading image without being one.
     if !literal && text.trim().starts_with('/') {
@@ -891,6 +914,15 @@ pub(super) fn dispatch_send_prompt_submission(
         // Map CommandResult to pager behavior. (MRU persistence is queued off-thread inside `record_command_use` above.)
         // The feedback modal owns the composer only once it accepts the open, so it settles before the
         // shared image disposition below.
+        if matches!(
+            exec_result,
+            CommandResult::QueueCommand(_)
+                | CommandResult::InjectSkill { .. }
+                | CommandResult::PassThrough(_)
+        ) && refuse_on_failed_tab(agent)
+        {
+            return effects;
+        }
         let exec_result = match exec_result {
             CommandResult::Action(Action::OpenFeedbackModal(mut open)) => {
                 // Composer chips stay put until this open is accepted. A no-session
@@ -1336,6 +1368,9 @@ pub(super) fn dispatch_send_bash_command(app: &mut AppView, command: String) -> 
     let ActiveView::Agent(id) = app.active_view else {
         return vec![];
     };
+    if refuse_if_load_failed(app, id) {
+        return vec![];
+    }
     let Some(agent) = app.agents.get_mut(&id) else {
         return vec![];
     };

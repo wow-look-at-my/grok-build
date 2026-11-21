@@ -1003,8 +1003,6 @@ mod tests {
         assert!(registry.get("dashboard").is_none());
     }
 
-    // ── Builtin/skill name collisions ───────────────────────────────
-    //
     fn login_builtin() -> Arc<dyn SlashCommand> {
         Arc::new(DummyCommand {
             name: "login",

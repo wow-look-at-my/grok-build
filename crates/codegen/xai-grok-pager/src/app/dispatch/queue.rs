@@ -1397,8 +1397,11 @@ pub(super) fn dispatch_run_edited_queued_command(
             return vec![];
         };
         let registry = agent.prompt.slash_controller.registry();
+        // Same text the send path parses: an image chip must not count as an argument here and
+        // vanish there, or the row is kept and the command runs.
+        let slash_input = submission.text_without_image_chips();
         let command_refused =
-            crate::slash::parse_invocation(submission.text.trim()).is_some_and(|invocation| {
+            crate::slash::parse_invocation(slash_input.trim()).is_some_and(|invocation| {
                 registry
                     .get_for_dispatch(invocation.token)
                     .is_some_and(|command| {
@@ -4306,7 +4309,7 @@ mod tests {
     }
 
     /// A task-tool refinement that omits `run_in_background` means background (the shell's serde default is true).
-    /// The provisional foreground Subagent wait must clear, not stick as "Waiting on subagent…".
+    /// The provisional foreground Subagent wait must clear and stop showing "Waiting for subagent…".
     #[test]
     fn task_refinement_without_background_field_defaults_to_background() {
         use std::sync::Arc;

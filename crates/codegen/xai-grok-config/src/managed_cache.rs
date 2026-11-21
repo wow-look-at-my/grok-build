@@ -261,8 +261,20 @@ fn serving_team_id(identity: &ServingIdentity) -> Option<&str> {
     }
 }
 
-/// Tamper signals for the current identity, split ways: [`Self::needs_refetch`] (staleness) fires on ANY signal.
-/// [`Self::compromised_for_gate`] (gate) fires only on artifact-missing.
+/// Why the gate refuses the managed policy.
+#[derive(Debug, Clone, Copy, PartialEq, Eq, serde::Serialize, thiserror::Error)]
+#[serde(rename_all = "camelCase")]
+pub enum ManagedPolicyCompromise {
+    #[error("signed managed policy is invalid")]
+    SignatureInvalid,
+    #[error("managed policy signature is missing")]
+    SignatureMissing,
+    #[error("managed policy file is missing")]
+    PolicyFileMissing,
+}
+
+/// Tamper signals for the current identity, split two ways: [`Self::needs_refetch`] (staleness) fires on ANY signal.
+/// [`Self::compromised_reason`] (gate) fires only on artifact-missing.
 /// A pure identity mismatch never compromises the gate: a foreign marker is rebound by the online refetch.
 #[derive(Clone, Copy)]
 struct TamperSignals {
@@ -282,8 +294,9 @@ impl TamperSignals {
         self.artifact_missing || self.identity_mismatch
     }
 
-    fn compromised_for_gate(self) -> bool {
+    fn compromised_reason(self) -> Option<ManagedPolicyCompromise> {
         self.artifact_missing
+            .then_some(ManagedPolicyCompromise::PolicyFileMissing)
     }
 }
 
@@ -351,11 +364,15 @@ fn is_managed_config_hard_stale_for_at(home: &Path, identity: &ServingIdentity) 
 /// With a key compiled in, the SIGNED verdict leads: the opt-in is non-forgeable and catches edits the marker can't.
 /// A fail-closed marker then REQUIRES an authentic sidecar.
 pub fn managed_policy_compromised_for(identity: &ServingIdentity) -> bool {
-    user_grok_home().is_some_and(|home| managed_policy_compromised_for_at(&home, identity))
+    user_grok_home()
+        .is_some_and(|home| managed_policy_compromised_for_at(&home, identity).is_some())
 }
 
 // No retry: the gate reads this under the flock the apply holds across its write sequence.
-fn managed_policy_compromised_for_at(home: &Path, identity: &ServingIdentity) -> bool {
+pub(crate) fn managed_policy_compromised_for_at(
+    home: &Path,
+    identity: &ServingIdentity,
+) -> Option<ManagedPolicyCompromise> {
     let cache = read_managed_config_cache(home);
     let expected_principal = expected_signed_principal(cache.as_ref(), identity);
     let now = effective_now(cache.as_ref());
@@ -379,7 +396,7 @@ fn managed_policy_compromised_decision(
     cache: Option<&ManagedConfigCache>,
     home: &Path,
     identity: &ServingIdentity,
-) -> bool {
+) -> Option<ManagedPolicyCompromise> {
     use crate::signed_policy::SignedVerdict;
     // A fail-closed marker that recorded served policy requires an authentic sidecar.
     let sidecar_required_but_missing = || {
@@ -392,45 +409,48 @@ fn managed_policy_compromised_decision(
         }
         required
     };
-    // The best-effort marker decision: refuse only an opted-in marker whose tamper counts for the gate (`compromised_for_gate`)
-    let marker_compromised = || {
-        cache.is_some_and(|cache| {
-            if !cache.fail_closed {
-                return false;
-            }
-            let signals = TamperSignals::evaluate(cache, home, identity);
-            let compromised = signals.compromised_for_gate();
-            if compromised {
-                tracing::warn!(
-                    artifact_missing = signals.artifact_missing,
-                    identity_mismatch = signals.identity_mismatch,
-                    "managed policy fail-closed gate: refusing session on tamper evidence"
-                );
-            } else if signals.identity_mismatch {
-                tracing::debug!(
-                    identity_mismatch = true,
-                    "managed policy fail-closed gate: foreign marker, not refusing (online refetch rebinds)"
-                );
-            }
-            compromised
-        })
-    };
     match signed_verdict {
-        SignedVerdict::Compromised => true,
-        SignedVerdict::Trusted => false,
+        SignedVerdict::Compromised => Some(ManagedPolicyCompromise::SignatureInvalid),
+        SignedVerdict::Trusted => None,
         SignedVerdict::NoAuthenticSidecar => {
-            let refused = claim_imposes();
-            if refused {
+            if claim_imposes() {
                 tracing::warn!(
                     "managed policy fail-closed gate: refusing session — the signed is-managed \
                      claim requires an authentic policy sidecar and none is present"
                 );
+                return Some(ManagedPolicyCompromise::SignatureMissing);
             }
-            refused || sidecar_required_but_missing() || marker_compromised()
+            if sidecar_required_but_missing() {
+                return Some(ManagedPolicyCompromise::SignatureMissing);
+            }
+            marker_compromise(cache, home, identity)
         }
-        SignedVerdict::SidecarUnreadable => marker_compromised(),
-        SignedVerdict::Inactive => marker_compromised(),
+        SignedVerdict::SidecarUnreadable => marker_compromise(cache, home, identity),
+        SignedVerdict::Inactive => marker_compromise(cache, home, identity),
     }
+}
+
+fn marker_compromise(
+    cache: Option<&ManagedConfigCache>,
+    home: &Path,
+    identity: &ServingIdentity,
+) -> Option<ManagedPolicyCompromise> {
+    let cache = cache.filter(|cache| cache.fail_closed)?;
+    let signals = TamperSignals::evaluate(cache, home, identity);
+    let compromise = signals.compromised_reason();
+    if compromise.is_some() {
+        tracing::warn!(
+            artifact_missing = signals.artifact_missing,
+            identity_mismatch = signals.identity_mismatch,
+            "managed policy fail-closed gate: refusing session on tamper evidence"
+        );
+    } else if signals.identity_mismatch {
+        tracing::debug!(
+            identity_mismatch = true,
+            "managed policy fail-closed gate: foreign marker, not refusing (online refetch rebinds)"
+        );
+    }
+    compromise
 }
 
 /// Same-machine marker: more than a few minutes of future skew is not genuine.

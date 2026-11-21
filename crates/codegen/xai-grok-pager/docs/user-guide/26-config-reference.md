@@ -100,8 +100,8 @@ User-level configuration lives in `$GROK_HOME/config.json` (default `~/.grok/con
 | `endpoints.cli_chat_proxy_base_url` | `string` | `pin` | `user` | Session-service API base URL. |
 | `endpoints.feedback_base_url` | `string` | `yes` | `user` | Where feedback submissions go. Also GROK_FEEDBACK_BASE_URL. |
 | `endpoints.managed_config_url` | `string` | `yes` | `user` | Override managed config endpoint. Also GROK_MANAGED_CONFIG_URL. |
-| `endpoints.models_base_url` | `string` | `pin` | `user` | Custom inference base URL. Also GROK_MODELS_BASE_URL. |
-| `endpoints.models_list_url` | `string` | `pin` | `user` | Override model-list URL. Also GROK_MODELS_LIST_URL. Alias `models_endpoint`. |
+| `endpoints.models_base_url` | `string` | `pin` | `user` | Custom inference base URL. With `auth_provider_command` set, `{models_base_url}/models` decides which models are offered. Also GROK_MODELS_BASE_URL. |
+| `endpoints.models_list_url` | `string` | `pin` | `user` | Override model-list URL. With `auth_provider_command` set, this list decides which models are offered. Also GROK_MODELS_LIST_URL. Alias `models_endpoint`. |
 | `endpoints.trace_upload_url` | `string` | `pin` | `user` | Proxy destination for traces. Also GROK_TRACE_UPLOAD_URL. Trace uploads go through the proxy only: a config that sets a removed direct-bucket key or env var fails to load. |
 | `endpoints.xai_api_base_url` | `string` | `pin` | `user` | Public xAI API base. Also GROK_XAI_API_BASE_URL. |
 
@@ -148,6 +148,7 @@ User-level configuration lives in `$GROK_HOME/config.json` (default `~/.grok/con
 | `features.dock` | `boolean` | `pin` | `user` | Enable or disable `dock`. Default false. Also `GROK_DOCK`. |
 | `features.feedback_trace_card` | `boolean` | `pin` | `user` | Show a trace-upload consent question after `/feedback`. Default false. Also `GROK_FEEDBACK_TRACE_CARD`. |
 | `features.feedback` | `boolean` | `pin` | `user` | Enable or disable `feedback`. Default true. Also `GROK_FEEDBACK_ENABLED`. |
+| `features.file_acceleration` | `boolean` | `pin` | `user` | Hand local sessions' file systems to a file accelerator when the build installs one. Default false. Also `GROK_FILE_ACCELERATION`. |
 | `features.image_edit_model_override` | `string` | `yes` | `user` | Imagine model id for image_edit. |
 | `features.image_gen_model_override` | `string` | `yes` | `user` | Imagine model id for image_gen. Empty defers to the remotely configured default. |
 | `features.image_gen` | `boolean` | `pin` | `user` | Enable image_gen / `/imagine`. |
@@ -176,6 +177,12 @@ User-level configuration lives in `$GROK_HOME/config.json` (default `~/.grok/con
 | `features.write_file` | `boolean` | `pin` | `user` | Enable or disable `write_file`. Default true. Also `GROK_WRITE_FILE`. |
 | `features.zdr_access_enabled` | `boolean` | `pin` | `user` | Advertise ZDR-incompatible tools when the team is on Zero Data Retention. Also `GROK_ZDR_ACCESS_ENABLED`. |
 
+### `file_acceleration`
+
+| Key | Type / Values | Requirements | Managed | Details |
+| --- | --- | --- | --- | --- |
+| `file_acceleration.routes` | `string` | `yes` | `user` | Route override passed unparsed to the installed file accelerator; empty is unset. Also `GROK_FILE_ACCELERATION_ROUTES`. |
+
 ### `hooks`
 
 | Key | Type / Values | Requirements | Managed | Details |
@@ -189,7 +196,7 @@ User-level configuration lives in `$GROK_HOME/config.json` (default `~/.grok/con
 
 | Key | Type / Values | Requirements | Managed | Details |
 | --- | --- | --- | --- | --- |
-| `login.auth_provider_command` | `string` | `yes` | `user` | External auth binary; stdout is the token. Also GROK_AUTH_PROVIDER_COMMAND. |
+| `login.auth_provider_command` | `string` | `yes` | `user` | External auth binary; stdout is the token. With `endpoints.models_base_url` or `models_list_url` set, that endpoint's list decides which models are offered. Also GROK_AUTH_PROVIDER_COMMAND. |
 | `login.auth_provider_label` | `string` | `yes` | `user` | Login button label for an external auth provider. Also GROK_AUTH_PROVIDER_LABEL. |
 | `login.auth_token_ttl` | `number` | `yes` | `user` | Token TTL in seconds for providers that return a bare token. Also GROK_AUTH_TOKEN_TTL. |
 | `login.disable_api_key_auth` | `boolean` | `pin` | `user` | Refuse API-key auth so only the deployment IdP can log in. Also GROK_DISABLE_API_KEY_AUTH. |
@@ -223,6 +230,7 @@ User-level configuration lives in `$GROK_HOME/config.json` (default `~/.grok/con
 | `mcp.max_output_bytes` | `number` | `yes` | `user` | Cap MCP tool output size in bytes. Project files may set this. |
 | `mcp.servers.<name>.args` | `string[]` | `yes` | `user` | `mcp.servers.<name>` `args` on a stdio or HTTP MCP server. |
 | `mcp.servers.<name>.bearer_token_env_var` | `string` | `yes` | `user` | `mcp.servers.<name>` `bearer_token_env_var` on a stdio or HTTP MCP server. |
+| `mcp.servers.<name>.bearer_token_file` | `string` | `yes` | `user` | `mcp.servers.<name>` `bearer_token_file` on an HTTP MCP server: absolute or `~/` path to a bearer token, re-read on every request. |
 | `mcp.servers.<name>.command` | `string` | `yes` | `user` | `mcp.servers.<name>` `command` on a stdio or HTTP MCP server. |
 | `mcp.servers.<name>.cwd` | `string` | `yes` | `user` | `mcp.servers.<name>` `cwd` on a stdio or HTTP MCP server. |
 | `mcp.servers.<name>.enabled` | `boolean` | `yes` | `user` | `mcp.servers.<name>` `enabled` on a stdio or HTTP MCP server. |
@@ -251,6 +259,11 @@ User-level configuration lives in `$GROK_HOME/config.json` (default `~/.grok/con
 | `memory.enabled` | `boolean` | `pin` | `user` | Memory switch. Also `GROK_MEMORY`. `false` turns memory off unless `memory_v2.enabled = true`. With v2 off, `true` turns legacy memory on. |
 | `memory.v2.archived_retention_days` | `number` | — | `user` | Retains archived memory-v2 observation files for this many days. Default: `30`. |
 | `memory.v2.automatic_dream_enabled` | `boolean` | — | `user` | Enables event-driven memory-v2 Dream. Default: `true`. |
+| `memory.v2.batch_dream_enabled` | `boolean` | — | `user` | Runs active memory-v2 Dream as batch Dream, which folds notes into topics in batches with the full topic catalog; a local value wins over remote `memory_v2.batch_dream_enabled`, then defaults to `false`. |
+| `memory.v2.batch_dream_max_batch_note_bytes` | `number` | — | `user` | Caps note bytes in one batch Dream batch, default `98304`, clamped to `16384`–`262144`. A local value wins over remote `memory_v2.batch_dream_max_batch_note_bytes`. |
+| `memory.v2.batch_dream_max_calls_per_batch` | `number` | — | `user` | Caps model calls per batch Dream batch, default `6`, clamped to `2`–`16`. A local value wins over remote `memory_v2.batch_dream_max_calls_per_batch`. |
+| `memory.v2.batch_dream_max_run_secs` | `number` | — | `user` | Caps one batch Dream run in seconds, default `1800`, clamped to `60`–`3600`; unfinished notes stay in the inbox. A local value wins over remote `memory_v2.batch_dream_max_run_secs`. |
+| `memory.v2.compact_index_enabled` | `boolean` | — | `user` | Injects a titles-only memory index into the system prompt (no topic descriptions, no pending observations) so more topics fit the 8 KiB budget; titled entries are ordered by how often the agent has read each topic, and the on-disk `MEMORY.md` is rendered the same way. A local value wins over the remote `memory_v2.compact_index_enabled`. Default: `false`. |
 | `memory.v2.capture_enabled` | `boolean` | — | `user` | Enables memory-v2 extraction and observation capture. Default: `true`. |
 | `memory.v2.capture_status_enabled` | `boolean` | — | `user` | Shows memory-v2 capture lifecycle messages in the UI for debugging. Successful captures are expandable and include generated content plus links to committed observation files. Telemetry and debug logs are always recorded. Default: `false`. |
 | `memory.v2.enabled` | `boolean` | `pin` | `user` | Memory-v2 switch. True or absent selects v2. `false` selects the legacy pipeline, which then follows `memory.enabled`. Default: `true`. |
@@ -264,7 +277,7 @@ User-level configuration lives in `$GROK_HOME/config.json` (default `~/.grok/con
 | Key | Type / Values | Requirements | Managed | Details |
 | --- | --- | --- | --- | --- |
 | `models.agent_type` | `string` | `yes` | `user` | Fallback agent_type for models without a per-model override. |
-| `models.allowed_models` | `string[]` | `pin` | `user` | Glob allowlist for the model picker, default, and `-m`. Empty means no restriction. |
+| `models.allowed_models` | `string[]` | `pin` | `user` | Glob allowlist for the model picker, default, and `-m`, ignored outside requirements when `auth_provider_command` and a custom models endpoint are set. Empty means no restriction. |
 | `models.auth_providers.<name>` | `table` | `yes` | `user` | Named credential helper used by `[model.<id>] auth_provider`. |
 | `models.default_reasoning_effort` | `string` | `yes` | `user` | Default reasoning effort for the default model when the model supports it. |
 | `models.default` | `string` | `pin` | `user` | Model used for new sessions. Also `GROK_DEFAULT_MODEL`, `--model`, `-m`. |

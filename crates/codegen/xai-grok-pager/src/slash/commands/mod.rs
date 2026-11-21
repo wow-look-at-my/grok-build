@@ -8,6 +8,7 @@ pub mod compact;
 pub mod compact_mode;
 pub mod config_agents;
 pub mod context;
+pub mod context_window;
 pub mod copy;
 pub mod dashboard;
 pub mod debug;
@@ -51,7 +52,6 @@ pub mod remember;
 pub mod rename;
 pub mod resume;
 pub mod rewind;
-pub mod scroll_debug;
 pub mod session_info;
 pub mod settings_cmd;
 pub mod share;
@@ -91,6 +91,7 @@ pub fn builtin_commands() -> Vec<Arc<dyn SlashCommand>> {
         Arc::new(new::NewCommand),
         // Per turn.
         Arc::new(effort::EffortCommand),
+        Arc::new(context_window::ContextWindowCommand),
         Arc::new(model::ModelCommand),
         Arc::new(context::ContextCommand),
         Arc::new(compact::CompactCommand),
@@ -155,8 +156,6 @@ pub fn builtin_commands() -> Vec<Arc<dyn SlashCommand>> {
         Arc::new(exit::ExitCommand),
         // Hidden easter egg: never listed, runs on bare `/gboom`.
         Arc::new(gboom::GboomCommand),
-        // Hidden diagnostic: never listed, toggles the scroll-debug HUD.
-        Arc::new(scroll_debug::ScrollDebugCommand),
         // Self-debugging skill (and the overlay toggles it fronts).
         Arc::new(debug::DebugCommand),
     ]

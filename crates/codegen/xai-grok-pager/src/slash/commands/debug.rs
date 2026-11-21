@@ -182,7 +182,6 @@ mod tests {
 
     use super::*;
     use crate::acp::model_state::ModelState;
-    use crate::slash::commands::scroll_debug::ScrollDebugCommand;
     use crate::slash::commands::tests::make_ctx;
 
     fn app_ctx(models: &ModelState) -> AppCtx<'_> {
@@ -208,21 +207,6 @@ mod tests {
             DebugCommand.visible(&app_ctx(&models)),
             "/debug must be offered in the composer regardless of build profile"
         );
-    }
-
-    /// `/debug scroll` and `/scroll-debug` must stay routed to the same action: the HUD has one toggle, two spellings.
-    #[test]
-    fn debug_scroll_routes_to_same_action_as_scroll_debug() {
-        let models = ModelState::default();
-        let mut ctx = make_ctx(&models);
-        assert!(matches!(
-            DebugCommand.run(&mut ctx, "scroll"),
-            CommandResult::Action(Action::ToggleScrollDebugHud)
-        ));
-        assert!(matches!(
-            ScrollDebugCommand.run(&mut ctx, ""),
-            CommandResult::Action(Action::ToggleScrollDebugHud)
-        ));
     }
 
     #[test]

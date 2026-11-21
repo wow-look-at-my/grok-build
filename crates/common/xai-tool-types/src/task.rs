@@ -1507,8 +1507,11 @@ pub struct TaskOutputToolNaming<'a> {
     pub monitor_tool: Option<&'a str>,
     /// Read tool name for the "large output" hint, or `None`.
     pub read_tool: Option<&'a str>,
-    /// The bash `is_background` param name, when a bash/`execute` tool is present.
+    /// The bash `is_background` param name, when the bash/`execute` tool advertises one.
     pub bash_background_param: Option<&'a str>,
+    /// The bash `block_until_ms` param name, when the bash/`execute` tool advertises one.
+    /// Ignored when [`Self::bash_background_param`] is `Some`.
+    pub bash_block_param: Option<&'a str>,
     /// The subagent `run_in_background` param name, when a `task` tool is present.
     pub subagent_background_param: Option<&'a str>,
     /// Model-facing name of the `task_ids` input (tracks param renames).
@@ -1524,6 +1527,7 @@ pub fn build_task_output_description(naming: &TaskOutputToolNaming) -> String {
         monitor_tool,
         read_tool,
         bash_background_param,
+        bash_block_param,
         subagent_background_param,
         task_ids_param,
         task_id_param,
@@ -1533,14 +1537,11 @@ pub fn build_task_output_description(naming: &TaskOutputToolNaming) -> String {
 
     let target_suffix = lifecycle_target_suffix(monitor_present, subagent_present);
 
-    let sources = match (bash_background_param, subagent_background_param) {
-        // Both params share one client-facing name: don't repeat it.
-        (Some(b), Some(s)) if b == s => format!("{b}=true commands or subagents"),
-        (Some(b), Some(s)) => format!("{b}=true commands or {s}=true subagents"),
-        (Some(b), None) => format!("{b}=true commands"),
-        (None, Some(s)) => format!("{s}=true subagents"),
-        (None, None) => "background tasks".to_string(),
-    };
+    let sources = background_sources(
+        bash_background_param,
+        bash_block_param,
+        subagent_background_param,
+    );
 
     let monitor_note = monitor_task_id_note(monitor_tool, task_id_param);
     let read_note = match read_tool {
@@ -1554,6 +1555,36 @@ pub fn build_task_output_description(naming: &TaskOutputToolNaming) -> String {
          - This tool never waits. It returns the current output, status, and exit code at once\n\
          - To wait for a task, end your turn. A completion message wakes you when the task finishes{read_note}"
     )
+}
+
+/// Names how the model starts a background command or subagent, for the "ids from …" sentence.
+fn background_sources(
+    bash_background_param: Option<&str>,
+    bash_block_param: Option<&str>,
+    subagent_background_param: Option<&str>,
+) -> String {
+    let bash = bash_background_phrase(bash_background_param, bash_block_param);
+    match (bash, subagent_background_param) {
+        // Both params share one client-facing name
+        (Some(b), Some(s)) if b == format!("{s}=true") => format!("{b} commands or subagents"),
+        (Some(b), Some(s)) => format!("{b} commands or {s}=true subagents"),
+        (Some(b), None) => format!("{b} commands"),
+        (None, Some(s)) => format!("{s}=true subagents"),
+        (None, None) => "background tasks".to_string(),
+    }
+}
+
+/// The bash argument that starts a background command, or `None` when the bash tool advertises neither param.
+/// `is_background=true` wins over `block_until_ms=0`.
+fn bash_background_phrase(
+    bash_background_param: Option<&str>,
+    bash_block_param: Option<&str>,
+) -> Option<String> {
+    match (bash_background_param, bash_block_param) {
+        (Some(b), _) => Some(format!("{b}=true")),
+        (None, Some(p)) => Some(format!("{p}=0")),
+        (None, None) => None,
+    }
 }
 
 #[cfg(test)]
@@ -2312,6 +2343,7 @@ mod tests {
             monitor_tool: Some("monitor"),
             read_tool: None,
             bash_background_param: Some("is_background"),
+            bash_block_param: None,
             subagent_background_param: None,
             task_ids_param: "process_ids",
             task_id_param: "id",
@@ -2336,6 +2368,7 @@ mod tests {
             monitor_tool: Some("monitor"),
             read_tool: Some("read_file"),
             bash_background_param: Some("background"),
+            bash_block_param: None,
             subagent_background_param: Some("background"),
             task_ids_param: "task_ids",
             task_id_param: "task_id",
@@ -2357,6 +2390,7 @@ mod tests {
             monitor_tool: None,
             read_tool: Some("read_file"),
             bash_background_param: None,
+            bash_block_param: None,
             subagent_background_param: Some("run_in_background"),
             task_ids_param: "task_ids",
             task_id_param: "task_id",
@@ -2369,6 +2403,47 @@ mod tests {
              - This tool never waits. It returns the current output, status, and exit code at once\n\
              - To wait for a task, end your turn. A completion message wakes you when the task finishes\n\
              - If output is large, use read_file on the output_file path"
+        );
+    }
+
+    #[test]
+    fn task_tools_name_block_until_ms_zero_when_bash_lacks_is_background() {
+        let naming = |bash_background_param, bash_block_param, subagent_background_param| {
+            TaskOutputToolNaming {
+                monitor_tool: None,
+                read_tool: None,
+                bash_background_param,
+                bash_block_param,
+                subagent_background_param,
+                task_ids_param: "task_ids",
+                task_id_param: "task_id",
+            }
+        };
+
+        let desc = build_task_output_description(&naming(
+            None,
+            Some("block_until_ms"),
+            Some("run_in_background"),
+        ));
+        assert!(
+            desc.contains(
+                "ids from block_until_ms=0 commands or run_in_background=true subagents;"
+            ),
+            "{desc}"
+        );
+
+        let desc = build_task_output_description(&naming(None, Some("wait_ms"), None));
+        assert!(desc.contains("ids from wait_ms=0 commands;"), "{desc}");
+
+        // `is_background` wins when the bash tool advertises both params
+        let desc = build_task_output_description(&naming(
+            Some("is_background"),
+            Some("block_until_ms"),
+            None,
+        ));
+        assert!(
+            desc.contains("ids from is_background=true commands;"),
+            "{desc}"
         );
     }
 

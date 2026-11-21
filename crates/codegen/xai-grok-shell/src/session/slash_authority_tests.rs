@@ -1,9 +1,6 @@
 use super::*;
 use crate::session::slash_commands::BUILTIN_COMMANDS;
-
-fn text_block(text: &str) -> acp::ContentBlock {
-    acp::ContentBlock::Text(acp::TextContent::new(text))
-}
+use xai_grok_test_support::acp_fixtures::text_block;
 
 #[test]
 fn model_authored_resolution_uses_exact_canonical_metadata() {

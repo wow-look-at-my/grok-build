@@ -663,6 +663,28 @@ impl SessionActor {
         }
     }
 
+    /// Notes the model writes with file tools produce no capture outcome, so
+    /// the turn end is the event that lets them count toward the trigger.
+    pub(super) fn schedule_v2_dream_check_after_turn(self: &Arc<Self>) {
+        if !self.memory.v2_config.can_run_automatic_dream()
+            || self.startup_hints.is_subagent
+            || self.memory.storage().is_none()
+        {
+            return;
+        }
+        let cancel = self.memory.dream_workers.cancellation_token();
+        if cancel.is_cancelled() {
+            return;
+        }
+        let session = Arc::clone(self);
+        let task = xai_grok_telemetry::session_ctx::spawn_local_in_session_ctx(async move {
+            session
+                .evaluate_automatic_v2_dream(cancel, xai_grok_memory::system_v2_clock())
+                .await;
+        });
+        self.memory.dream_workers.track(task);
+    }
+
     async fn evaluate_automatic_v2_dream_in(
         self: &Arc<Self>,
         scope: xai_grok_memory::V2MemoryScope,
@@ -885,6 +907,19 @@ impl SessionActor {
         let started_at = std::time::Instant::now();
         if cancel.is_cancelled() {
             return cancelled(false);
+        }
+        if self.memory.v2_config.batch_dream_enabled
+            && self.memory.v2_config.rollout == crate::config::MemoryV2Rollout::Active
+        {
+            let outcome = self.execute_batch_v2_dream(cancel.clone(), clock).await;
+            return self
+                .finish_v2_dream(
+                    outcome.disposition,
+                    outcome.observation_count,
+                    outcome.topics_affected,
+                    false,
+                )
+                .await;
         }
         let Some(storage) = self.memory.storage() else {
             return V2DreamPass {
