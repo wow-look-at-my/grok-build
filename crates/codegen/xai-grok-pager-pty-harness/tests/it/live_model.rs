@@ -515,7 +515,8 @@ const MEMORY_PROMPTS: [&str; 5] = [
 /// The topic the session stores next to the release note. No prompt is about it.
 const EDITOR_NOTE: &str = "files.md";
 
-/// The observations and topics the session itself wrote under `grok_home`.
+/// The observations and topics the session itself wrote under `grok_home`. A Dream moves the observations it
+/// consumed to `archive/`, so a path there is capture output and a path in `topics/` is Dream output.
 fn notes_written_by_the_session(grok_home: &Path) -> Vec<PathBuf> {
     let mut found = Vec::new();
     let mut pending = vec![grok_home.join("memory-v2")];
@@ -525,7 +526,9 @@ fn notes_written_by_the_session(grok_home: &Path) -> Vec<PathBuf> {
             let text = path.to_string_lossy().into_owned();
             if path.is_dir() {
                 pending.push(path);
-            } else if (text.contains("/observations/") || text.contains("/topics/"))
+            } else if (text.contains("/observations/")
+                || text.contains("/topics/")
+                || text.contains("/archive/"))
                 && text.ends_with(".md")
                 && !text.ends_with(RELEASE_NOTE)
                 && !text.ends_with(EDITOR_NOTE)
@@ -534,6 +537,24 @@ fn notes_written_by_the_session(grok_home: &Path) -> Vec<PathBuf> {
             }
         }
     }
+    found
+}
+
+/// Every file under `dir`, relative to it.
+fn files_under(dir: &Path) -> Vec<String> {
+    let mut found = Vec::new();
+    let mut pending = vec![dir.to_path_buf()];
+    while let Some(next) = pending.pop() {
+        for entry in std::fs::read_dir(&next).into_iter().flatten().flatten() {
+            let path = entry.path();
+            if path.is_dir() {
+                pending.push(path);
+            } else if let Ok(relative) = path.strip_prefix(dir) {
+                found.push(relative.display().to_string());
+            }
+        }
+    }
+    found.sort();
     found
 }
 
@@ -705,6 +726,117 @@ fn manifests(grok_home: &Path) -> String {
     out
 }
 
+/// The prompts of the compaction session. Each asks about the stored release note.
+const COMPACTION_PROMPTS: [&str; 3] = [
+    "How do I run the zebrafish deploy pipeline? Answer from what you know and run nothing.",
+    "Say again how the zebrafish deploy pipeline starts. Run nothing.",
+    "One last time: what command starts the zebrafish deploy pipeline? Run nothing.",
+];
+
+/// A live session recalls the release note for the first prompt about it and not for the second. After a
+/// `/compact`, the reminder is gone from the conversation, so the next prompt about it recalls it again.
+#[cfg(unix)]
+#[test]
+#[ignore = "live model; needs GROK_LIVE_BASE_URL, GROK_LIVE_MODEL and GROK_LIVE_KEY_ENV"]
+fn live_a_note_is_recalled_again_after_a_compaction() {
+    let base_url = required_env("GROK_LIVE_BASE_URL");
+    let model = required_env("GROK_LIVE_MODEL");
+    let key_env = required_env("GROK_LIVE_KEY_ENV");
+    let key = required_env(&key_env);
+
+    let sandbox = TestSandbox::new();
+    let grok_home = sandbox.grok_home().to_path_buf();
+    // Memory is off for a workspace in the system temp directory.
+    let workspace = Path::new(env!("CARGO_TARGET_TMPDIR"))
+        .join(format!("live-memory-compact-{}", std::process::id()));
+    std::fs::create_dir_all(&workspace).expect("create the workspace");
+    let config = json!({
+        "models": {
+            "default": "live",
+            "providers": {
+                "live": { "base_url": base_url, "env_key": key_env, "models_autodetect": false }
+            },
+            "definitions": {
+                "live": { "model_provider": "live", "model": model, "context_window": 200_000 }
+            }
+        }
+    });
+    std::fs::write(grok_home.join("config.json"), config.to_string()).expect("write config");
+    let topics = grok_home.join("memory-v2").join("global").join("topics");
+    std::fs::create_dir_all(&topics).expect("create the topics directory");
+    std::fs::write(
+        topics.join(RELEASE_NOTE),
+        "# Release steps\nHow a release is cut.\n\n## Zebrafish deploy pipeline\n\
+         - The zebrafish deploy pipeline starts with `make quokka-release`.\n",
+    )
+    .expect("write the release note");
+
+    let mut env: Vec<(String, String)> = vec![
+        (key_env.clone(), key),
+        ("TERM".into(), "xterm-256color".into()),
+        ("COLORTERM".into(), "truecolor".into()),
+    ];
+    for name in NETWORK_ENV {
+        if let Ok(value) = std::env::var(name) {
+            env.push((name.to_owned(), value));
+        }
+    }
+    let env_refs: Vec<(&str, &str)> = env.iter().map(|(k, v)| (k.as_str(), v.as_str())).collect();
+    let binary = pager_binary().expect("resolve pager binary");
+    let mut harness = PtyHarness::new_in_sandbox(
+        &binary,
+        160,
+        140,
+        &["--yolo", "--trust"],
+        &sandbox,
+        &env_refs,
+        Some(&workspace),
+    )
+    .expect("spawn pager");
+    harness
+        .wait_for_text(WELCOME, Duration::from_secs(30))
+        .unwrap_or_else(|e| panic!("welcome: {e:#}\nscreen:\n{}", harness.screen_contents()));
+
+    ask_and_wait(&mut harness, &grok_home, COMPACTION_PROMPTS[0]);
+    ask_and_wait(&mut harness, &grok_home, COMPACTION_PROMPTS[1]);
+    let first = notes_recalled_for(&grok_home, COMPACTION_PROMPTS[0]);
+    let second = notes_recalled_for(&grok_home, COMPACTION_PROMPTS[1]);
+
+    harness.inject_keys(b"/compact").expect("type /compact");
+    harness.update(Duration::from_millis(500));
+    harness.inject_keys(b"\r").expect("run /compact");
+    harness
+        .wait_for_text("Compaction completed", Duration::from_secs(300))
+        .unwrap_or_else(|e| panic!("compaction: {e:#}\nscreen:\n{}", harness.screen_contents()));
+    harness.update(Duration::from_secs(2));
+
+    ask_and_wait(&mut harness, &grok_home, COMPACTION_PROMPTS[2]);
+    let third = notes_recalled_for(&grok_home, COMPACTION_PROMPTS[2]);
+    for (prompt, notes) in COMPACTION_PROMPTS.iter().zip([&first, &second, &third]) {
+        println!("LIVE compact, `{prompt}` recalled {notes:?}");
+    }
+
+    harness.inject_keys(b"\x11").expect("ctrl-q once");
+    harness.update(Duration::from_millis(300));
+    harness.inject_keys(b"\x11").expect("ctrl-q confirm");
+    let _ = harness.quit();
+    let _ = std::fs::remove_dir_all(&workspace);
+
+    let release = |notes: &[String]| notes.len() == 1 && notes[0].contains(RELEASE_NOTE);
+    assert!(
+        release(&first),
+        "the first prompt recalls the note: {first:?}"
+    );
+    assert!(
+        second.is_empty(),
+        "a note is shown one time for a conversation: {second:?}"
+    );
+    assert!(
+        release(&third),
+        "after a compaction the note is recalled again: {third:?}"
+    );
+}
+
 /// One session states a preference and a location in passing. A later session, in a new process, is asked where
 /// the thing is and is given a task that the preference applies to. Nothing but memory carries both facts over.
 #[cfg(unix)]
@@ -780,6 +912,32 @@ fn live_later_session_knows_what_an_earlier_session_was_told_in_passing() {
             notes_written_by_the_session(&grok_home).len() > notes_before
         });
     }
+    // Capture spent on a real provider, so the status bar and `/memory` must show what memory cost.
+    harness
+        .wait_for_text("mem $", Duration::from_secs(60))
+        .unwrap_or_else(|e| {
+            panic!(
+                "the status bar must show what memory spent: {e}\nscreen:\n{}",
+                harness.screen_contents()
+            )
+        });
+    harness.inject_keys(b"/memory\r").expect("submit /memory");
+    harness
+        .wait_for_text("Memory cost: $", Duration::from_secs(30))
+        .unwrap_or_else(|e| {
+            panic!(
+                "the memory browser must show the memory cost: {e}\nscreen:\n{}",
+                harness.screen_contents()
+            )
+        });
+    let cost_lines: Vec<String> = harness
+        .screen_contents()
+        .lines()
+        .filter(|line| line.contains("mem $") || line.contains("Memory cost"))
+        .map(|line| line.trim().to_owned())
+        .collect();
+    println!("LIVE carry, memory cost on screen: {cost_lines:#?}");
+    harness.inject_keys(b"\x1b").expect("close /memory");
     quit(harness);
     let captured = notes_written_by_the_session(&grok_home);
     println!("LIVE carry, notes of the earlier session: {captured:?}");
@@ -796,6 +954,16 @@ fn live_later_session_knows_what_an_earlier_session_was_told_in_passing() {
         }
     }
     println!("LIVE carry, manifests:\n{}", manifests(&grok_home));
+    println!(
+        "LIVE carry, memory files:\n{}",
+        files_under(&grok_home.join("memory-v2")).join("\n")
+    );
+    let memory_writes: Vec<String> = history_holding(&grok_home, EARLIER_PROMPTS[1])
+        .iter()
+        .filter(|item| item["type"] == "assistant" && item.to_string().contains("memory-v2"))
+        .map(|item| item.to_string())
+        .collect();
+    println!("LIVE carry, earlier assistant items that name memory-v2: {memory_writes:#?}");
     // The later session must not learn the prefix from the file.
     for entry in std::fs::read_dir(&workspace)
         .into_iter()
