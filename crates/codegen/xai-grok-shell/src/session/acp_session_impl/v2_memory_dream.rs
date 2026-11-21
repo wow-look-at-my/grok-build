@@ -22,7 +22,9 @@ const V2_DREAM_SYSTEM_PROMPT: &str = "Consolidate only the supplied claimed obse
     only those two lines), then durable facts as short standalone statements under `##` \
     headings: file paths, constants, commands, invariants, decisions, and user preferences. \
     Put changing state under `## Recent state` or omit it. Do not narrate conversations. Drop \
-    facts that newer observations contradict or make stale. \
+    facts that newer observations contradict or make stale. A limit the user set for one \
+    request (\"do not run it now\", \"do not create it\") is not a durable fact: leave it out, \
+    also as a clause inside another fact. \
     Return one JSON object with an `operations` array. \
     Every operation must have an `op` field identifying its type: create, update, delete, \
     rename, merge, or split. Use exactly the fields listed for each type; do not add other fields. \

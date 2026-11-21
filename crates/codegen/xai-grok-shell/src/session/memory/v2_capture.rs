@@ -11,7 +11,7 @@ use xai_grok_memory::{
     V2CaptureError,
 };
 
-pub(crate) const PROMPT_VERSION: &str = "memory-v2-capture-3";
+pub(crate) const PROMPT_VERSION: &str = "memory-v2-capture-5";
 pub(crate) const FLUSH_TIMEOUT: std::time::Duration = std::time::Duration::from_secs(4 * 60);
 
 #[derive(Debug, Clone, Copy, PartialEq, Eq)]
