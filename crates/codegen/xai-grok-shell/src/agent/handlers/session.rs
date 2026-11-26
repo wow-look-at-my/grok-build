@@ -106,6 +106,7 @@ async fn handle_session_info(
         model_fingerprint: None,
         show_model_fingerprint: false,
         api_backend: None,
+        route: None,
         conversation_id: None,
         turns: 0,
         turn_index: 0,

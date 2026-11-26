@@ -701,6 +701,13 @@ impl SessionActor {
         let free_tokens = xai_token_estimation::free_tokens(context_window, total_tokens);
         let usage_pct = xai_token_estimation::usage_percentage_u8(total_tokens, context_window);
         let api_backend = config.as_ref().map(|c| format!("{:?}", c.api_backend));
+        let route = config
+            .as_ref()
+            .and_then(|c| xai_grok_sampler::provider_route::route_for(&c.base_url))
+            .map(|route| match &route.target {
+                Ok(_) => route.describe_path(),
+                Err(reason) => format!("broken: {reason}"),
+            });
         let agent_name = self.agent.borrow().definition().name.clone();
         let conversation_id = None;
         SessionInfoData {
@@ -710,6 +717,7 @@ impl SessionActor {
             model_fingerprint,
             show_model_fingerprint,
             api_backend,
+            route,
             conversation_id,
             agent_name: Some(agent_name),
             turns: turns as u64,

@@ -18,6 +18,7 @@ pub mod file_search;
 pub mod fps_hud;
 pub mod goal_detail;
 pub mod history_search;
+pub mod hops_dialog;
 pub mod icon_label;
 pub mod import_claude_modal;
 pub mod jump;

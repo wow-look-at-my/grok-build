@@ -413,6 +413,65 @@ A provider with a large catalog fills the picker. `favorite_models` is a list of
 
 The lists are joined: `models.favorite_models` matches any model, and a provider's own list matches only that provider's models. A pattern matches the catalog key or the routing slug, case-sensitive.
 
+### Proxy Hops
+
+A provider block can list the proxies between Grok and the provider. `hops` names them from the client outward, and the provider block itself is the last link:
+
+```json
+{
+  "models": {
+    "providers": {
+      "openrouter": {
+        "base_url": "https://openrouter.ai/api/v1",
+        "env_key": "OPENROUTER_API_KEY",
+        "hops": [
+          {
+            "id": "nas",
+            "name": "NAS",
+            "kind": "relay",
+            "optional": true,
+            "base_url": "http://nas.lan:8317",
+            "routes": { "bifrost": "bifrost", "openrouter": "openrouter" },
+            "env_http_headers": { "X-AI-Proxy-Token": "AI_PROXY_TOKEN" }
+          },
+          {
+            "id": "bifrost",
+            "name": "Bifrost",
+            "kind": "gateway",
+            "optional": true,
+            "base_url": "http://bifrost.lan:8080/v1",
+            "model_prefix": "openrouter/",
+            "env_key": "BIFROST_API_KEY",
+            "extra_headers": { "x-bf-send-back-raw-response": "true" }
+          }
+        ]
+      }
+    }
+  }
+}
+```
+
+A request enters at the first hop that is on. With both hops on it goes to `http://nas.lan:8317/bifrost/v1`. With `bifrost` off it goes to `http://nas.lan:8317/openrouter/api/v1`. With `nas` off it goes straight to the next link.
+
+| Field | Meaning |
+| --- | --- |
+| `id` | Names the hop in the `routes` of the hop before it, and in the toggle. |
+| `name` | The name the UI shows. Unset shows the `id`. |
+| `kind` | `gateway` (the default) answers the API itself, so its `base_url` is the whole address. `relay` forwards a path to the link that `routes` names, and changes nothing else. |
+| `optional` | The hop can be turned off in the UI. A hop that is not optional is always on. |
+| `enabled` | Whether an optional hop is on. Unset means on. `/hops` writes it. |
+| `base_url` | Where the hop listens. |
+| `routes` | A relay's path to each link after it, by that link's `id`. The provider block's own id names the provider. A value that starts with `http` is the whole base URL through the relay. Any other value is a path on the relay that stands for the next link's origin. |
+| `model_prefix` | What a gateway puts before the model id, for example `openrouter/`. |
+| `env_key`, `api_key` | A credential the hop takes in place of the provider's. The hop nearest Grok that sets one wins. |
+| `extra_headers`, `env_http_headers` | Headers sent only while the hop is on. |
+
+`/hops` (also `/route`, and the last row of `/model`) opens the route dialog. It lists every link with its address and its round-trip time, and Space turns an optional hop on or off. The toggle is saved to `config.json` and the next request takes the new path. A model that sets a `base_url` of its own does not use its provider's hops.
+
+A chain that cannot carry a request refuses every request to that provider, and the dialog shows why. A relay with no `routes` entry for the next link is the usual cause.
+
+The top bar shows `zstd` while requests go out compressed, and `zstd Δ` when the relay keeps the body before and only the change is sent. While a response streams, the upstream that serves it is named beside the tokens-per-second reading, in its own colour. A terminal that draws pixels (Kitty, Ghostty, WezTerm) also shows the provider's mark. A PNG at `$GROK_HOME/provider-icons/<name>.png` adds a mark for a provider that has none. `<name>` is the provider's name in lower case, letters and digits only.
+
 ---
 
 ## Overriding Built-in Models

@@ -371,6 +371,10 @@ Every one of those is the test doing its job. Making them pass there means weake
 
 [docs/model-providers-id-notes.md](docs/model-providers-id-notes.md) holds this section.
 
+## Hop-chain notes
+
+[docs/hop-chain-notes.md](docs/hop-chain-notes.md) holds this section: the proxy hops of a provider and the route dialog. This also covers the transport record and the provider label with its mark.
+
 ## Provider model autodetection and favorites notes
 
 [docs/provider-model-autodetection-and-favorites-notes.md](docs/provider-model-autodetection-and-favorites-notes.md) holds this section.
