@@ -45,7 +45,7 @@ Open the route dialog: every proxy between Grok and the model's provider, its ad
 
 ### `/session-info`
 
-Show session details — auth method, model, API dialect, route, turn count, and context usage. Aliases: `/status`, `/info`. Click a value or drag to select and copy; `c` copies the session ID and `y` copies the whole block.
+Show session details — auth method, model, API dialect, route, turn count, and context usage. Aliases. Click a value or drag to select and copy. `c` copies the session ID and `y` copies the whole block.
 
 ### `/fork`
 
