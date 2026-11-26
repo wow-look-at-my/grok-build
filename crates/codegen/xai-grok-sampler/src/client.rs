@@ -72,6 +72,36 @@ struct HttpRequest {
     invalid_header: Option<&'static str>,
     /// Set when the body went to a delta relay, which keeps it as the next base.
     delta: Option<DeltaPlan>,
+    /// The JSON body's size, set when `body` holds an encoded form of it.
+    plain_len: Option<usize>,
+}
+
+/// What one send put on the wire.
+struct SentBody {
+    encoding: xai_grok_sampling_types::BodyEncoding,
+    plain_bytes: u64,
+    wire_bytes: u64,
+}
+
+impl SentBody {
+    fn of(request: &HttpRequest) -> Self {
+        use xai_grok_sampling_types::BodyEncoding;
+        let wire = request.body.as_ref().map_or(0, Vec::len);
+        let zstd = request
+            .headers
+            .get(CONTENT_ENCODING)
+            .is_some_and(|value| value.as_bytes().eq_ignore_ascii_case(b"zstd"));
+        let encoding = match (zstd, request.headers.contains_key(BASE_HEADER)) {
+            (false, _) => BodyEncoding::Plain,
+            (true, false) => BodyEncoding::Zstd,
+            (true, true) => BodyEncoding::ZstdDelta,
+        };
+        Self {
+            encoding,
+            plain_bytes: request.plain_len.unwrap_or(wire) as u64,
+            wire_bytes: wire as u64,
+        }
+    }
 }
 
 /// What a delta relay keeps of one request, and how to resend it.
@@ -694,6 +724,7 @@ fn extract_model_metadata(
             context_window,
             max_completion_tokens,
             models_etag,
+            transport: None,
         })
     } else {
         None
@@ -1268,6 +1299,7 @@ impl SamplingClient {
                 body: None,
                 invalid_header: None,
                 delta: None,
+                plain_len: None,
             },
             sent_bearer,
         }
@@ -1562,6 +1594,7 @@ impl SamplingClient {
             request.body = Some(json);
             return Ok(request);
         }
+        request.plain_len = Some(json.len());
         if !delta_capable(&request.url) {
             request.body = Some(match compress_body(&json).await {
                 Some(compressed) => {
@@ -1611,8 +1644,12 @@ impl SamplingClient {
     }
 
     /// Send `request`. A body the relay accepted becomes the next base.
-    async fn send_net(&self, mut request: HttpRequest) -> Result<xai_grok_net::Response> {
+    async fn send_net(
+        &self,
+        mut request: HttpRequest,
+    ) -> Result<(xai_grok_net::Response, SentBody)> {
         let plan = request.delta.take();
+        let mut sent = SentBody::of(&request);
         let resend = plan.as_ref().filter(|plan| plan.against_base).map(|_| {
             (
                 request.url.clone(),
@@ -1642,7 +1679,9 @@ impl SamplingClient {
                     body: Some(body),
                     invalid_header: None,
                     delta: None,
+                    plain_len: Some(plan.plain.len()),
                 };
+                sent = SentBody::of(&retry);
                 let response = self.net_request(retry)?.send().await?;
                 note_response_headers(response.url().as_str(), response.headers());
                 response
@@ -1652,7 +1691,7 @@ impl SamplingClient {
         if let Some(plan) = plan {
             remember_delta_base(plan.url, plan.plain);
         }
-        Ok(response)
+        Ok((response, sent))
     }
 
     /// Hand `request` to `xai-grok-net`, which writes its credential.
@@ -1682,6 +1721,7 @@ impl SamplingClient {
     async fn send(&self, request: HttpRequest) -> Result<xai_grok_net::Response> {
         self.send_net(request)
             .await
+            .map(|(response, _sent)| response)
             .inspect_err(|e| tracing::debug!("HTTP request failed: {}", e))
     }
 
@@ -1691,11 +1731,26 @@ impl SamplingClient {
         span_timing: &mut StreamSpanTiming,
     ) -> Result<xai_grok_net::Response> {
         span_timing.record_request_build();
-        let response = self.send_net(built_request).await.inspect_err(|e| {
+        let sent_at = std::time::Instant::now();
+        let (response, sent) = self.send_net(built_request).await.inspect_err(|e| {
             tracing::debug!("HTTP request failed: {}", e);
             span_timing.record_transport_failure(&e.to_string());
         })?;
         span_timing.record_response_headers();
+        let server_timing = xai_grok_sampling_types::parse_server_timing(
+            response
+                .headers()
+                .get_all("server-timing")
+                .iter()
+                .filter_map(|value| value.to_str().ok()),
+        );
+        span_timing.set_transport(xai_grok_sampling_types::RequestTransport {
+            encoding: sent.encoding,
+            plain_bytes: sent.plain_bytes,
+            wire_bytes: sent.wire_bytes,
+            headers_ms: u64::try_from(sent_at.elapsed().as_millis()).unwrap_or(u64::MAX),
+            server_timing,
+        });
         Ok(response)
     }
 
@@ -1800,7 +1855,7 @@ impl SamplingClient {
             .span()
             .record(STATUS_CODE, status.as_u16() as i64);
         span_timing.span().record(SUCCESS, status.is_success());
-        let model_metadata = extract_model_metadata(response.headers());
+        let model_metadata = span_timing.with_transport(extract_model_metadata(response.headers()));
         let retry_after_secs = extract_retry_after(response.headers());
         let should_retry = extract_should_retry(response.headers());
         if !status.is_success() {
@@ -2245,7 +2300,7 @@ impl SamplingClient {
             });
         }
 
-        let model_metadata = extract_model_metadata(response.headers());
+        let model_metadata = span_timing.with_transport(extract_model_metadata(response.headers()));
 
         // Strip UTF-8 BOM if present
         const UTF8_BOM: &[u8] = &[0xEF, 0xBB, 0xBF];
@@ -2612,7 +2667,7 @@ impl SamplingClient {
             });
         }
 
-        let model_metadata = extract_model_metadata(response.headers());
+        let model_metadata = span_timing.with_transport(extract_model_metadata(response.headers()));
 
         // Strip UTF-8 BOM if present
         const UTF8_BOM: &[u8] = &[0xEF, 0xBB, 0xBF];

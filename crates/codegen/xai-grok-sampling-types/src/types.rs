@@ -805,6 +805,36 @@ pub struct ChatCompletionChunk {
         deserialize_with = "crate::serde_helpers::empty_string_as_none"
     )]
     pub system_fingerprint: Option<String>,
+    /// OpenRouter's name of the upstream that served the request.
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    pub provider: Option<serde_json::Value>,
+    /// Bifrost's own fields. Its `raw_response` is the chunk the gateway's upstream sent.
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    pub extra_fields: Option<serde_json::Value>,
+}
+
+impl ChatCompletionChunk {
+    /// The upstream that served this chunk, when a gateway named one.
+    pub fn upstream_provider(&self) -> Option<&str> {
+        upstream_provider_of(self.provider.as_ref(), self.extra_fields.as_ref())
+    }
+}
+
+/// The name nearest the model wins. The top-level `provider` is first. The
+/// `provider` in Bifrost's raw upstream chunk is next. Bifrost's own is last.
+pub fn upstream_provider_of<'a>(
+    provider: Option<&'a serde_json::Value>,
+    extra_fields: Option<&'a serde_json::Value>,
+) -> Option<&'a str> {
+    let named = |value: Option<&'a serde_json::Value>| {
+        value
+            .and_then(serde_json::Value::as_str)
+            .map(str::trim)
+            .filter(|name| !name.is_empty())
+    };
+    named(provider)
+        .or_else(|| named(extra_fields.and_then(|f| f.get("raw_response")?.get("provider"))))
+        .or_else(|| named(extra_fields.and_then(|f| f.get("provider"))))
 }
 
 #[derive(Debug, Serialize, Deserialize, Clone)]

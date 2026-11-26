@@ -52,6 +52,7 @@ pub fn stream_chat_completions<'a>(
 
         // Per-response accumulators
         let mut first_chunk_seen = false;
+        let mut provider_reported = false;
         let mut first_choice_seen = false;
         let mut first_token_emitted = false;
         let mut model: String = String::new();
@@ -112,6 +113,15 @@ pub fn stream_chat_completions<'a>(
                     .clone()
                     .filter(|s| !s.is_empty());
                 first_chunk_seen = true;
+            }
+
+            // A gateway can name its upstream on a later chunk than the first.
+            if !provider_reported && let Some(provider) = chunk.upstream_provider() {
+                provider_reported = true;
+                yield SamplingEvent::UpstreamProvider {
+                    request_id: request_id.clone(),
+                    provider: provider.to_owned(),
+                };
             }
 
             if let Some(u) = chunk.usage.as_ref() {
