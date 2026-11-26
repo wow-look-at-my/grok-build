@@ -194,7 +194,8 @@ fn check_ids(provider_id: &str, hops: &[HopConfig]) -> Result<(), RouteError> {
         if hop.id == provider_id {
             return Err(RouteError::ProviderId { id: hop.id.clone() });
         }
-        if hops[..index].iter().any(|earlier| earlier.id == hop.id) {
+        let earlier_hops = hops.get(..index).unwrap_or_default();
+        if earlier_hops.iter().any(|earlier| earlier.id == hop.id) {
             return Err(RouteError::DuplicateId { id: hop.id.clone() });
         }
     }
