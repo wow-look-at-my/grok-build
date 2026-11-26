@@ -1884,6 +1884,28 @@ mod tests {
     use serde_json::json;
 
     #[test]
+    fn the_upstream_name_nearest_the_model_wins() {
+        let bifrost = json!({"provider": "openrouter", "raw_response": {"provider": "Fireworks"}});
+        let top = json!("DeepInfra");
+        assert_eq!(
+            upstream_provider_of(Some(&top), Some(&bifrost)),
+            Some("DeepInfra")
+        );
+        assert_eq!(
+            upstream_provider_of(None, Some(&bifrost)),
+            Some("Fireworks")
+        );
+        let own = json!({"provider": " openrouter ", "raw_response": {"provider": ""}});
+        assert_eq!(upstream_provider_of(None, Some(&own)), Some("openrouter"));
+        // A request-shaped `provider` object is not a name.
+        assert_eq!(
+            upstream_provider_of(Some(&json!({"order": ["a"]})), None),
+            None
+        );
+        assert_eq!(upstream_provider_of(None, None), None);
+    }
+
+    #[test]
     fn endpoint_host_keeps_the_host_and_port_only() {
         assert_eq!(
             endpoint_host("http://LocalHost:18080/v1/").as_deref(),

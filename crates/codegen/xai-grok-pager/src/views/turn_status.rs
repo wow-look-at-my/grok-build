@@ -1628,6 +1628,87 @@ mod tests {
         (text, fg)
     }
 
+    /// A running turn with a healthy rate and the provider `brand`.
+    fn render_with_provider(
+        brand: &crate::views::provider_brand::ProviderBrand,
+        rate: bool,
+        width: u16,
+    ) -> (TurnStatusOutput, Buffer) {
+        let mut args = idle_args(Watchers::default());
+        args.state = &AgentState::TurnRunning;
+        args.turn_elapsed = Some(Duration::from_secs(30));
+        args.output_rate = rate.then_some(crate::acp::tracker::OutputRate {
+            tokens_per_sec: 120.0,
+            window_secs: 10,
+            floor_tokens_per_sec: None,
+            slow_for: None,
+        });
+        args.provider = Some(brand);
+        render_row(args, width)
+    }
+
+    fn brand(name: &str, color: Color) -> crate::views::provider_brand::ProviderBrand {
+        crate::views::provider_brand::ProviderBrand {
+            name: name.to_owned(),
+            color,
+            icon: None,
+        }
+    }
+
+    /// The provider's name follows the rate, in the provider's own colour.
+    #[test]
+    fn the_provider_is_named_after_the_rate_in_its_own_colour() {
+        let color = Color::Rgb(0xD9, 0x77, 0x57);
+        let brand = brand("Anthropic", color);
+        let (output, buf) = render_with_provider(&brand, true, 100);
+        let text = buffer_text(&buf, buf.area);
+        assert!(text.contains("120 tok/s Anthropic"), "got: {text:?}");
+        assert!(
+            output.provider_icon.is_none(),
+            "a brand with no mark has no slot"
+        );
+
+        let row: Vec<char> = text.chars().collect();
+        let at = text
+            .find("Anthropic")
+            .map(|byte| text[..byte].chars().count());
+        let at = at.expect("the name is drawn");
+        assert_eq!(row.get(at), Some(&'A'));
+        let fg = buf.cell((at as u16, 0)).map(|cell| cell.fg);
+        assert_eq!(fg, Some(crate::theme::quantize(color)));
+        // The rate keeps its own colour.
+        let rate_at = row
+            .iter()
+            .position(|c| *c == 'k')
+            .expect("the rate is drawn");
+        let rate_fg = buf.cell((rate_at as u16, 0)).map(|cell| cell.fg);
+        assert_eq!(rate_fg, Some(Theme::current().gray));
+    }
+
+    /// A narrow row gives the provider's cells back. The rate stays.
+    #[test]
+    fn a_narrow_row_drops_the_provider_and_keeps_the_rate() {
+        let brand = brand("Anthropic", Color::Rgb(0xD9, 0x77, 0x57));
+        let (_, buf) = render_with_provider(&brand, true, PROVIDER_MIN_WIDTH - 1);
+        let text = buffer_text(&buf, buf.area);
+        assert!(text.contains("120 tok/s"), "got: {text:?}");
+        assert!(!text.contains("Anthropic"), "got: {text:?}");
+
+        let (_, buf) = render_with_provider(&brand, true, PROVIDER_MIN_WIDTH);
+        let text = buffer_text(&buf, buf.area);
+        assert!(text.contains("120 tok/s Anthropic"), "got: {text:?}");
+    }
+
+    /// The name explains the rate. With no rate on the row it is not drawn.
+    #[test]
+    fn the_provider_is_not_drawn_with_no_rate() {
+        let brand = brand("Anthropic", Color::Rgb(0xD9, 0x77, 0x57));
+        let (output, buf) = render_with_provider(&brand, false, 100);
+        let text = buffer_text(&buf, buf.area);
+        assert!(!text.contains("Anthropic"), "got: {text:?}");
+        assert!(output.provider_icon.is_none());
+    }
+
     /// A healthy rate renders gray; near the floor amber; under it red, with
     /// how long it has been under it.
     #[test]

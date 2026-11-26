@@ -1207,6 +1207,58 @@ mod tests {
     use super::*;
 
     #[test]
+    fn server_timing_reads_every_metric_of_every_line() {
+        let metrics = parse_server_timing([
+            "upstream;dur=412.5;desc=\"openrouter, via relay\", cache;desc=miss",
+            "edge; DUR=3",
+        ]);
+        let read: Vec<_> = metrics
+            .iter()
+            .map(|m| (m.name.as_str(), m.dur_ms, m.desc.as_deref()))
+            .collect();
+        assert_eq!(
+            read,
+            [
+                ("upstream", Some(412.5), Some("openrouter, via relay")),
+                ("cache", None, Some("miss")),
+                ("edge", Some(3.0), None),
+            ]
+        );
+    }
+
+    #[test]
+    fn server_timing_drops_what_it_cannot_read() {
+        let metrics = parse_server_timing([";dur=4, , slow;dur=fast;desc=\"\", nan;dur=NaN"]);
+        let read: Vec<_> = metrics
+            .iter()
+            .map(|m| (m.name.as_str(), m.dur_ms, m.desc.as_deref()))
+            .collect();
+        assert_eq!(read, [("slow", None, None), ("nan", None, None)]);
+    }
+
+    #[test]
+    fn saved_percent_is_for_a_compressed_body_only() {
+        let sent = |encoding, plain_bytes, wire_bytes| RequestTransport {
+            encoding,
+            plain_bytes,
+            wire_bytes,
+            ..Default::default()
+        };
+        assert_eq!(sent(BodyEncoding::Plain, 1000, 1000).saved_percent(), None);
+        assert_eq!(sent(BodyEncoding::Zstd, 0, 0).saved_percent(), None);
+        assert_eq!(
+            sent(BodyEncoding::Zstd, 1000, 250).saved_percent(),
+            Some(75)
+        );
+        assert_eq!(
+            sent(BodyEncoding::ZstdDelta, 100_000, 400).saved_percent(),
+            Some(99)
+        );
+        // A frame can be larger than a body that does not compress.
+        assert_eq!(sent(BodyEncoding::Zstd, 100, 130).saved_percent(), Some(0));
+    }
+
+    #[test]
     fn overloaded_detects_stream_and_api_shapes() {
         assert!(
             SamplingError::StreamError {

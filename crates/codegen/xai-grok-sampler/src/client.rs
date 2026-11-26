@@ -4427,6 +4427,191 @@ mod tests {
         headers.get(name).and_then(|v| v.to_str().ok())
     }
 
+    fn large_user_request() -> ConversationRequest {
+        use xai_grok_sampling_types::{ContentPart, ConversationItem, UserItem};
+        ConversationRequest {
+            items: vec![ConversationItem::User(UserItem {
+                content: vec![ContentPart::Text {
+                    text: Arc::from(large_input().as_str()),
+                }],
+                ..Default::default()
+            })],
+            ..Default::default()
+        }
+    }
+
+    /// The record a streaming request reports of its own trip: plain at
+    /// first, zstd once the server said it takes it. The streaming
+    /// request also reports what a hop said about its own time.
+    #[tokio::test]
+    async fn a_streaming_request_reports_how_its_body_travelled() {
+        use xai_grok_sampling_types::BodyEncoding;
+
+        let handler = post(|| async {
+            axum::response::Response::builder()
+                .header("content-type", "text/event-stream")
+                .header("accept-encoding", "zstd")
+                .header(
+                    "server-timing",
+                    r#"ai-proxy;dur=12.5;desc="upstream, first byte", edge;dur=3"#,
+                )
+                .body(axum::body::Body::from("data: [DONE]\n\n"))
+                .unwrap()
+        });
+        let app = Router::new().route("/v1/chat/completions", handler);
+        let listener = TcpListener::bind("127.0.0.1:0").await.unwrap();
+        let addr = listener.local_addr().unwrap();
+        let server = xai_spawn::spawn(async move {
+            let _ = axum::serve(listener, app).await;
+        });
+        let client = SamplingClient::new(SamplerConfig {
+            base_url: format!("http://{addr}/v1"),
+            api_backend: ApiBackend::ChatCompletions,
+            ..minimal_config()
+        })
+        .unwrap();
+
+        let mut seen = Vec::new();
+        for _ in 0..2 {
+            let (_chunks, metadata) = client
+                .conversation_stream(large_user_request())
+                .await
+                .expect("the request is answered");
+            seen.push(
+                metadata
+                    .and_then(|metadata| metadata.transport)
+                    .expect("a streaming response carries its transport record"),
+            );
+        }
+        server.abort();
+
+        assert_eq!(seen[0].encoding, BodyEncoding::Plain);
+        assert_eq!(seen[0].plain_bytes, seen[0].wire_bytes);
+        assert!(seen[0].wire_bytes as usize > large_input().len());
+        assert_eq!(seen[0].saved_percent(), None);
+
+        assert_eq!(seen[1].encoding, BodyEncoding::Zstd);
+        assert_eq!(seen[1].plain_bytes, seen[0].plain_bytes);
+        assert!(
+            seen[1].wire_bytes * 10 < seen[1].plain_bytes,
+            "a repeated letter compresses well: {} of {} bytes",
+            seen[1].wire_bytes,
+            seen[1].plain_bytes
+        );
+        assert!(seen[1].saved_percent().is_some_and(|saved| saved >= 90));
+
+        let timing = &seen[0].server_timing;
+        assert_eq!(timing.len(), 2, "{timing:?}");
+        assert_eq!(timing[0].name, "ai-proxy");
+        assert_eq!(timing[0].dur_ms, Some(12.5));
+        assert_eq!(timing[0].desc.as_deref(), Some("upstream, first byte"));
+        assert_eq!(timing[1].name, "edge");
+        assert_eq!(timing[1].dur_ms, Some(3.0));
+        assert_eq!(timing[1].desc, None);
+    }
+
+    /// The route table is one per process. A test that sets it builds its client under this lock.
+    static ROUTE_TABLE: std::sync::Mutex<()> = std::sync::Mutex::new(());
+
+    /// A client built for a provider with a chain sends to the first hop. The
+    /// hop's model prefix, header and key go with it.
+    #[tokio::test]
+    async fn a_provider_route_moves_the_request_to_its_first_hop() {
+        use crate::provider_route::{ProviderRoute, RouteTarget, set_provider_routes};
+
+        let (tx, rx) = tokio::sync::oneshot::channel();
+        let tx = Arc::new(std::sync::Mutex::new(Some(tx)));
+        let handler = post(move |headers: axum::http::HeaderMap, body: Bytes| {
+            let tx = tx.clone();
+            async move {
+                let _ = tx.lock().unwrap().take().unwrap().send((headers, body));
+                axum::response::Response::builder()
+                    .header("content-type", "text/event-stream")
+                    .body(axum::body::Body::from("data: [DONE]\n\n"))
+                    .unwrap()
+            }
+        });
+        // Only the hop's path exists.
+        let app = Router::new().route("/bifrost/v1/chat/completions", handler);
+        let listener = TcpListener::bind("127.0.0.1:0").await.unwrap();
+        let addr = listener.local_addr().unwrap();
+        let server = xai_spawn::spawn(async move {
+            let _ = axum::serve(listener, app).await;
+        });
+        let provider_base_url = format!("http://{addr}/provider/v1");
+
+        let client = {
+            let _table = ROUTE_TABLE
+                .lock()
+                .unwrap_or_else(|poisoned| poisoned.into_inner());
+            let mut extra_headers = IndexMap::new();
+            extra_headers.insert("x-hop".to_owned(), "on".to_owned());
+            set_provider_routes(vec![ProviderRoute {
+                provider_id: "openrouter".to_owned(),
+                provider_base_url: provider_base_url.clone(),
+                target: Ok(RouteTarget {
+                    base_url: format!("http://{addr}/bifrost/v1"),
+                    model_prefix: "openrouter/".to_owned(),
+                    extra_headers,
+                    env_http_headers: IndexMap::new(),
+                    api_key: Some("hop-key".to_owned()),
+                }),
+                hop_names: vec!["Bifrost".to_owned()],
+            }]);
+            SamplingClient::new(SamplerConfig {
+                // The trailing slash and the case differ from the table's entry. The match ignores both.
+                base_url: format!("HTTP://{addr}/provider/v1/"),
+                api_backend: ApiBackend::ChatCompletions,
+                model: "deepseek/deepseek-chat".to_owned(),
+                ..minimal_config()
+            })
+            .expect("the route resolves")
+        };
+        client
+            .conversation_stream(large_user_request())
+            .await
+            .expect("the hop answers");
+        let (headers, body) = rx.await.expect("the hop got the request");
+        server.abort();
+
+        let body: serde_json::Value = serde_json::from_slice(&body).unwrap();
+        assert_eq!(body["model"], "openrouter/deepseek/deepseek-chat");
+        assert_eq!(header(&headers, "x-hop".parse().unwrap()), Some("on"));
+        assert_eq!(
+            header(&headers, xai_grok_net::header::AUTHORIZATION),
+            Some("Bearer hop-key")
+        );
+    }
+
+    /// A chain that cannot resolve sends nothing, and says why.
+    #[test]
+    fn a_broken_provider_route_refuses_the_client() {
+        use crate::provider_route::{ProviderRoute, set_provider_routes};
+
+        let _table = ROUTE_TABLE
+            .lock()
+            .unwrap_or_else(|poisoned| poisoned.into_inner());
+        set_provider_routes(vec![ProviderRoute {
+            provider_id: "openrouter".to_owned(),
+            provider_base_url: "http://127.0.0.1:9/broken/v1".to_owned(),
+            target: Err("relay `nas` has no `routes.bifrost` entry".to_owned()),
+            hop_names: Vec::new(),
+        }]);
+        let refusal = SamplingClient::new(SamplerConfig {
+            base_url: "http://127.0.0.1:9/broken/v1".to_owned(),
+            ..minimal_config()
+        })
+        .err()
+        .expect("a broken chain refuses the client");
+        let text = refusal.to_string();
+        assert!(
+            matches!(refusal, SamplingError::EndpointNotAllowed(_)),
+            "{text}"
+        );
+        assert!(text.contains("models.providers.openrouter.hops"), "{text}");
+        assert!(text.contains("routes.bifrost"), "{text}");
+    }
+
     #[tokio::test]
     async fn every_chat_route_compresses_large_bodies_when_configured() {
         let input = large_input();
