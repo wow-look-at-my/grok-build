@@ -130,19 +130,11 @@ impl RequestTransport {
                 .and_then(|metric| metric.dur_ms)
         };
         let upstream = metric(RELAY_UPSTREAM_METRIC)?;
-<<<<<<< HEAD
-        let relay_ms = upstream + metric(RELAY_DECODE_METRIC).unwrap_or(0.0);
-        // The half millisecond rounds to the nearest. A negative or non-finite sum has no duration.
-        let relay = std::time::Duration::try_from_secs_f64((relay_ms + 0.5) / 1000.0).ok()?;
-        let relay_ms = u64::try_from(relay.as_millis()).ok()?;
-        self.headers_ms.checked_sub(relay_ms)
-=======
         let relay = upstream + metric(RELAY_DECODE_METRIC).unwrap_or(0.0);
         // The relay's durations are fractional milliseconds, so `Duration` carries them without a truncating cast.
         let relay = Duration::try_from_secs_f64(relay / 1000.0).ok()?;
         let link = Duration::from_millis(self.headers_ms).checked_sub(relay)?;
         u64::try_from((link.as_nanos() + 500_000) / 1_000_000).ok()
->>>>>>> 6e5229c72e2068813721936bd66e68bdaaa558fd
     }
 
     pub fn saved_percent(&self) -> Option<u8> {
