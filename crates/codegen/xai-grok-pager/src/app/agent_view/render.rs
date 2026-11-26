@@ -1342,6 +1342,16 @@ impl AgentView {
         ) {
             status.push("context", ctx_line);
         }
+        if let Some(line) = self
+            .session
+            .tracker
+            .request_transport()
+            .and_then(|transport| {
+                crate::views::agent_status::transport_status_line(transport, &theme)
+            })
+        {
+            status.push("transport", line);
+        }
         let hover_or = |hovered: bool, resting: Style| {
             if hovered {
                 bg.fg(theme.text_primary)
