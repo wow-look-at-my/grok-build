@@ -139,16 +139,17 @@ pub fn transport_summary(transport: &RequestTransport) -> String {
 
 /// What each hop said about its own time, from `Server-Timing`.
 pub fn server_timing_summary(transport: &RequestTransport) -> Option<String> {
-    let parts: Vec<String> = transport
-        .server_timing
-        .iter()
-        .filter_map(|metric| {
+    // A relay reports its own share. The rest of the wait is the link to it.
+    let link = transport.link_ms().map(|ms| format!("link {ms} ms"));
+    let parts: Vec<String> = link
+        .into_iter()
+        .chain(transport.server_timing.iter().filter_map(|metric| {
             let dur = metric.dur_ms?;
             Some(match metric.desc.as_deref() {
                 Some(desc) => format!("{} {dur:.0} ms ({desc})", metric.name),
                 None => format!("{} {dur:.0} ms", metric.name),
             })
-        })
+        }))
         .collect();
     (!parts.is_empty()).then(|| parts.join(" \u{b7} "))
 }
@@ -649,5 +650,39 @@ mod tests {
             "headers in 30 ms \u{b7} plain JSON 900 B"
         );
         assert_eq!(server_timing_summary(&transport), None);
+    }
+
+    /// A relay reports its decode and its upstream wait. The rest is the link to it.
+    #[test]
+    fn a_relay_s_timing_splits_the_wait_into_the_link_and_the_upstream() {
+        let transport = RequestTransport {
+            encoding: BodyEncoding::ZstdDelta,
+            plain_bytes: 100_000,
+            wire_bytes: 400,
+            headers_ms: 450,
+            server_timing: xai_grok_sampling_types::parse_server_timing([
+                "relay-decode;dur=1.6, relay-upstream;dur=410.2;desc=\"openrouter\"",
+            ]),
+        };
+        assert_eq!(transport.link_ms(), Some(38));
+        assert_eq!(
+            server_timing_summary(&transport).as_deref(),
+            Some("link 38 ms \u{b7} relay-decode 2 ms \u{b7} relay-upstream 410 ms (openrouter)")
+        );
+    }
+
+    /// A metric from another server is shown as it is. With no relay metric, no link time is derived.
+    #[test]
+    fn a_timing_with_no_relay_metric_derives_no_link_time() {
+        let transport = RequestTransport {
+            headers_ms: 450,
+            server_timing: xai_grok_sampling_types::parse_server_timing(["edge;dur=12"]),
+            ..Default::default()
+        };
+        assert_eq!(transport.link_ms(), None);
+        assert_eq!(
+            server_timing_summary(&transport).as_deref(),
+            Some("edge 12 ms")
+        );
     }
 }

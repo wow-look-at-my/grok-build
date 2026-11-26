@@ -262,7 +262,10 @@ fn fallback_color(key: &str) -> (u8, u8, u8) {
     let hash = key.bytes().fold(0u32, |hash, byte| {
         hash.wrapping_mul(31).wrapping_add(u32::from(byte))
     });
-    FALLBACK[hash as usize % FALLBACK.len()]
+    FALLBACK
+        .get(hash as usize % FALLBACK.len())
+        .copied()
+        .unwrap_or((0x9C, 0xA3, 0xAF))
 }
 
 /// The bundled marks, shared: a frame that draws a mark clones a pointer, not the PNG.
@@ -319,10 +322,14 @@ pub fn brand_for(name: &str) -> ProviderBrand {
                 png,
             })
         }
-        (None, Some((index, _))) => BUNDLED[index].clone().map(|png| ProviderIcon {
-            id: BUNDLED_ICON_ID_BASE + index as u32,
-            png,
-        }),
+        (None, Some((index, _))) => BUNDLED
+            .get(index)
+            .cloned()
+            .flatten()
+            .map(|png| ProviderIcon {
+                id: BUNDLED_ICON_ID_BASE + index as u32,
+                png,
+            }),
         (None, None) => None,
     };
     ProviderBrand {

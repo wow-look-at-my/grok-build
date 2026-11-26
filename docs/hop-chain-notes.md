@@ -4,6 +4,7 @@
 
 - The chain is applied where a client is built, not in the catalog. `Config::new_from_toml_cfg` resolves every provider's chain (`agent/model_route.rs`) and hands the table to `xai_grok_sampler::provider_route`. `SamplingClient::new` looks its `base_url` up there and sends to the first hop that is on. So a catalog entry keeps the provider's own URL and model id. A session finds its model by those. A toggle does not move it.
 - A model that sets a `base_url` of its own matches no provider URL in the table. It is off the chain.
+- Every `SamplingClient` built for the provider's URL takes the chain: turns, side calls, web search and embeddings. The model listing (`remote/model_source`) builds no `SamplingClient`. It goes to the provider's own URL.
 - The gateway `model_prefix` goes on in the backend `apply_*defaults` functions, one time per request. It is not idempotent on purpose: `openrouter/auto` through a gateway that prefixes `openrouter/` is `openrouter/openrouter/auto`.
 - A chain that cannot resolve is published as an `Err` target. `SamplingClient::new` refuses with the reason. A hop `env_key` that names no set variable is such an error, because the provider's key must never go to that hop.
 - The config watcher calls `publish_from_raw` when `model_providers` changes (`config/reloader.rs`). The table is process-wide, so no session is told and the next request takes the new path. `ModelsChanged` does not fire for a hop toggle, so no provider is listed again.

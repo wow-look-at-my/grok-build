@@ -18,6 +18,8 @@ mod doubled_lines_out_of_band_repro;
 mod embedded_mode_boots_without_hanging_on_blocked_backend;
 #[path = "pty_e2e/first_prompt_waits_for_model_catalog.rs"]
 mod first_prompt_waits_for_model_catalog;
+#[path = "pty_e2e/hop_chain_route_dialog.rs"]
+mod hop_chain_route_dialog;
 #[path = "pty_e2e/initial_prompt_positional_auto_submits.rs"]
 mod initial_prompt_positional_auto_submits;
 #[path = "pty_e2e/input_echoes_at_idle_prompt.rs"]
