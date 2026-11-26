@@ -115,6 +115,7 @@ async fn the_route_dialog_draws_the_provider_mark_on_a_graphics_terminal() {
         .unwrap_or_else(|_| panic!("the dialog lists the hop\n{}", harness.screen_contents()));
     let screen = harness.screen_contents();
     assert!(screen.contains("DeepSeek"), "no provider row in:\n{screen}");
+    write_screen_dump_if_requested(&harness, "route_dialog_provider_mark");
 
     let placed = format!("\x1b_Ga=p,i={PROVIDER_MARK_ID_PREFIX}");
     let placed_at = wait_for_raw_bytes_after(&mut harness, before, placed.as_bytes(), TIMEOUT)
@@ -192,8 +193,21 @@ async fn a_hop_toggled_in_the_route_dialog_changes_the_next_request() {
     }
     // Both links are the mock, and it answers a probe.
     harness
-        .wait_for_text(" ms", TIMEOUT)
-        .unwrap_or_else(|_| panic!("a link is measured\n{}", harness.screen_contents()));
+        .wait_for_text_absent("measuring", TIMEOUT)
+        .unwrap_or_else(|_| panic!("every probe answers\n{}", harness.screen_contents()));
+    let screen = harness.screen_contents();
+    for link in ["[x] NAS", "internal provider"] {
+        let row = screen
+            .lines()
+            .find(|line| line.contains(link))
+            .unwrap_or_default();
+        let row = row.trim_end().trim_end_matches('\u{2502}').trim_end();
+        assert!(
+            row.ends_with(" ms"),
+            "the row of {link:?} ends with its round trip: {row:?}"
+        );
+    }
+    write_screen_dump_if_requested(&harness, "route_dialog_hop_on");
 
     harness.inject_keys(b" ").expect("toggle the hop");
     harness
@@ -202,6 +216,7 @@ async fn a_hop_toggled_in_the_route_dialog_changes_the_next_request() {
     harness
         .wait_for_text("skipped", TIMEOUT)
         .unwrap_or_else(|_| panic!("an off hop is not measured\n{}", harness.screen_contents()));
+    write_screen_dump_if_requested(&harness, "route_dialog_hop_off");
     harness
         .wait_until("config.json holds the toggle", TIMEOUT, |_| {
             config_text(&content).contains("\"enabled\": false")
