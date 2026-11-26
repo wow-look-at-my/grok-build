@@ -129,9 +129,11 @@ impl RequestTransport {
                 .and_then(|metric| metric.dur_ms)
         };
         let upstream = metric(RELAY_UPSTREAM_METRIC)?;
-        let relay = upstream + metric(RELAY_DECODE_METRIC).unwrap_or(0.0);
-        let link = self.headers_ms as f64 - relay;
-        (link >= 0.0).then(|| link.round() as u64)
+        let relay_ms = upstream + metric(RELAY_DECODE_METRIC).unwrap_or(0.0);
+        // The half millisecond rounds to the nearest. A negative or non-finite sum has no duration.
+        let relay = std::time::Duration::try_from_secs_f64((relay_ms + 0.5) / 1000.0).ok()?;
+        let relay_ms = u64::try_from(relay.as_millis()).ok()?;
+        self.headers_ms.checked_sub(relay_ms)
     }
 
     pub fn saved_percent(&self) -> Option<u8> {
