@@ -292,6 +292,7 @@ fn error_with_tiny_window(
             context_window: Some(1),
             max_completion_tokens: None,
             models_etag: None,
+            transport: None,
         }),
         empty_response_context: None,
         doom_loop_triggers: None,
