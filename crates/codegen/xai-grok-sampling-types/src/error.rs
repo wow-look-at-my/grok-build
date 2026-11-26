@@ -113,7 +113,27 @@ pub struct RequestTransport {
     pub server_timing: Vec<ServerTiming>,
 }
 
+/// The `Server-Timing` metric a relay reports for its body decode.
+pub const RELAY_DECODE_METRIC: &str = "relay-decode";
+/// The `Server-Timing` metric a relay reports for its wait on the upstream's headers.
+pub const RELAY_UPSTREAM_METRIC: &str = "relay-upstream";
+
 impl RequestTransport {
+    /// The part of the header wait that a relay did not spend: the round trip
+    /// on the link to it. `None` when no relay reported its own share.
+    pub fn link_ms(&self) -> Option<u64> {
+        let metric = |name: &str| {
+            self.server_timing
+                .iter()
+                .find(|metric| metric.name == name)
+                .and_then(|metric| metric.dur_ms)
+        };
+        let upstream = metric(RELAY_UPSTREAM_METRIC)?;
+        let relay = upstream + metric(RELAY_DECODE_METRIC).unwrap_or(0.0);
+        let link = self.headers_ms as f64 - relay;
+        (link >= 0.0).then(|| link.round() as u64)
+    }
+
     pub fn saved_percent(&self) -> Option<u8> {
         if !self.encoding.is_compressed() || self.plain_bytes == 0 {
             return None;

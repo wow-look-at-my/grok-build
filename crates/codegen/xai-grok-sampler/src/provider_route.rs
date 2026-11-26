@@ -61,8 +61,8 @@ pub fn set_provider_routes(routes: Vec<ProviderRoute>) {
 
 fn describe(route: &ProviderRoute) -> String {
     match &route.target {
-        Ok(target) => format!("{} -> {}", route.provider_id, target.base_url),
-        Err(error) => format!("{} -> refused ({error})", route.provider_id),
+        Ok(target) => format!("{} at {}", route.describe_path(), target.base_url),
+        Err(error) => format!("{} refused ({error})", route.describe_path()),
     }
 }
 

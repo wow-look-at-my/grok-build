@@ -466,7 +466,7 @@ A request enters at the first hop that is on. With both hops on it goes to `http
 | `env_key`, `api_key` | A credential the hop takes in place of the provider's. The hop nearest Grok that sets one wins. |
 | `extra_headers`, `env_http_headers` | Headers sent only while the hop is on. |
 
-`/hops` (also `/route`, and the last row of `/model`) opens the route dialog. It lists every link with its address and its round-trip time, and Space turns an optional hop on or off. The toggle is saved to `config.json` and the next request takes the new path. A model that sets a `base_url` of its own does not use its provider's hops.
+`/hops` (also `/route`, and the last row of `/model`) opens the route dialog. It lists every link with its address and its round-trip time, and Space turns an optional hop on or off. The toggle is saved to `config.json` and the next request takes the new path. A model that sets a `base_url` of its own does not use its provider's hops. The chain carries model requests only. The request that lists a provider's models goes to the provider's own `base_url`.
 
 A chain that cannot carry a request refuses every request to that provider, and the dialog shows why. A relay with no `routes` entry for the next link is the usual cause.
 
