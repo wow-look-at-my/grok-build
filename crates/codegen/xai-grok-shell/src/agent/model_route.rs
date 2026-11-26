@@ -341,6 +341,12 @@ fn sampler_route(
         provider_id: provider_id.to_owned(),
         provider_base_url,
         target,
+        hop_names: provider
+            .hops
+            .iter()
+            .filter(|hop| hop.is_on())
+            .map(|hop| hop.display_name().to_owned())
+            .collect(),
     })
 }
 

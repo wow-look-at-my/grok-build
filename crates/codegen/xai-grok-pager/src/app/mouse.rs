@@ -69,6 +69,9 @@ impl AgentView {
                     }
                     return InputOutcome::Changed;
                 }
+                if self.hit_transport.contains(mouse.column, mouse.row) {
+                    return InputOutcome::Action(Action::OpenHopsDialog);
+                }
                 if self.hit_context.contains(mouse.column, mouse.row) {
                     let now = Instant::now();
                     let too_soon = self.last_context_click_at.is_some_and(|t| {

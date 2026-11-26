@@ -27,6 +27,20 @@ pub struct ProviderRoute {
     pub provider_base_url: String,
     /// `Err` is why the chain cannot carry a request. Such a client is refused.
     pub target: Result<RouteTarget, String>,
+    /// The names of the hops that are on, client side first.
+    pub hop_names: Vec<String>,
+}
+
+impl ProviderRoute {
+    /// The path a request takes, for display: each hop that is on, then the provider.
+    pub fn describe_path(&self) -> String {
+        self.hop_names
+            .iter()
+            .map(String::as_str)
+            .chain(std::iter::once(self.provider_id.as_str()))
+            .collect::<Vec<_>>()
+            .join(" \u{2192} ")
+    }
 }
 
 static ROUTES: LazyLock<RwLock<Vec<ProviderRoute>>> = LazyLock::new(|| RwLock::new(Vec::new()));
