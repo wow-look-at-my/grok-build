@@ -1,6 +1,7 @@
 //! TODO: Move from xai-grok-shell/src/sampling/error.rs
 
 use std::fmt;
+use std::time::Duration;
 
 use serde::{Deserialize, Serialize};
 use thiserror::Error;
@@ -130,8 +131,10 @@ impl RequestTransport {
         };
         let upstream = metric(RELAY_UPSTREAM_METRIC)?;
         let relay = upstream + metric(RELAY_DECODE_METRIC).unwrap_or(0.0);
-        let link = self.headers_ms as f64 - relay;
-        (link >= 0.0).then(|| link.round() as u64)
+        // The relay's durations are fractional milliseconds, so `Duration` carries them without a truncating cast.
+        let relay = Duration::try_from_secs_f64(relay / 1000.0).ok()?;
+        let link = Duration::from_millis(self.headers_ms).checked_sub(relay)?;
+        u64::try_from((link.as_nanos() + 500_000) / 1_000_000).ok()
     }
 
     pub fn saved_percent(&self) -> Option<u8> {
@@ -139,7 +142,7 @@ impl RequestTransport {
             return None;
         }
         let saved = self.plain_bytes.saturating_sub(self.wire_bytes);
-        Some((saved.saturating_mul(100) / self.plain_bytes).min(100) as u8)
+        u8::try_from((saved.saturating_mul(100) / self.plain_bytes).min(100)).ok()
     }
 }
 
