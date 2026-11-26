@@ -391,7 +391,11 @@ impl MvpAgent {
     ) -> Result<acp::NewSessionResponse, acp::Error> {
         let session_started_at = std::time::Instant::now();
         reject_chat_kind_without_feature(arguments.meta.as_ref())?;
-        tracing::debug!(config = ?self.sampling_config, "Received new session request {arguments:?}");
+        tracing::debug!(
+            config = %super::log_safe::sampler_config(&*self.sampling_config.borrow()),
+            "Received new session request {}",
+            super::log_safe::session_request(&arguments)
+        );
         let init = self.initialize_request.get().ok_or_else(|| {
             acp::Error::invalid_params().data("initialize must be called before new_session")
         })?;

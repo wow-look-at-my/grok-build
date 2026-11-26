@@ -1212,6 +1212,7 @@ mod agent_directory;
 mod agent_runtime;
 mod code_nav;
 mod folder_trust_prompt;
+mod log_safe;
 mod resource_telemetry;
 mod session_registry;
 mod session_lifecycle;

@@ -38,10 +38,11 @@ pub(crate) fn resolve_context_window_from_provider(
     model: &str,
     api_base_url: &str,
     api_key: Option<&str>,
+    headers: &[(String, String)],
 ) -> Option<std::num::NonZeroU64> {
     use crate::remote::DEFAULT_CONTEXT_WINDOW;
     let default = std::num::NonZeroU64::new(DEFAULT_CONTEXT_WINDOW).expect("non-zero");
-    let listing = provider_listing(api_base_url, api_key);
+    let listing = provider_listing(api_base_url, api_key, headers);
     let listed = listing
         .iter()
         .find(|entry| entry.model == model || entry.id.as_deref() == Some(&model))?;
@@ -55,6 +56,7 @@ const LISTING_REUSE: std::time::Duration = std::time::Duration::from_secs(60);
 fn provider_listing(
     api_base_url: &str,
     api_key: Option<&str>,
+    headers: &[(String, String)],
 ) -> Vec<crate::agent::config::ModelEntryConfig> {
     use std::collections::HashMap;
     use std::sync::{Arc, LazyLock, Mutex, PoisonError};
@@ -62,13 +64,17 @@ fn provider_listing(
 
     type Listing = Vec<crate::agent::config::ModelEntryConfig>;
     type Slot = Arc<Mutex<Option<(Instant, Listing)>>>;
-    static SLOTS: LazyLock<Mutex<HashMap<(String, Option<String>), Slot>>> =
-        LazyLock::new(Default::default);
+    type Request = (String, Option<String>, Vec<(String, String)>);
+    static SLOTS: LazyLock<Mutex<HashMap<Request, Slot>>> = LazyLock::new(Default::default);
 
     let slot = SLOTS
         .lock()
         .unwrap_or_else(PoisonError::into_inner)
-        .entry((api_base_url.to_owned(), api_key.map(str::to_owned)))
+        .entry((
+            api_base_url.to_owned(),
+            api_key.map(str::to_owned),
+            headers.to_vec(),
+        ))
         .or_default()
         .clone();
     let mut cached = slot.lock().unwrap_or_else(PoisonError::into_inner);
@@ -77,7 +83,7 @@ fn provider_listing(
     {
         return listing.clone();
     }
-    let listing = fetch_provider_listing(api_base_url, api_key);
+    let listing = fetch_provider_listing(api_base_url, api_key, headers);
     *cached = Some((Instant::now(), listing.clone()));
     listing
 }
@@ -88,14 +94,17 @@ fn provider_listing(
 fn fetch_provider_listing(
     api_base_url: &str,
     api_key: Option<&str>,
+    headers: &[(String, String)],
 ) -> Vec<crate::agent::config::ModelEntryConfig> {
     const FETCH_TIMEOUT: std::time::Duration = std::time::Duration::from_secs(15);
     let (base, key) = (api_base_url.to_owned(), api_key.map(str::to_owned));
+    let headers = headers.to_vec();
     let (tx, rx) = std::sync::mpsc::channel();
     std::thread::spawn(move || {
         let _ = tx.send(crate::remote::fetch_models_for_api_base_blocking(
             &base,
             key.as_deref(),
+            &headers,
         ));
     });
     match rx.recv_timeout(FETCH_TIMEOUT) {

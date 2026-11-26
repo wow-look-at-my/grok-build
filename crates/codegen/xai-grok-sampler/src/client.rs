@@ -738,18 +738,21 @@ fn append_response_includes(body: &mut serde_json::Value, extra_includes: &[Stri
     }
 }
 
-/// Resolve `env_http_headers` (`header -> env var`) into `headers` via `getenv`, skipping unset/blank/invalid entries and trimming values.
+/// Resolve `env_http_headers` (`header -> env var`) into `headers` via `getenv`, trimming values. An unset, blank or invalid entry sends no header and logs its name.
 fn apply_env_http_headers(
     env_http_headers: &IndexMap<String, String>,
     getenv: impl Fn(&str) -> Option<String>,
     headers: &mut HeaderMap,
 ) {
     for (key, env_var) in env_http_headers {
-        let Some(value) = getenv(env_var) else {
-            continue;
-        };
+        let value = getenv(env_var).unwrap_or_default();
         let value = value.trim();
         if value.is_empty() {
+            tracing::warn!(
+                header = %key,
+                env_var = %env_var,
+                "env_http_headers variable is unset or blank; the header is not sent"
+            );
             continue;
         }
         let (Ok(name), Ok(header_value)) = (
@@ -1151,6 +1154,11 @@ impl SamplingClient {
             has_api_key = config.api_key.is_some(),
             has_bearer_resolver = config.bearer_resolver.is_some(),
             has_configured_credential_header = !configured_credentials.is_empty(),
+            header_names = ?headers
+                .keys()
+                .chain(configured_credentials.keys())
+                .map(HeaderName::as_str)
+                .collect::<Vec<_>>(),
         );
 
         let defaults = ClientDefaults {

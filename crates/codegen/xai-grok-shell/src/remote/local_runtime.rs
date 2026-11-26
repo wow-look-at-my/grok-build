@@ -135,7 +135,7 @@ pub(crate) fn fetch_local_listing_blocking(
         ModelsListDialect::Ollama => fetch_ollama_models(&host, api_key)?,
         ModelsListDialect::Lmstudio => fetch_lmstudio_models(&host, api_key)?,
         ModelsListDialect::Openai => {
-            return super::client::fetch_models_for_api_base_blocking(base_url, api_key);
+            return super::client::fetch_models_for_api_base_blocking(base_url, api_key, &[]);
         }
     };
     record_embedding_models(format!("{host}/v1"), embedding);
