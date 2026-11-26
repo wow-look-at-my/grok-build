@@ -4567,7 +4567,7 @@ mod tests {
             })
             .expect("the route resolves")
         };
-        client
+        let (_chunks, _metadata) = client
             .conversation_stream(large_user_request())
             .await
             .expect("the hop answers");

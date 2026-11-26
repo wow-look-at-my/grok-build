@@ -468,6 +468,8 @@ A request enters at the first hop that is on. With both hops on it goes to `http
 
 `/hops` (also `/route`, and the last row of `/model`) opens the route dialog. It lists every link with its address and its round-trip time, and Space turns an optional hop on or off. The toggle is saved to `config.json` and the next request takes the new path. A model that sets a `base_url` of its own does not use its provider's hops. The chain carries model requests only. The request that lists a provider's models goes to the provider's own `base_url`.
 
+Under the links, "Last request" shows the wait for the response headers, the body encoding and the size before and after it. A relay that sends `Server-Timing` adds a "Hop timing" row. The `ai-proxy` relay does: the row then splits the wait into the link to the relay and the relay's own wait for the next link.
+
 A chain that cannot carry a request refuses every request to that provider, and the dialog shows why. A relay with no `routes` entry for the next link is the usual cause.
 
 The top bar shows `zstd` while requests go out compressed, and `zstd Δ` when the relay keeps the body before and only the change is sent. While a response streams, the upstream that serves it is named beside the tokens-per-second reading, in its own colour. A terminal that draws pixels (Kitty, Ghostty, WezTerm) also shows the provider's mark. A PNG at `$GROK_HOME/provider-icons/<name>.png` adds a mark for a provider that has none. `<name>` is the provider's name in lower case, letters and digits only.
