@@ -848,6 +848,8 @@ impl std::fmt::Debug for SamplingClient {
 #[derive(Clone, Debug, Default)]
 struct ClientDefaults {
     model: String,
+    /// What the provider's proxy chain puts before a model id on the wire.
+    route_model_prefix: String,
     max_completion_tokens: Option<u32>,
     temperature: Option<f32>,
     top_p: Option<f32>,
@@ -1030,10 +1032,13 @@ impl SamplingClient {
 
     /// Uses an identity-specific client for configured mTLS; otherwise grabs the process-wide shared client.
     /// This does not perform any network I/O.
-    pub fn new(config: SamplerConfig) -> Result<Self> {
+    pub fn new(mut config: SamplerConfig) -> Result<Self> {
         if config.base_url.trim().is_empty() {
             return Err(SamplingError::InvalidConfiguration(MISSING_BASE_URL));
         }
+        // From here on `base_url` is the first hop that is on, not the provider.
+        let route_model_prefix =
+            crate::provider_route::apply(&mut config).map_err(SamplingError::EndpointNotAllowed)?;
         xai_grok_extra_ca::endpoint_allowlist::check(&config.base_url)
             .map_err(|refusal| SamplingError::EndpointNotAllowed(refusal.to_string()))?;
         let api_backend = crate::backend_detect::effective_api_backend(&config);
@@ -1186,6 +1191,7 @@ impl SamplingClient {
 
         let defaults = ClientDefaults {
             model: config.model,
+            route_model_prefix,
             max_completion_tokens: config.max_completion_tokens,
             temperature: config.temperature,
             top_p: config.top_p,
@@ -1246,6 +1252,11 @@ impl SamplingClient {
     /// Whether this client reports its usage to a sink.
     pub fn has_usage_sink(&self) -> bool {
         self.usage_sink.is_some()
+    }
+
+    /// The id `model` goes out under: the provider chain's gateway prefix, then the model's own id.
+    fn wire_model(&self, model: String) -> String {
+        crate::provider_route::wire_model(&self.defaults.route_model_prefix, model)
     }
 
     /// The meter for one request to `model`, or the client's model when `model` is empty.
@@ -1448,6 +1459,7 @@ impl SamplingClient {
         if request.model.is_none() {
             request.model = Some(self.defaults.model.clone());
         }
+        request.model = request.model.map(|model| self.wire_model(model));
 
         if request.max_tokens.is_none() {
             request.max_tokens = self.defaults.max_completion_tokens;
@@ -1976,6 +1988,11 @@ impl SamplingClient {
         if request.inner.model.is_none() {
             request.inner.model = Some(self.defaults.model.clone());
         }
+        request.inner.model = request
+            .inner
+            .model
+            .take()
+            .map(|model| self.wire_model(model));
 
         if request.inner.temperature.is_none() {
             request.inner.temperature = self.defaults.temperature;
@@ -2384,6 +2401,7 @@ impl SamplingClient {
         if request.inner.model.is_empty() {
             request.inner.model = self.defaults.model.clone();
         }
+        request.inner.model = self.wire_model(std::mem::take(&mut request.inner.model));
 
         if request.inner.max_tokens == 0 {
             request.inner.max_tokens = self

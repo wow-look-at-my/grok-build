@@ -341,6 +341,12 @@ impl ConfigReloader {
             let _ = self.config_update_tx.send(ConfigUpdate::ModelsChanged);
         }
 
+        // The route table is process-wide, so no session has to be told.
+        if self.last_global_config.get("model_providers") != new_global.get("model_providers") {
+            info!("model provider change detected; publishing provider routes");
+            crate::agent::model_route::publish_from_raw(&new_global);
+        }
+
         if output_rate_floor_inputs(&self.last_global_config)
             != output_rate_floor_inputs(&new_global)
         {

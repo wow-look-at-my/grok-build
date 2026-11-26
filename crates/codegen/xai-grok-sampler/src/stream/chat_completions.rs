@@ -365,6 +365,8 @@ mod tests {
                 .collect(),
             usage: None,
             system_fingerprint: None,
+            provider: None,
+            extra_fields: None,
         }
     }
 
@@ -911,6 +913,7 @@ mod tests {
             context_window: Some(8192),
             max_completion_tokens: Some(4096),
             models_etag: None,
+            transport: None,
         };
         let events = collect(stream_chat_completions(
             raw,

@@ -31,6 +31,7 @@ fn message_start() -> MessageStreamEvent {
             content: vec![],
             model: "messages-compatible-model".into(),
             stop_reason: None,
+            provider: None,
             usage: MessagesUsage {
                 input_tokens: 10,
                 output_tokens: 0,
@@ -808,6 +809,7 @@ fn message_start_with_cache(
             content: vec![],
             model: "messages-compatible-model".into(),
             stop_reason: None,
+            provider: None,
             usage: MessagesUsage {
                 input_tokens: input,
                 output_tokens: 0,
