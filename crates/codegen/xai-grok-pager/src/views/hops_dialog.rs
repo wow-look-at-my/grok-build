@@ -162,6 +162,10 @@ fn latency_cell(link: &RouteLink, probe: Option<&ProbeState>, theme: &Theme) -> 
     match probe {
         None => (String::new(), dim),
         Some(ProbeState::Pending) => ("measuring".to_owned(), dim),
+        // A link on this machine answers in less than one millisecond.
+        Some(ProbeState::Millis(0)) => {
+            ("<1 ms".to_owned(), Style::default().fg(theme.text_primary))
+        }
         Some(ProbeState::Millis(ms)) => {
             (format!("{ms} ms"), Style::default().fg(theme.text_primary))
         }
@@ -508,6 +512,15 @@ mod tests {
             notice: None,
             loading: false,
         }
+    }
+
+    /// A probe that rounds to zero still reads as an answer.
+    #[test]
+    fn a_probe_under_one_millisecond_says_so() {
+        let mut state = state();
+        state.probes.insert("nas".to_owned(), ProbeState::Millis(0));
+        let (rows, _) = render(&state, HopsDialogLive::default());
+        assert!(row_with(&rows, "[x] nas").contains("<1 ms"));
     }
 
     fn render(
