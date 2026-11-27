@@ -24,6 +24,7 @@
   "version": "0.2.112",
   "cost": {
     "total_cost_usd": 0.0123,
+    "total_cost_usd_ticks": 123000000,
     "total_duration_ms": 45000,
     "total_api_duration_ms": 2300
   },

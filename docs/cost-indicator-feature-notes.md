@@ -1,5 +1,6 @@
 # Cost-indicator feature notes
 
+- Every dollar amount the pager shows goes through `Usd` (`xai-grok-pager/src/usd.rs`). It rounds to the nearest cent and always shows the cents, as in `$3.00`. A real cost under half a cent shows as `<$0.01`. `no_other_code_formats_dollars` fails on a `$` written before a format placeholder anywhere else in the pager.
 - Per-message cost rides `XaiSessionUpdate::ResponseCompleted.cost_usd_ticks`, one per model call, and the pager attaches it to the message that call streamed (`AcpUpdateTracker::set_response_cost`). `TurnCompleted`'s prompt-scoped cost is the fallback for an agent that prices only whole turns. It stands down for any prompt a response already priced.
 - The session total is the agent's own ledger (`ResponseCompleted`/`TurnCompleted.session_cost_usd_ticks`), not a sum over scrollback: rewound and never-rendered spend is real. The scrollback sum survives only as the fallback for an agent that reports no total.
 - Billing happens in `SamplingClient`. Each send method meters its request where it takes the request slot, and reports it once to `SamplerConfig::usage_sink` (`xai-grok-sampler/src/usage_sink.rs`). A stream reports on its terminal item, at its end, or when dropped. A call that fails after usage arrived still reports it. Each retry and backend switch reports its own call.

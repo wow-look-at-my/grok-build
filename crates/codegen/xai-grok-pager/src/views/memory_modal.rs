@@ -1064,17 +1064,15 @@ fn render_notice(buf: &mut Buffer, area: Rect, markdown: &str, theme: &Theme) {
 
 /// One line with what memory spent in this run, by kind. `None` when it spent nothing.
 fn memory_cost_line(totals: MemoryCostTotals) -> Option<String> {
-    use crate::scrollback::wrappers::cost_ticks_to_display;
-    let total = cost_ticks_to_display(Some(totals.total_usd_ticks()))?;
+    use crate::usd::Usd;
+    let total = Usd::reported(Some(totals.total_usd_ticks()))?;
     let parts: Vec<String> = [
         ("capture", totals.capture_usd_ticks),
         ("consolidation", totals.consolidation_usd_ticks),
         ("recall", totals.recall_usd_ticks),
     ]
     .into_iter()
-    .filter_map(|(name, ticks)| {
-        cost_ticks_to_display(Some(ticks)).map(|cost| format!("{name} {cost}"))
-    })
+    .filter_map(|(name, ticks)| Usd::reported(Some(ticks)).map(|cost| format!("{name} {cost}")))
     .collect();
     Some(format!("Memory cost: {total} ({})", parts.join(" · ")))
 }
@@ -2846,7 +2844,7 @@ mod tests {
         };
         assert_eq!(
             memory_cost_line(totals).as_deref(),
-            Some("Memory cost: $0.031 (capture $0.031)")
+            Some("Memory cost: $0.03 (capture $0.03)")
         );
     }
 
@@ -2859,7 +2857,7 @@ mod tests {
         };
         assert_eq!(
             memory_cost_line(totals).as_deref(),
-            Some("Memory cost: $0.0421 (capture $0.031 · consolidation $0.01 · recall $0.0011)")
+            Some("Memory cost: $0.04 (capture $0.03 · consolidation $0.01 · recall <$0.01)")
         );
     }
 
@@ -2872,7 +2870,7 @@ mod tests {
         let mut state = MemoryModalState::new(Vec::new()).with_memory_cost(Some(totals));
         let text = render_full(&mut state);
         assert!(
-            text.contains("Memory cost: $0.0011 (recall $0.0011)"),
+            text.contains("Memory cost: <$0.01 (recall <$0.01)"),
             "{text}"
         );
         let mut without = MemoryModalState::new(Vec::new()).with_memory_cost(None);
@@ -2988,7 +2986,7 @@ mod tests {
         assert!(text.contains("anyrun.md"), "{text}");
         assert!(
             text.contains(
-                "Memory cost: $0.0421 (capture $0.031 · consolidation $0.01 · recall $0.0011)"
+                "Memory cost: $0.04 (capture $0.03 · consolidation $0.01 · recall <$0.01)"
             ),
             "the list column must not cut the cost line: {text}"
         );
