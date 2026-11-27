@@ -4223,6 +4223,116 @@
 			},
 			"description": "Configurable in `config.json` under `tools.hashline`:"
 		},
+		"HopConfig": {
+			"type": "object",
+			"properties": {
+				"id": {
+					"type": "string",
+					"description": "Names this hop in the `routes` of the hop before it and in the UI.",
+					"default": ""
+				},
+				"name": {
+					"type": [
+						"string",
+						"null"
+					],
+					"description": "The name the UI shows. Unset shows the id.",
+					"default": null
+				},
+				"kind": {
+					"$ref": "#/$defs/HopKind",
+					"default": "gateway"
+				},
+				"optional": {
+					"type": "boolean",
+					"description": "The user may turn an optional hop off in the UI.",
+					"default": false
+				},
+				"enabled": {
+					"type": [
+						"boolean",
+						"null"
+					],
+					"description": "Unset means on. Only an optional hop reads it.",
+					"default": null
+				},
+				"base_url": {
+					"type": [
+						"string",
+						"null"
+					],
+					"description": "Where this hop listens.",
+					"default": null
+				},
+				"routes": {
+					"type": "object",
+					"additionalProperties": {
+						"type": "string"
+					},
+					"description": "A relay's path to each link after it, by that link's id. The provider's id names the provider.",
+					"default": {}
+				},
+				"model_prefix": {
+					"type": [
+						"string",
+						"null"
+					],
+					"description": "A gateway's prefix on the model id, for example `openrouter/`.",
+					"default": null
+				},
+				"env_key": {
+					"anyOf": [
+						{
+							"$ref": "#/$defs/EnvKeys"
+						},
+						{
+							"type": "null"
+						}
+					],
+					"description": "A credential this hop takes in place of the provider's.",
+					"default": null
+				},
+				"api_key": {
+					"type": [
+						"string",
+						"null"
+					],
+					"default": null
+				},
+				"extra_headers": {
+					"type": "object",
+					"additionalProperties": {
+						"type": "string"
+					},
+					"description": "Headers sent while this hop is on.",
+					"default": {}
+				},
+				"env_http_headers": {
+					"type": "object",
+					"additionalProperties": {
+						"type": "string"
+					},
+					"description": "Header name to environment variable, sent while this hop is on.",
+					"default": {}
+				}
+			},
+			"description": "One proxy in `models.providers.<id>.hops`."
+		},
+		"HopKind": {
+			"oneOf": [
+				{
+					"type": "string",
+					"const": "gateway",
+					"description": "Answers the API itself and picks its own upstream. Its `base_url` is the whole address."
+				},
+				{
+					"type": "string",
+					"const": "relay",
+					"description": "Forwards a path to the upstream that `routes` names, and changes nothing else."
+				}
+			],
+			"description": "How a hop passes a request on."
+		},
 		"HubConfig": {
 			"type": "object",
 			"properties": {
@@ -5473,6 +5583,13 @@
 					"minimum": 1,
 					"description": "Request-body cap of this endpoint; inherited by models that set none of their own.",
 					"default": null
+				},
+				"hops": {
+					"type": "array",
+					"items": {
+						"$ref": "#/$defs/HopConfig"
+					},
+					"description": "The proxies between this client and the provider, client side first."
 				}
 			},
 			"description": "A `[model_providers.<id>]` block: the settings every model behind one\nendpoint shares. A `[model.<id>]` that names the provider with\n`model_provider = \"<id>\"` inherits each field it leaves unset, so an\nendpoint, a credential. A wire format or a header set is written once.\nEvery field here is also a `[model.<id>]` field, and the model's own value\nalways wins. What is NOT here is what identifies one model."

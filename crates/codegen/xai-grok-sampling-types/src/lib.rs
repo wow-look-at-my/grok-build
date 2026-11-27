@@ -31,10 +31,11 @@ pub use self::doom_loop::{
     EXACT_REPETITION_CHECK_HEADER, is_check_event, peek_doom_loop,
 };
 pub use self::error::{
-    ApiErrorCode, EmptyReason, EmptyResponseContext, INVALID_IMAGE_ERROR_CODE,
-    ResponseModelMetadata, Result, SamplingError, SentCredential, error_chain,
-    is_context_length_error, is_retryable_api_status, is_size_overflow_error_code,
-    parse_error_code, status_user_message, status_user_message_from, user_facing_api_error_message,
+    ApiErrorCode, BodyEncoding, EmptyReason, EmptyResponseContext, INVALID_IMAGE_ERROR_CODE,
+    RequestTransport, ResponseModelMetadata, Result, SamplingError, SentCredential, ServerTiming,
+    error_chain, is_context_length_error, is_retryable_api_status, is_size_overflow_error_code,
+    parse_error_code, parse_server_timing, status_user_message, status_user_message_from,
+    user_facing_api_error_message,
 };
 pub use self::output_rate::{
     OutputRateFloorPolicy, OutputRateGate, OutputRateHealth, OutputRateMeter, RateTick,

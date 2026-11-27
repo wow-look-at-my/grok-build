@@ -1463,6 +1463,19 @@ pub(super) fn handle_session_notification_with_origin(
                     slow_for: slow_for_ms.map(std::time::Duration::from_millis),
                 })
         }
+        // Both describe a request in flight, so a replayed one is dropped.
+        XaiSessionUpdate::RequestTransport { transport } => {
+            if meta.is_replay {
+                return false;
+            }
+            agent.session.tracker.set_request_transport(transport)
+        }
+        XaiSessionUpdate::UpstreamProvider { provider } => {
+            if meta.is_replay {
+                return false;
+            }
+            agent.session.tracker.set_upstream_provider(provider)
+        }
         // A queue wait is happening now, so a replayed one is dropped.
         XaiSessionUpdate::RequestQueued { ahead, limit } => {
             if meta.is_replay {
@@ -1780,6 +1793,24 @@ pub(super) fn handle_child_session_notification(
                     floor_tokens_per_sec,
                     slow_for: slow_for_ms.map(std::time::Duration::from_millis),
                 })
+        }
+        XaiSessionUpdate::RequestTransport { transport } => {
+            let Some(child_view) = agent.subagent_views.get_mut(child_sid) else {
+                return false;
+            };
+            if child_view.session.loading_replay {
+                return false;
+            }
+            child_view.session.tracker.set_request_transport(transport)
+        }
+        XaiSessionUpdate::UpstreamProvider { provider } => {
+            let Some(child_view) = agent.subagent_views.get_mut(child_sid) else {
+                return false;
+            };
+            if child_view.session.loading_replay {
+                return false;
+            }
+            child_view.session.tracker.set_upstream_provider(provider)
         }
         XaiSessionUpdate::RequestQueued { ahead, limit } => {
             let Some(child_view) = agent.subagent_views.get_mut(child_sid) else {

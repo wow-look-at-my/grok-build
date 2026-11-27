@@ -130,6 +130,7 @@ impl AgentView {
             // Kept unconditional as a safe over-refusal (like the modals and line_viewer): a tip during goal reading is unwanted regardless
             || (self.show_goal_detail && self.goal_state.is_some())
             || self.todo_detail.is_some()
+            || self.hops_dialog.is_some()
             || self.show_workflows
             // Prompt dropdowns (@/slash/completion/history) render in the row directly above the prompt (the banner row), clearing it
             || self.prompt.any_dropdown_open()

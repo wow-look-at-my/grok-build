@@ -84,6 +84,8 @@ mod tests {
             }],
             usage: None,
             system_fingerprint: None,
+            provider: None,
+            extra_fields: None,
         }
     }
 
@@ -100,6 +102,8 @@ mod tests {
             }],
             usage: None,
             system_fingerprint: None,
+            provider: None,
+            extra_fields: None,
         }
     }
 
