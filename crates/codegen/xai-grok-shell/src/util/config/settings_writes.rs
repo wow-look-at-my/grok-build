@@ -1041,3 +1041,58 @@ fn remove_and_prune(root: &mut toml::map::Map<String, toml::Value>, tables: &[&s
         root.remove(*first);
     }
 }
+
+/// Persist `enabled` on the hop `hop_id` of `models.providers."<provider_id>".hops` in the user `config.json`.
+pub async fn set_hop_enabled(provider_id: String, hop_id: String, enabled: bool) -> Result<()> {
+    rewrite_user_config_locked("hop toggle", move |path| {
+        write_hop_enabled(
+            path,
+            &provider_id,
+            &hop_id,
+            enabled,
+            crate::util::config::persist::atomic_write_follow_bound,
+        )
+    })
+    .await
+}
+
+pub(super) fn write_hop_enabled(
+    path: &Path,
+    provider_id: &str,
+    hop_id: &str,
+    enabled: bool,
+    write: impl FnOnce(&Path, &BoundDest, &str) -> std::io::Result<()>,
+) -> Result<()> {
+    rewrite_user_config_table(path, "hop toggle", write, |root| {
+        apply_hop_enabled(root, provider_id, hop_id, enabled)
+            .with_context(|| format!("in {}", path.display()))
+    })
+}
+
+/// The TOML edit of [`write_hop_enabled`], apart from the disk. A hop the user
+/// config does not hold is an error: a toggle that wrote nothing reads as done.
+pub(crate) fn apply_hop_enabled(
+    root: &mut toml::map::Map<String, toml::Value>,
+    provider_id: &str,
+    hop_id: &str,
+    enabled: bool,
+) -> Result<()> {
+    let hops = root
+        .get_mut("model_providers")
+        .and_then(|providers| providers.get_mut(provider_id))
+        .and_then(|provider| provider.get_mut("hops"))
+        .and_then(toml::Value::as_array_mut)
+        .with_context(|| {
+            format!("`models.providers.{provider_id}.hops` is not in the user config")
+        })?;
+    let hop = hops
+        .iter_mut()
+        .filter_map(toml::Value::as_table_mut)
+        .find(|hop| hop.get("id").and_then(toml::Value::as_str) == Some(hop_id))
+        .with_context(|| format!("`models.providers.{provider_id}.hops` has no hop `{hop_id}`"))?;
+    if hop.get("optional").and_then(toml::Value::as_bool) != Some(true) {
+        anyhow::bail!("hop `{hop_id}` is not optional, so it cannot be turned off");
+    }
+    hop.insert("enabled".to_owned(), toml::Value::Boolean(enabled));
+    Ok(())
+}

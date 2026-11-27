@@ -12086,6 +12086,21 @@ Additional requirements / notices:
   Upstream license expression: MIT OR Apache-2.0. For this distribution, obligations are satisfied under: MIT.
 
 --------------------------------------------------------------------------------
+simple-icons 16.38.1
+--------------------------------------------------------------------------------
+Source:  https://github.com/simple-icons/simple-icons
+License: CC0-1.0
+
+Copyright notice:
+  The icon paths are dedicated to the public domain by the Simple Icons Collaborators.
+
+License text: see upstream https://github.com/simple-icons/simple-icons (license: CC0-1.0)
+
+Additional requirements / notices:
+  Used for the provider marks in crates/codegen/xai-grok-pager/assets/provider-icons, drawn as PNG and tinted.
+  Each mark is a trademark of its owner. CC0 covers the icon data and grants no trademark right.
+
+--------------------------------------------------------------------------------
 similar 2.7.0
 --------------------------------------------------------------------------------
 Source:  https://github.com/mitsuhiko/similar

@@ -71,6 +71,8 @@ pub struct ModelProviderConfig {
     pub extra_body: IndexMap<String, toml::Value>,
     /// Request-body cap of this endpoint; inherited by models that set none of their own.
     pub max_request_bytes: Option<NonZeroU64>,
+    /// The proxies between this client and the provider, client side first.
+    pub hops: Vec<super::model_route::HopConfig>,
 }
 
 /// The shape of a provider's model listing.
@@ -395,6 +397,8 @@ impl ConfigModelOverride {
             pricing_lookup_enabled: _,
             extra_body,
             max_request_bytes,
+            // The chain is applied where a request is sent, so a model keeps the provider's own URL.
+            hops: _,
         } = provider;
 
         let mut merged = self.clone();

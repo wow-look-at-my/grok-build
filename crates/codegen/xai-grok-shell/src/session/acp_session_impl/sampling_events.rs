@@ -397,8 +397,39 @@ impl SessionActor {
                     let _ = tx.send(());
                 }
             }
-            SamplingEvent::ModelMetadata { metadata, .. } => {
-                self.handle_model_metadata_update(metadata).await;
+            SamplingEvent::ModelMetadata { mut metadata, .. } => {
+                // Transient like the output rate: it describes the request in flight.
+                if let Some(transport) = metadata.transport.take() {
+                    // The screen keeps the last request only. The log keeps
+                    // each.
+                    xai_grok_telemetry::unified_log::info(
+                        "shell.turn.request_transport",
+                        Some(self.session_info.id.0.as_ref()),
+                        Some(serde_json::json!({
+                            "encoding": transport.encoding,
+                            "plain_bytes": transport.plain_bytes,
+                            "wire_bytes": transport.wire_bytes,
+                            "headers_ms": transport.headers_ms,
+                            "link_ms": transport.link_ms(),
+                            "server_timing": transport.server_timing,
+                        })),
+                    );
+                    self.send_xai_notification_transient(XaiSessionUpdate::RequestTransport {
+                        transport,
+                    });
+                }
+                // Every streaming response has a transport record. Few carry model metadata.
+                if metadata.context_window.is_some()
+                    || metadata.max_completion_tokens.is_some()
+                    || metadata.models_etag.is_some()
+                {
+                    self.handle_model_metadata_update(metadata).await;
+                }
+            }
+            SamplingEvent::UpstreamProvider { provider, .. } => {
+                self.send_xai_notification_transient(XaiSessionUpdate::UpstreamProvider {
+                    provider,
+                });
             }
             SamplingEvent::OutputRate {
                 tokens_per_sec,

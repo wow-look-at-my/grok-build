@@ -681,6 +681,9 @@ pub struct SessionInfoData {
     pub show_model_fingerprint: bool,
     #[serde(default, skip_serializing_if = "Option::is_none")]
     pub api_backend: Option<String>,
+    /// The proxy hops a request takes to the provider, then the provider. `None` when the provider declares no hop.
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    pub route: Option<String>,
     /// Gateway chat conversation id when this session is gateway-proxied.
     #[serde(default, skip_serializing_if = "Option::is_none")]
     pub conversation_id: Option<String>,
