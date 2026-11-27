@@ -4572,11 +4572,11 @@ fn status_cost_label(
     session_cost_ticks: Option<i64>,
     memory: Option<xai_grok_shell::extensions::notification::MemoryCostTotals>,
 ) -> Option<String> {
-    let session = crate::scrollback::wrappers::cost_ticks_to_display(session_cost_ticks)?;
-    let memory_ticks = memory.map(|totals| totals.total_usd_ticks());
-    match crate::scrollback::wrappers::cost_ticks_to_display(memory_ticks) {
+    use crate::usd::Usd;
+    let session = Usd::reported(session_cost_ticks)?;
+    match Usd::reported(memory.map(|totals| totals.total_usd_ticks())) {
         Some(memory) => Some(format!("{session} · mem {memory}")),
-        None => Some(session),
+        None => Some(session.to_string()),
     }
 }
 #[cfg(test)]
@@ -4587,11 +4587,26 @@ mod status_cost_label_tests {
     fn no_memory_cost_leaves_the_session_total_alone() {
         assert_eq!(
             status_cost_label(Some(5_000_000_000), None).as_deref(),
-            Some("$0.5")
+            Some("$0.50")
         );
         assert_eq!(
             status_cost_label(Some(5_000_000_000), Some(MemoryCostTotals::default())).as_deref(),
-            Some("$0.5")
+            Some("$0.50")
+        );
+    }
+    #[test]
+    fn both_costs_round_to_cents() {
+        let totals = MemoryCostTotals {
+            capture_usd_ticks: 22_510_000,
+            ..MemoryCostTotals::default()
+        };
+        assert_eq!(
+            status_cost_label(Some(45_030_000), Some(totals)).as_deref(),
+            Some("<$0.01 · mem <$0.01")
+        );
+        assert_eq!(
+            status_cost_label(Some(1_236_000_000), None).as_deref(),
+            Some("$0.12")
         );
     }
     #[test]
@@ -4603,7 +4618,7 @@ mod status_cost_label_tests {
         };
         assert_eq!(
             status_cost_label(Some(5_000_000_000), Some(totals)).as_deref(),
-            Some("$0.5 · mem $0.04")
+            Some("$0.50 · mem $0.04")
         );
     }
     #[test]

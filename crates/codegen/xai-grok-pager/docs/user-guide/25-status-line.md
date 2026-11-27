@@ -117,6 +117,7 @@ Nothing outside the table below is sent. A ported script that reads counts of li
 | `version` | Grok release, for display |
 | `cost.total_duration_ms` | Milliseconds since this process attached the session. A resumed session counts from the resume, as its cost does |
 | `cost.total_cost_usd`, `cost.total_api_duration_ms` | Session cost and API-wait milliseconds. The cost is absent until something in the session carries a price, and also when the usage ledger is unreadable, so treat an absent cost as unknown rather than as zero |
+| `cost.total_cost_usd_ticks` | The same cost as an exact integer, 10,000,000,000 ticks to the dollar. It is present and absent with `total_cost_usd` |
 | `context_window.context_window_size` | Maximum context size, in tokens. Omitted until the model's window is known |
 | `context_window.context_tokens` | Tokens the conversation occupies right now, counting input only, so it falls after a compaction. Omitted when the agent cannot read the count, so `0` always means an empty context |
 | `context_window.session_input_tokens`, `.session_output_tokens` | Billed across the whole session, so they only grow. Named for the session because that is what they count: `total_*` is used elsewhere for what is in the window right now, which here is `context_tokens`. Dividing these by `context_window_size` passes 100% and keeps going. Omitted when the usage ledger is unreadable |

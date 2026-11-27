@@ -203,6 +203,7 @@ impl SessionActor {
             version: xai_grok_version::version().to_string(),
             cost: StatusLineCost {
                 total_cost_usd: totals.and_then(|t| t.cost_usd_ticks).map(ticks_to_usd),
+                total_cost_usd_ticks: totals.and_then(|t| t.cost_usd_ticks),
                 total_duration_ms: self.session_start.elapsed().as_millis() as u64,
                 total_api_duration_ms: totals.map(|t| t.api_duration_ms),
             },
