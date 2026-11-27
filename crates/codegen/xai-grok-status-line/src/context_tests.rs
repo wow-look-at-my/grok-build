@@ -47,6 +47,7 @@ fn every_field_survives_a_round_trip_through_the_shared_fixture() {
         version: "0.2.112".to_string(),
         cost: StatusLineCost {
             total_cost_usd: Some(0.0123),
+            total_cost_usd_ticks: Some(123_000_000),
             total_duration_ms: 45_000,
             total_api_duration_ms: Some(2_300),
         },

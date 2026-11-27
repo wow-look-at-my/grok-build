@@ -961,19 +961,19 @@ fn allowance_lines(
         lines.push(Line::default());
         lines.push(plain(
             theme,
-            format!("Credits: ${:.2}", prepaid as f64 / 100.0),
+            format!("Credits: {}", crate::usd::Usd::from_cents(prepaid)),
         ));
     }
 
     // Legacy on-demand (pay-as-you-go) billing.
     if bal.pay_as_you_go {
-        let used = bal.on_demand_used_cents.unwrap_or(0).abs() as f64 / 100.0;
-        let cap = bal.on_demand_cap_cents.unwrap_or(0).abs() as f64 / 100.0;
+        let used = crate::usd::Usd::from_cents(bal.on_demand_used_cents.unwrap_or(0).abs());
+        let cap = crate::usd::Usd::from_cents(bal.on_demand_cap_cents.unwrap_or(0).abs());
         lines.push(Line::default());
         lines.push(Line::styled("Pay as you go: Enabled", header_style(theme)));
         lines.push(muted_line(
             theme,
-            format!("Usage: ${used:.2} / ${cap:.2} per month"),
+            format!("Usage: {used} / {cap} per month"),
         ));
     }
     lines
