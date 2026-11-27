@@ -2510,6 +2510,7 @@ pub(super) async fn run_session(
                             .enqueue_v2_turn_capture(source_prompt_index)
                             .await;
                     }
+                    session.schedule_v2_dream_check_after_turn();
                     #[cfg(test)]
                     if let Some(processed) = processed {
                         let _ = processed.send(());

@@ -144,7 +144,7 @@ pub const WIRED: &[WireAlias] = &[
         aliases: &["otel_transport"],
     },
     WireAlias {
-        file: "crates/codegen/xai-grok-shell/src/agent/config.rs",
+        file: "crates/codegen/xai-grok-config/src/endpoints.rs",
         ty: "EndpointsConfig",
         canonical: "models_list_url",
         aliases: &["models_endpoint"],
@@ -299,7 +299,7 @@ pub const WIRED: &[WireAlias] = &[
     // `Deserialize` folds the keys on the buffered object and then calls the
     // derived reader.
     WireAlias {
-        file: "crates/codegen/xai-grok-config-types/src/lib.rs",
+        file: "crates/codegen/xai-grok-config/src/remote_settings.rs",
         ty: "RemoteSettings",
         canonical: "grove_worktree",
         aliases: &["nfs_worktree"],
@@ -371,19 +371,19 @@ pub const WIRED: &[WireAlias] = &[
         aliases: &["conflictType"],
     },
     WireAlias {
-        file: "crates/codegen/xai-grok-config-types/src/lib.rs",
+        file: "crates/codegen/xai-grok-config/src/remote_settings.rs",
         ty: "CampaignOverride",
         canonical: "id",
         aliases: &["campaign_id"],
     },
     WireAlias {
-        file: "crates/codegen/xai-grok-config-types/src/mcp.rs",
+        file: "crates/codegen/xai-grok-config/src/mcp_server_config.rs",
         ty: "McpServerTransportConfig",
         canonical: "url",
         aliases: &["urlTemplate", "url_template"],
     },
     WireAlias {
-        file: "crates/codegen/xai-grok-config-types/src/mcp.rs",
+        file: "crates/codegen/xai-grok-config/src/mcp_server_config.rs",
         ty: "McpSetupConfig",
         canonical: "variables",
         aliases: &["values"],
@@ -634,7 +634,7 @@ pub const ENUM_VARIANTS: &[EnumVariantAlias] = &[
         why: "a tool filter is one string key; see ToolNamespace",
     },
     EnumVariantAlias {
-        file: "crates/codegen/xai-grok-workspace/src/permission/types.rs",
+        file: "crates/codegen/xai-grok-permission-rules/src/types.rs",
         ty: "ToolFilter",
         aliases: &["agentmessage"],
         why: "a tool filter is one string key; see ToolNamespace",

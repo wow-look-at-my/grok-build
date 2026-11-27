@@ -12,6 +12,7 @@ macro_rules! own_process {
 }
 
 mod child_net_e2e;
+mod cli_facing_unchanged;
 mod deny_paths_e2e;
 mod gh_contract_e2e;
 mod integration_test;

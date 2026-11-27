@@ -1,9 +1,7 @@
 //! Tests for feedback / remember / btw / recap dispatchers.
-
 use super::*;
 use crate::app::dispatch::ctx::NO_SESSION_NOTICE;
 use crate::app::dispatch::{recap_unavailable_toast, scrollback_has_user_messages};
-
 fn agent_ref(app: &AppView, id: AgentId) -> &AgentView {
     let Some(agent) = app.agents.get(&id) else {
         panic!("expected agent {id:?}");
@@ -28,7 +26,6 @@ fn remember_save_carries_the_session_pinned_mode() {
         }),
         &mut app,
     );
-
     let rewrite = dispatch(
         Action::SendRememberNote("keep this in v2".to_owned()),
         &mut app,
@@ -37,9 +34,6 @@ fn remember_save_carries_the_session_pinned_mode() {
         rewrite.as_slice(),
         [Effect::RewriteMemoryNote { .. }]
     ));
-
-    // A later disk-config flip cannot affect the effect: it owns the mode
-    // returned by the active session when it was created.
     let save = dispatch(Action::SaveRememberNoteFromModal, &mut app);
     assert!(matches!(
         save.as_slice(),
@@ -49,13 +43,11 @@ fn remember_save_carries_the_session_pinned_mode() {
         }]
     ));
 }
-
 #[test]
 fn remember_save_without_session_defers_to_disk_mode() {
     let mut app = test_app_with_agent();
     let id = AgentId(0);
     app.agents.get_mut(&id).unwrap().session.session_id = None;
-
     assert!(
         dispatch(
             Action::SendRememberNote("pre-session note".to_owned()),
@@ -72,13 +64,11 @@ fn remember_save_without_session_defers_to_disk_mode() {
         }]
     ));
 }
-
 #[test]
 fn recap_unavailable_toast_empty_vs_with_messages() {
     assert_eq!(recap_unavailable_toast(false), "No messages yet");
     assert_eq!(recap_unavailable_toast(true), "Couldn't generate recap");
 }
-
 #[test]
 fn manual_recap_with_no_messages_toasts_empty_state_and_skips_request() {
     let mut app = test_app_with_agent();
@@ -89,9 +79,7 @@ fn manual_recap_with_no_messages_toasts_empty_state_and_skips_request() {
         agent.prompt.set_text("/recap");
         assert!(!scrollback_has_user_messages(&agent.scrollback));
     }
-
     let effects = dispatch(Action::SendRecap { auto: false }, &mut app);
-
     assert!(
         effects.is_empty(),
         "empty session must not fire example.invalid/recap: {effects:?}"
@@ -105,7 +93,6 @@ fn manual_recap_with_no_messages_toasts_empty_state_and_skips_request() {
     );
     assert_eq!(agent.prompt.text(), "", "slash command text is cleared");
 }
-
 #[test]
 fn manual_recap_with_messages_requests_and_shows_spinner() {
     let mut app = test_app_with_agent();
@@ -118,9 +105,7 @@ fn manual_recap_with_messages_requests_and_shows_spinner() {
             .push_block(RenderBlock::user_prompt("hello"));
         assert!(scrollback_has_user_messages(&agent.scrollback));
     }
-
     let effects = dispatch(Action::SendRecap { auto: false }, &mut app);
-
     assert!(
         matches!(effects.as_slice(), [Effect::SendRecap { auto: false, .. }]),
         "expected SendRecap effect, got {effects:?}"
@@ -132,7 +117,6 @@ fn manual_recap_with_messages_requests_and_shows_spinner() {
     );
     assert!(agent.toast.is_none());
 }
-
 /// Regression: during session/load, scrollback is batched so `turn_count()` stays 0 until `end_batch`, but UserPrompt entries may already be present.
 /// Manual `/recap` must still request a recap.
 #[test]
@@ -146,13 +130,10 @@ fn manual_recap_during_batch_load_with_prompts_still_requests() {
         agent
             .scrollback
             .push_block(RenderBlock::user_prompt("hello from resume"));
-        // Batched push defers rebuild_turns: the turn index is stale, the entries aren't
         assert_eq!(agent.scrollback.turn_count(), 0);
         assert!(scrollback_has_user_messages(&agent.scrollback));
     }
-
     let effects = dispatch(Action::SendRecap { auto: false }, &mut app);
-
     assert!(
         matches!(effects.as_slice(), [Effect::SendRecap { auto: false, .. }]),
         "batched resume with user prompts must still fire example.invalid/recap: {effects:?}"
@@ -160,10 +141,8 @@ fn manual_recap_during_batch_load_with_prompts_still_requests() {
     let agent = app.agents.get(&id).unwrap();
     assert!(agent.pending_recap_entry.is_some());
     assert!(agent.toast.is_none());
-    // Clean up batch for the test fixture (not required for the assertion).
     app.agents.get_mut(&id).unwrap().scrollback.end_batch();
 }
-
 /// While session replay is still streaming, don't claim "No messages yet" even if scrollback looks empty; history may arrive on the next notification.
 #[test]
 fn manual_recap_while_loading_replay_still_requests() {
@@ -175,9 +154,7 @@ fn manual_recap_while_loading_replay_still_requests() {
         agent.session.loading_replay = true;
         assert!(!scrollback_has_user_messages(&agent.scrollback));
     }
-
     let effects = dispatch(Action::SendRecap { auto: false }, &mut app);
-
     assert!(
         matches!(effects.as_slice(), [Effect::SendRecap { auto: false, .. }]),
         "loading_replay must not short-circuit to No messages yet: {effects:?}"
@@ -186,7 +163,6 @@ fn manual_recap_while_loading_replay_still_requests() {
     assert!(agent.pending_recap_entry.is_some());
     assert!(agent.toast.is_none());
 }
-
 #[test]
 fn recap_request_transport_failure_with_no_turns_uses_empty_toast() {
     let mut app = test_app_with_agent();
@@ -205,7 +181,6 @@ fn recap_request_transport_failure_with_no_turns_uses_empty_toast() {
         agent.pending_recap_entry = Some(spinner);
         assert!(!scrollback_has_user_messages(&agent.scrollback));
     }
-
     dispatch(
         Action::TaskComplete(TaskResult::RecapRequested {
             session_id,
@@ -214,7 +189,6 @@ fn recap_request_transport_failure_with_no_turns_uses_empty_toast() {
         }),
         &mut app,
     );
-
     let agent = app.agents.get(&id).unwrap();
     assert!(agent.pending_recap_entry.is_none());
     assert_eq!(
@@ -222,7 +196,6 @@ fn recap_request_transport_failure_with_no_turns_uses_empty_toast() {
         Some("No messages yet")
     );
 }
-
 #[test]
 fn recap_request_transport_failure_with_turns_uses_generic_toast() {
     let mut app = test_app_with_agent();
@@ -244,7 +217,6 @@ fn recap_request_transport_failure_with_turns_uses_generic_toast() {
         agent.pending_recap_entry = Some(spinner);
         assert!(scrollback_has_user_messages(&agent.scrollback));
     }
-
     dispatch(
         Action::TaskComplete(TaskResult::RecapRequested {
             session_id,
@@ -253,7 +225,6 @@ fn recap_request_transport_failure_with_turns_uses_generic_toast() {
         }),
         &mut app,
     );
-
     let agent = app.agents.get(&id).unwrap();
     assert!(agent.pending_recap_entry.is_none());
     assert_eq!(
@@ -261,7 +232,6 @@ fn recap_request_transport_failure_with_turns_uses_generic_toast() {
         Some("Couldn't generate recap")
     );
 }
-
 #[test]
 fn fullscreen_btw_response_after_dismiss_keeps_existing_behavior() {
     let mut app = test_app_with_agent();
@@ -275,7 +245,6 @@ fn fullscreen_btw_response_after_dismiss_keeps_existing_behavior() {
     );
     assert!(matches!(effects.as_slice(), [Effect::SendBtw { .. }]));
     app.agents.get_mut(&id).unwrap().btw_state = None;
-
     dispatch(
         Action::TaskComplete(TaskResult::BtwResponse {
             image_notice: None,
@@ -285,14 +254,12 @@ fn fullscreen_btw_response_after_dismiss_keeps_existing_behavior() {
         }),
         &mut app,
     );
-
     assert!(matches!(
         agent_ref(&app, id).btw_state,
         Some(crate::views::btw_overlay::BtwOverlayState::Done { ref question, .. })
             if question.is_empty()
     ));
 }
-
 /// Attachments the side question dropped over the cap and attachments it could not load arrive as one
 /// visible notice when the answer lands; neither replaces the other.
 #[test]
@@ -306,7 +273,6 @@ fn btw_response_toasts_skipped_image_numbers() {
         },
         &mut app,
     );
-
     dispatch(
         Action::TaskComplete(TaskResult::BtwResponse {
             image_notice: Some(
@@ -318,7 +284,6 @@ fn btw_response_toasts_skipped_image_numbers() {
         }),
         &mut app,
     );
-
     assert_eq!(
         agent_ref(&app, id)
             .toast
@@ -329,7 +294,6 @@ fn btw_response_toasts_skipped_image_numbers() {
         )
     );
 }
-
 #[test]
 fn btw_no_session_toasts() {
     let id = AgentId(0);
@@ -355,29 +319,24 @@ fn btw_no_session_toasts() {
     );
     assert_eq!(agent_ref(&fullscreen, id).scrollback.len(), 0);
 }
-
 /// A fresh install initializes before login, so the connection-time snapshot of the trace offer is `false`.
 /// The authenticate meta must refresh it or the first post-login `/feedback` silently skips the consent question.
 #[test]
 fn auth_meta_refreshes_feedback_trace_offer() {
     let mut app = test_app_with_agent();
-    app.shell_feedback_trace_offer = false; // initialize ran logged-out
-
+    app.shell_feedback_trace_offer = false;
     let meta = xai_grok_login::AuthMeta {
         feedback_trace_offer: true,
         coding_data_retention_opt_out: false,
         ..Default::default()
     };
     app.apply_auth_meta(&meta);
-    // The modal reads the offer live at submit time, so refreshing the app-level flag is enough.
     assert!(app.feedback_trace_offer(), "login must refresh the offer");
 }
-
 #[test]
 fn unknown_immediate_feedback_outcome_warns_against_duplicate_retry() {
     let id = AgentId(0);
     let mut app = test_app_with_agent();
-
     let _ = dispatch(
         Action::TaskComplete(crate::app::actions::TaskResult::FeedbackComplete {
             agent_id: id,
@@ -387,19 +346,16 @@ fn unknown_immediate_feedback_outcome_warns_against_duplicate_retry() {
         }),
         &mut app,
     );
-
     let notice = last_system_text(&app, id);
     assert!(notice.contains("may still complete"), "{notice}");
     assert!(notice.contains("do not resend"), "{notice}");
 }
-
 /// A failed inline send keeps the report as a text-only local draft and says so, attachments
 /// included in the count; the composer, which sends to the model, is never touched.
 #[test]
 fn feedback_failed_keeps_the_report_as_a_draft_and_spares_the_composer() {
     let id = AgentId(0);
     let mut app = test_app_with_agent();
-    // Planted where the failure path derives it: under the agent's own cwd, not `app.cwd`.
     let session_id = format!("feedback-failed-{}", uuid::Uuid::new_v4());
     let session_dir = plant_local_build_session(&test_agent(&app, id).session.cwd, &session_id);
     {
@@ -407,7 +363,6 @@ fn feedback_failed_keeps_the_report_as_a_draft_and_spares_the_composer() {
         agent.session.session_id = Some(session_id.into());
         agent.prompt.set_text("unrelated draft");
     }
-
     let _ = dispatch(
         Action::TaskComplete(crate::app::actions::TaskResult::FeedbackFailed {
             agent_id: id,
@@ -420,7 +375,6 @@ fn feedback_failed_keeps_the_report_as_a_draft_and_spares_the_composer() {
     );
     let drafts = xai_grok_feedback::FeedbackDraftStore::new(&session_dir).list();
     let _ = std::fs::remove_dir_all(&session_dir);
-
     let notice = last_system_text(&app, id);
     assert_eq!(
         "Couldn't send feedback: disabled. Saved to Drafts (its 2 images were dropped); open `/feedback` to retry.",
@@ -438,7 +392,6 @@ fn feedback_failed_keeps_the_report_as_a_draft_and_spares_the_composer() {
         "a failed report must not land in the composer, which sends to the model"
     );
 }
-
 /// The slash path clears the composer before the send is refused for lack of a session, so the
 /// notice must carry the report (and count its chip) instead of dropping it.
 #[test]
@@ -454,9 +407,7 @@ fn inline_feedback_without_a_session_keeps_the_report_in_the_notice() {
         agent.prompt.insert_image(test_pasted_png()).expect("chip");
     }
     let composed = test_agent(&app, id).prompt.text().to_string();
-
     let effects = dispatch(Action::SendPrompt(composed), &mut app);
-
     assert!(
         effects.is_empty(),
         "nothing to send without a session: {effects:?}"
@@ -467,7 +418,6 @@ fn inline_feedback_without_a_session_keeps_the_report_in_the_notice() {
     );
     assert!(test_agent(&app, id).session.pending_prompts.is_empty());
 }
-
 fn test_pasted_image(mime_type: &str) -> crate::prompt_images::PastedImage {
     crate::prompt_images::from_clipboard_data(&crate::clipboard::ImageData {
         data: vec![
@@ -476,11 +426,9 @@ fn test_pasted_image(mime_type: &str) -> crate::prompt_images::PastedImage {
         mime_type: mime_type.to_string(),
     })
 }
-
 fn test_pasted_png() -> crate::prompt_images::PastedImage {
     test_pasted_image("image/png")
 }
-
 /// `/feedback <text>` with a composer chip, typed while a turn runs, POSTs on Enter as a Write-tab
 /// report: no skill turn, no queue row, composer cleared, thanks at send time.
 #[test]
@@ -497,9 +445,7 @@ fn inline_feedback_sends_immediately_while_a_turn_runs() {
         agent.prompt.insert_image(test_pasted_png()).expect("chip");
     }
     let composed = test_agent(&app, id).prompt.text().to_string();
-
     let effects = dispatch(Action::SendPrompt(composed), &mut app);
-
     let [
         Effect::SendFeedback {
             feedback_text,
@@ -535,33 +481,33 @@ fn inline_feedback_sends_immediately_while_a_turn_runs() {
     assert!(agent.prompt.images.is_empty());
     assert!(last_system_text(&app, id).contains("Thanks for the feedback"));
 }
-
 /// Typed bare `/feedback` must not drain composer images until the modal opens: every refusal
 /// (voice owning the prompt, no session, a blocker) keeps the composer text, its chip, and the
 /// staged temp file that FeedbackImages Drop would otherwise unlink, and is visible.
 #[test]
 fn refused_bare_feedback_keeps_the_composer_image_and_is_visible() {
-    use crate::app::app_view::{VoiceState, VoiceTarget};
+    use crate::app::app_view::{Partial, VoiceState, VoiceTarget};
     use strum::IntoEnumIterator as _;
-
     #[derive(Debug, Clone, Copy, strum::EnumIter)]
     enum Refusal {
         Voice,
         NoSession,
         Blocker,
     }
-
     let id = AgentId(0);
     let recording = VoiceState::Recording {
         hold: false,
         target: VoiceTarget::Agent(id),
-        interim: Some("dictated text".to_owned()),
+        partial: Partial::Shown("dictated text".to_owned()),
+        route: Some(xai_grok_voice::VoiceRoute::Streaming),
     };
     for refusal in Refusal::iter() {
         let mut app = test_app_with_agent();
         match refusal {
             Refusal::Voice => app.voice_state = recording.clone(),
-            Refusal::NoSession => app.agents.get_mut(&id).unwrap().session.session_id = None,
+            Refusal::NoSession => {
+                app.agents.get_mut(&id).unwrap().session.session_id = None;
+            }
             Refusal::Blocker => {
                 app.agents.get_mut(&id).unwrap().plan_approval_view =
                     Some(crate::app::agent_view::test_fixtures::make_plan_approval_view_state());
@@ -586,9 +532,7 @@ fn refused_bare_feedback_keeps_the_composer_image_and_is_visible() {
             panic!("expected the composer image");
         };
         image.staged_temp_path = Some(staged.clone());
-
         let effects = dispatch(Action::SendPrompt(composed.clone()), &mut app);
-
         assert!(effects.is_empty(), "{refusal:?}: {effects:?}");
         let agent = agent_ref(&app, id);
         assert!(agent.feedback_modal.is_none(), "{refusal:?}");
@@ -641,12 +585,10 @@ fn typed_bare_feedback_moves_composer_images_into_the_modal() {
         agent.prompt.set_cursor(end);
         agent.prompt.insert_image(test_pasted_png()).expect("chip");
     }
-
     let effects = dispatch(
         Action::SendPrompt(agent_ref(&app, id).prompt.text().to_string()),
         &mut app,
     );
-
     assert!(
         effects
             .iter()
@@ -664,7 +606,6 @@ fn typed_bare_feedback_moves_composer_images_into_the_modal() {
         "composer chips mean a new report, not a Drafts peek"
     );
 }
-
 #[test]
 fn draft_preserving_feedback_uses_the_submitted_command_without_draft_images() {
     let mut app = test_app_with_agent();
@@ -678,12 +619,10 @@ fn draft_preserving_feedback_uses_the_submitted_command_without_draft_images() {
         agent.prompt.insert_image(test_pasted_png()).expect("chip");
     }
     let draft = agent_ref(&app, id).prompt.text().to_owned();
-
     let effects = dispatch(
         Action::SendSlashCommandPreservingDraft("/feedback submitted report".into()),
         &mut app,
     );
-
     let [
         Effect::SendFeedback {
             feedback_text,
@@ -703,19 +642,16 @@ fn draft_preserving_feedback_uses_the_submitted_command_without_draft_images() {
     assert_eq!(draft, test_agent(&app, id).prompt.text());
     assert_eq!(1, test_agent(&app, id).prompt.images.len());
 }
-
 /// `dispatch_send_feedback` bailing before the send (no agent view) still owns the attachments and must delete their staged temp files.
 #[test]
 fn send_feedback_without_agent_view_cleans_staged_temp_files() {
     let mut app = test_app_with_agent();
     app.active_view = crate::app::app_view::ActiveView::AgentDashboard;
-
     let dir = tempfile::tempdir().unwrap();
     let staged = dir.path().join("staged.png");
     std::fs::write(&staged, b"staged").unwrap();
     let mut image = test_pasted_png();
     image.staged_temp_path = Some(staged.clone());
-
     let effects = dispatch(
         Action::SendFeedback {
             text: "it broke".into(),
@@ -730,7 +666,6 @@ fn send_feedback_without_agent_view_cleans_staged_temp_files() {
         "a bailed send must release its staged files"
     );
 }
-
 /// A direct send must not wipe the composer draft.
 #[test]
 fn send_feedback_preserves_composer_draft() {
@@ -740,7 +675,6 @@ fn send_feedback_preserves_composer_draft() {
         let agent = app.agents.get_mut(&id).unwrap();
         agent.prompt.set_text("keep this draft");
     }
-
     let effects = dispatch(
         Action::SendFeedback {
             text: "report".into(),
@@ -765,7 +699,6 @@ fn send_feedback_preserves_composer_draft() {
         "composer draft must survive SendFeedback"
     );
 }
-
 /// Dispatch a full-TUI modal open and return the open generation's id.
 fn open_feedback_modal(
     app: &mut AppView,
@@ -791,7 +724,6 @@ fn open_feedback_modal(
         .expect("the feedback modal must open")
         .id()
 }
-
 /// Bare `/feedback` opens the modal empty, and an `OpenFeedbackModal` payload with text (e.g. a
 /// restored draft) still prefills it; the old question pane never opens.
 #[test]
@@ -814,7 +746,6 @@ fn feedback_modal_opens_empty_and_prefilled() {
         "the tool crashed"
     );
 }
-
 /// Dashboard feedback opens refuse in the visible error slot and consume the dispatch input.
 #[test]
 fn feedback_modal_open_refuses_visibly_on_dashboard() {
@@ -823,9 +754,7 @@ fn feedback_modal_open_refuses_visibly_on_dashboard() {
     app.dashboard = Some(crate::views::dashboard::DashboardState::new());
     let dashboard = app.dashboard.as_mut().unwrap();
     dashboard.dispatch.set_text("/feedback");
-
     let effects = dispatch(Action::OpenFeedbackModal(Default::default()), &mut app);
-
     assert!(effects.is_empty());
     let dashboard = app.dashboard.as_ref().unwrap();
     assert_eq!(dashboard.dispatch.text(), "");
@@ -833,15 +762,13 @@ fn feedback_modal_open_refuses_visibly_on_dashboard() {
     assert_eq!(dashboard.error_toast.as_deref(), Some(expected.as_str()));
     assert!(agent_ref(&app, AgentId(0)).feedback_modal.is_none());
 }
-
 /// The palette route refuses visibly under every other input owner (voice in any live state, a
 /// question card, a line viewer, a plan approval) without touching the owner or the main draft.
 #[test]
 fn feedback_modal_open_refuses_visibly_under_every_input_owner() {
-    use crate::app::app_view::{VoiceState, VoiceTarget};
+    use crate::app::app_view::{Partial, VoiceState, VoiceTarget};
     use crate::views::question_view::QuestionViewState;
     use strum::IntoEnumIterator as _;
-
     #[derive(Debug, Clone, Copy, strum::EnumIter)]
     enum Owner {
         VoiceColdStart,
@@ -851,7 +778,6 @@ fn feedback_modal_open_refuses_visibly_under_every_input_owner() {
         LineViewer,
         PlanApproval,
     }
-
     let id = AgentId(0);
     let viewer_dir = tempfile::tempdir().unwrap();
     let viewer_path = viewer_dir.path().join("preview.txt");
@@ -874,13 +800,15 @@ fn feedback_modal_open_refuses_visibly_under_every_input_owner() {
                 app.voice_state = VoiceState::Recording {
                     hold: false,
                     target: VoiceTarget::Agent(id),
-                    interim: Some("partial".to_owned()),
+                    partial: Partial::Shown("partial".to_owned()),
+                    route: Some(xai_grok_voice::VoiceRoute::Streaming),
                 };
             }
             Owner::VoiceStopping => {
                 app.voice_state = VoiceState::Stopping {
                     target: VoiceTarget::Agent(id),
-                    interim: Some("partial".to_owned()),
+                    partial: Partial::Shown("partial".to_owned()),
+                    route: Some(xai_grok_voice::VoiceRoute::Streaming),
                 };
             }
             Owner::QuestionCard => {
@@ -899,9 +827,7 @@ fn feedback_modal_open_refuses_visibly_under_every_input_owner() {
                     Some(crate::app::agent_view::test_fixtures::make_plan_approval_view_state());
             }
         }
-
         let effects = dispatch(Action::OpenFeedbackModal(Default::default()), &mut app);
-
         assert!(effects.is_empty(), "{owner:?}: {effects:?}");
         let agent = agent_ref(&app, id);
         assert!(
@@ -937,7 +863,6 @@ fn feedback_modal_open_refuses_visibly_under_every_input_owner() {
         );
     }
 }
-
 /// The palette emits a default typed payload directly; the main composer draft stays byte-for-byte intact.
 #[test]
 fn feedback_modal_open_preserves_main_composer_draft() {
@@ -947,9 +872,7 @@ fn feedback_modal_open_preserves_main_composer_draft() {
         .unwrap()
         .prompt
         .set_text("keep this draft");
-
     open_feedback_modal(&mut app, None);
-
     let agent = &agent_ref(&app, AgentId(0));
     assert_eq!(
         agent.prompt.text(),
@@ -962,7 +885,6 @@ fn feedback_modal_open_preserves_main_composer_draft() {
         "the modal composer is independent of the main draft"
     );
 }
-
 /// A live screenshot is sufficient feedback even when the text is blank.
 #[test]
 fn feedback_modal_image_only_sends() {
@@ -980,9 +902,7 @@ fn feedback_modal_image_only_sends() {
         assert_eq!(modal.image_count(), 1, "the image still renders as a chip");
         modal.id()
     };
-
     let effects = dispatch(Action::SubmitFeedbackModal { modal_id }, &mut app);
-
     assert!(matches!(
         effects.as_slice(),
         [Effect::SendFeedback {
@@ -993,7 +913,6 @@ fn feedback_modal_image_only_sends() {
     ));
     assert!(agent_ref(&app, AgentId(0)).feedback_modal.is_none());
 }
-
 #[test]
 fn feedback_modal_rejected_image_only_submit_keeps_the_modal_and_attachment() {
     let mut app = test_app_with_agent();
@@ -1010,15 +929,12 @@ fn feedback_modal_rejected_image_only_submit_keeps_the_modal_and_attachment() {
         .as_ref()
         .unwrap()
         .id();
-
     let effects = dispatch(Action::SubmitFeedbackModal { modal_id }, &mut app);
-
     assert!(effects.is_empty());
     let modal = agent_ref(&app, AgentId(0)).feedback_modal.as_ref().unwrap();
     assert_eq!(modal.image_count(), 1);
     assert!(modal.text().contains("[Image #"));
 }
-
 /// Image chips stay in the composer buffer but must not ride the POST body.
 #[test]
 fn feedback_modal_submit_strips_image_chips_from_post_body() {
@@ -1037,9 +953,7 @@ fn feedback_modal_submit_strips_image_chips_from_post_body() {
         .as_ref()
         .unwrap()
         .id();
-
     let effects = dispatch(Action::SubmitFeedbackModal { modal_id }, &mut app);
-
     match effects.as_slice() {
         [Effect::SendFeedback { feedback_text, .. }] => {
             assert_eq!(feedback_text, "clipboard broke");
@@ -1048,22 +962,18 @@ fn feedback_modal_submit_strips_image_chips_from_post_body() {
         other => panic!("expected POST without image chips, got {other:?}"),
     }
 }
-
 /// Submit emits only the POST (no trace/upload effect), closes the modal at send time, and thanks
 /// immediately; a duplicate submit finds no modal, and a failed POST keeps the report as a draft
 /// (the closed modal held the only copy) and says so in the transcript.
 #[test]
 fn feedback_modal_submit_closes_immediately_and_failure_keeps_a_draft() {
     use crate::app::actions::FeedbackSendOrigin;
-
     let mut app = test_app_with_agent();
     let session_id = format!("feedback-write-failed-{}", uuid::Uuid::new_v4());
     let session_dir =
         plant_local_build_session(&test_agent(&app, AgentId(0)).session.cwd, &session_id);
     app.agents.get_mut(&AgentId(0)).unwrap().session.session_id = Some(session_id.into());
-    // The fixture advertises no shell offer, so this submit is the direct-send path.
     let modal_id = open_feedback_modal(&mut app, Some("clipboard broke"));
-
     let effects = dispatch(Action::SubmitFeedbackModal { modal_id }, &mut app);
     let origin = match effects.as_slice() {
         [
@@ -1096,7 +1006,6 @@ fn feedback_modal_submit_closes_immediately_and_failure_keeps_a_draft() {
         dispatch(Action::SubmitFeedbackModal { modal_id }, &mut app).is_empty(),
         "a duplicate submit after the close must be ignored"
     );
-
     let _ = dispatch(
         Action::TaskComplete(TaskResult::FeedbackFailed {
             agent_id: AgentId(0),
@@ -1109,7 +1018,6 @@ fn feedback_modal_submit_closes_immediately_and_failure_keeps_a_draft() {
     );
     let drafts = xai_grok_feedback::FeedbackDraftStore::new(&session_dir).list();
     let _ = std::fs::remove_dir_all(&session_dir);
-
     assert!(
         agent_ref(&app, AgentId(0)).feedback_modal.is_none(),
         "a failed POST must not resurrect the closed modal"
@@ -1124,15 +1032,12 @@ fn feedback_modal_submit_closes_immediately_and_failure_keeps_a_draft() {
     };
     assert_eq!("clipboard broke", draft.details);
 }
-
 /// Cycled enums are committed to the modal's stored metadata and ride the POST's metadata bag
 /// as the versioned `structured_feedback` envelope of wire values, never display labels.
 #[test]
 fn edited_enums_ride_the_send_feedback_metadata() {
     use crossterm::event::{KeyCode, KeyEvent, KeyModifiers};
-
     let mut app = test_app_with_agent();
-    // The fixture advertises no shell offer, so the submit emits the POST directly.
     let effects = dispatch(
         Action::OpenFeedbackModal(crate::views::feedback_modal::OpenFeedbackModal {
             text: Some("wrong file rewritten".to_owned()),
@@ -1157,14 +1062,11 @@ fn edited_enums_ride_the_send_feedback_metadata() {
         modal
             .render(&mut buffer, area, &crate::theme::Theme::current(), false)
             .expect("metadata rows should render");
-        // Tab focuses Type; Right cycles Bug to Idea.
         modal.handle_key(&KeyEvent::new(KeyCode::Tab, KeyModifiers::NONE));
         modal.handle_key(&KeyEvent::new(KeyCode::Right, KeyModifiers::NONE));
         modal.id()
     };
-
     let effects = dispatch(Action::SubmitFeedbackModal { modal_id }, &mut app);
-
     match effects.as_slice() {
         [
             Effect::SendFeedback {
@@ -1189,7 +1091,6 @@ fn edited_enums_ride_the_send_feedback_metadata() {
         other => panic!("expected the modal POST carrying metadata, got {other:?}"),
     }
 }
-
 #[test]
 fn drafts_with_optional_taxonomy_omitted_remain_sendable() {
     for (r#type, expected_metadata) in [
@@ -1252,9 +1153,7 @@ fn drafts_with_optional_taxonomy_omitted_remain_sendable() {
                     revision: 1,
                 },
             );
-
         let effects = dispatch(Action::SubmitFeedbackModal { modal_id }, &mut app);
-
         match effects.as_slice() {
             [
                 Effect::SendFeedback {
@@ -1275,12 +1174,10 @@ fn drafts_with_optional_taxonomy_omitted_remain_sendable() {
         }
     }
 }
-
 #[test]
 fn deferred_feedback_submit_stays_armed_while_the_agent_is_off_screen() {
     use crate::app::actions::{ClipboardPasteContext, ClipboardPasteSource, ClipboardPasteTarget};
     use crossterm::event::{KeyCode, KeyEvent, KeyModifiers};
-
     let mut app = test_app_with_agent();
     let modal_id = open_feedback_modal(&mut app, Some("include the screenshot"));
     let composition_id = app
@@ -1307,7 +1204,6 @@ fn deferred_feedback_submit_stays_armed_while_the_agent_is_off_screen() {
         crate::views::feedback_modal::FeedbackModalOutcome::Changed
     );
     app.active_view = crate::app::app_view::ActiveView::AgentDashboard;
-
     let effects = dispatch(
         Action::TaskComplete(TaskResult::ClipboardAttachmentProbed {
             ctx: ClipboardPasteContext {
@@ -1326,7 +1222,6 @@ fn deferred_feedback_submit_stays_armed_while_the_agent_is_off_screen() {
         }),
         &mut app,
     );
-
     assert!(effects.is_empty());
     let modal = test_agent_mut(&mut app, AgentId(0))
         .feedback_modal
@@ -1337,20 +1232,17 @@ fn deferred_feedback_submit_stays_armed_while_the_agent_is_off_screen() {
         "off-screen completion must preserve the deferred submit"
     );
 }
-
 /// A dropped or failed probe still inserts the caption the keypress read, as the composer does; only the image is withheld.
 #[test]
 fn dropped_or_failed_feedback_modal_probe_still_inserts_the_caption() {
     use crate::app::actions::{
         ClipboardPasteContext, ClipboardPasteSource, ClipboardPasteTarget, ProbedAttachment,
     };
-
     for image in [
         ProbedAttachment::ProbeDropped,
         ProbedAttachment::ProbeFailed,
     ] {
         let mut app = test_app_with_agent();
-        // Only the Write tab defers a probe on Ctrl-V.
         let modal_id = open_feedback_modal(&mut app, Some("the screenshot: "));
         let composition_id = app
             .agents
@@ -1364,7 +1256,6 @@ fn dropped_or_failed_feedback_modal_probe_still_inserts_the_caption() {
             })
             .unwrap();
         let label = format!("{image:?}");
-
         dispatch(
             Action::TaskComplete(TaskResult::ClipboardAttachmentProbed {
                 ctx: ClipboardPasteContext {
@@ -1385,18 +1276,15 @@ fn dropped_or_failed_feedback_modal_probe_still_inserts_the_caption() {
             }),
             &mut app,
         );
-
         let agent = app.agents.get(&AgentId(0)).unwrap();
         let modal = agent.feedback_modal.as_ref().unwrap();
         assert_eq!(modal.text(), "the screenshot: caption text", "{label}");
     }
 }
-
 /// The matching success is a pure no-op with no consent parked: no second thank-you, no upload.
 #[test]
 fn feedback_modal_success_completion_is_quiet_without_consent() {
     let mut app = test_app_with_agent();
-    // The fixture advertises no shell offer, so this submit sends directly.
     let modal_id = open_feedback_modal(&mut app, Some("it worked"));
     let effects = dispatch(Action::SubmitFeedbackModal { modal_id }, &mut app);
     let origin = match effects.as_slice() {
@@ -1409,7 +1297,6 @@ fn feedback_modal_success_completion_is_quiet_without_consent() {
     );
     assert!(last_system_text(&app, AgentId(0)).contains("Thanks for the feedback"));
     let scrollback_len = agent_ref(&app, AgentId(0)).scrollback.len();
-
     let effects = dispatch(
         Action::TaskComplete(TaskResult::FeedbackComplete {
             agent_id: AgentId(0),
@@ -1419,7 +1306,6 @@ fn feedback_modal_success_completion_is_quiet_without_consent() {
         }),
         &mut app,
     );
-
     assert!(effects.is_empty(), "no consent, no upload: {effects:?}");
     assert_eq!(
         agent_ref(&app, AgentId(0)).scrollback.len(),
@@ -1427,22 +1313,18 @@ fn feedback_modal_success_completion_is_quiet_without_consent() {
         "success must not thank a second time"
     );
 }
-
 /// A completion belonging to an earlier committed report cannot close or silently touch a later modal.
 #[test]
 fn stale_feedback_modal_completion_leaves_a_later_modal_alone() {
     let mut app = test_app_with_agent();
-    // The fixture advertises no shell offer, so submits send directly.
     let modal_id = open_feedback_modal(&mut app, Some("first report"));
     let effects = dispatch(Action::SubmitFeedbackModal { modal_id }, &mut app);
     let origin = match effects.as_slice() {
         [Effect::SendFeedback { origin, .. }] => *origin,
         other => panic!("expected the POST, got {other:?}"),
     };
-    // The first submit already closed its modal; a second one opened mid-flight.
     open_feedback_modal(&mut app, Some("second report"));
     let scrollback_len = agent_ref(&app, AgentId(0)).scrollback.len();
-
     let effects = dispatch(
         Action::TaskComplete(TaskResult::FeedbackComplete {
             agent_id: AgentId(0),
@@ -1458,7 +1340,6 @@ fn stale_feedback_modal_completion_leaves_a_later_modal_alone() {
         scrollback_len,
         "an unconsented success must not thank again or complain"
     );
-
     let _ = dispatch(
         Action::TaskComplete(TaskResult::FeedbackFailed {
             agent_id: AgentId(0),
@@ -1469,7 +1350,6 @@ fn stale_feedback_modal_completion_leaves_a_later_modal_alone() {
         }),
         &mut app,
     );
-
     let agent = &agent_ref(&app, AgentId(0));
     let modal = agent
         .feedback_modal
@@ -1481,13 +1361,11 @@ fn stale_feedback_modal_completion_leaves_a_later_modal_alone() {
         "the committed report's failure is surfaced in the transcript, not the later modal"
     );
 }
-
 /// A second open while feedback is already up refuses and leaves the first draft untouched.
 #[test]
 fn feedback_modal_open_refuses_while_one_is_open() {
     let mut app = test_app_with_agent();
     let first = open_feedback_modal(&mut app, Some("first draft"));
-
     let effects = dispatch(
         Action::OpenFeedbackModal(crate::views::feedback_modal::OpenFeedbackModal {
             text: Some("second".to_owned()),
@@ -1495,7 +1373,6 @@ fn feedback_modal_open_refuses_while_one_is_open() {
         }),
         &mut app,
     );
-
     assert!(effects.is_empty());
     let agent = &agent_ref(&app, AgentId(0));
     let modal = agent.feedback_modal.as_ref().unwrap();
@@ -1503,14 +1380,12 @@ fn feedback_modal_open_refuses_while_one_is_open() {
     assert_eq!(modal.text(), "first draft");
     assert!(agent.toast.is_some(), "the refusal must be visible");
 }
-
 /// The draft-update task result reaches the open modal with its outcome; the banner wording is the modal's contract.
 #[test]
 fn draft_update_completion_routes_its_outcome_to_the_open_modal() {
     use crate::views::feedback_modal::{
         FeedbackDraftRequest, FeedbackModalState, OpenFeedbackModal,
     };
-
     for (result, expected) in [
         (Ok(()), "was saved"),
         (Err("store unavailable".to_owned()), "could not be saved"),
@@ -1526,7 +1401,6 @@ fn draft_update_completion_routes_its_outcome_to_the_open_modal() {
             panic!("an unknown outcome on a draft queues its update");
         };
         app.agents.get_mut(&AgentId(0)).unwrap().feedback_modal = Some(modal);
-
         let _ = dispatch(
             Action::TaskComplete(TaskResult::FeedbackDraftUpdateComplete {
                 agent_id: AgentId(0),
@@ -1535,7 +1409,6 @@ fn draft_update_completion_routes_its_outcome_to_the_open_modal() {
             }),
             &mut app,
         );
-
         let banner = agent_ref(&app, AgentId(0))
             .feedback_modal
             .as_ref()
@@ -1547,7 +1420,6 @@ fn draft_update_completion_routes_its_outcome_to_the_open_modal() {
         );
     }
 }
-
 #[test]
 fn displaced_draft_send_outcome_is_reported_in_scrollback() {
     let mut app = test_app_with_agent();
@@ -1591,7 +1463,6 @@ fn displaced_draft_send_outcome_is_reported_in_scrollback() {
         args, &mut app
     ));
     assert!(agent_ref(&app, AgentId(0)).feedback_modal.is_none());
-
     let _ = dispatch(
         Action::TaskComplete(TaskResult::FeedbackComplete {
             agent_id: AgentId(0),
@@ -1601,10 +1472,8 @@ fn displaced_draft_send_outcome_is_reported_in_scrollback() {
         }),
         &mut app,
     );
-
     assert!(last_system_text(&app, AgentId(0)).contains("do not resend"));
 }
-
 /// A mandatory ACP question evicts the open modal via the production handler: the draft is dropped
 /// with a visible notice, the question installs, and the stashed main draft is untouched.
 #[test]
@@ -1616,11 +1485,9 @@ fn acp_question_displaces_feedback_modal_and_keeps_main_draft() {
         .prompt
         .set_text("main draft");
     open_feedback_modal(&mut app, Some("unsent report"));
-
     let (args, _rx) = make_ask_user_question_args("acp-question");
     let handled = crate::app::acp_handler::handle_ask_user_question(args, &mut app);
     assert!(handled);
-
     let agent = &agent_ref(&app, AgentId(0));
     assert!(
         agent.feedback_modal.is_none(),
@@ -1636,16 +1503,13 @@ fn acp_question_displaces_feedback_modal_and_keeps_main_draft() {
         "displacement must leave a visible notice"
     );
 }
-
 /// A permission request evicts the open modal through the production enqueue path.
 #[test]
 fn permission_ingress_displaces_feedback_modal() {
     use std::sync::Arc;
     use xai_acp_lib::AcpClientMessage;
-
     let mut app = test_app_with_agent();
     open_feedback_modal(&mut app, Some("unsent report"));
-
     let (tx, _rx) = tokio::sync::oneshot::channel();
     let request = acp::RequestPermissionRequest::new(
         acp::SessionId::new("test-session"),
@@ -1666,7 +1530,6 @@ fn permission_ingress_displaces_feedback_modal() {
         }),
         &mut app,
     );
-
     let agent = &agent_ref(&app, AgentId(0));
     assert!(agent.feedback_modal.is_none(), "permission evicts feedback");
     assert!(!agent.permission_queue.is_empty(), "permission installed");
@@ -1680,7 +1543,6 @@ fn permission_ingress_displaces_feedback_modal() {
             .contains("Feedback closed because a permission request needs an answer")
     );
 }
-
 /// The cancel-turn prompt evicts the open modal immediately before it installs.
 #[test]
 fn cancel_turn_prompt_displaces_feedback_modal() {
@@ -1694,9 +1556,7 @@ fn cancel_turn_prompt_displaces_feedback_modal() {
             .subagent_sessions
             .insert("child-1".into(), make_test_subagent("child-1", "sa-1"));
     }
-
     let effects = dispatch(Action::CancelTurn, &mut app);
-
     assert!(effects.is_empty());
     let agent = agent_ref(&app, id);
     assert!(agent.cancel_turn_view.is_some(), "cancel prompt installed");
@@ -1706,15 +1566,12 @@ fn cancel_turn_prompt_displaces_feedback_modal() {
     );
     assert!(last_system_text(&app, id).contains("Feedback closed"));
 }
-
 /// A plan approval evicts the open modal through the production ext-method handler.
 #[test]
 fn plan_approval_ingress_displaces_feedback_modal() {
     use xai_acp_lib::AcpClientMessage;
-
     let mut app = test_app_with_agent();
     open_feedback_modal(&mut app, Some("unsent report"));
-
     let (tx, _rx) = tokio::sync::oneshot::channel();
     let ext_req = crate::views::plan_approval_view::ExitPlanModeExtRequest {
         session_id: "test-session".into(),
@@ -1729,7 +1586,6 @@ fn plan_approval_ingress_displaces_feedback_modal() {
         }),
         &mut app,
     );
-
     let agent = &agent_ref(&app, AgentId(0));
     assert!(
         agent.feedback_modal.is_none(),
@@ -1738,16 +1594,13 @@ fn plan_approval_ingress_displaces_feedback_modal() {
     assert!(agent.plan_approval_view.is_some(), "approval installed");
     assert!(last_system_text(&app, AgentId(0)).contains("Feedback closed"));
 }
-
 /// An MCP elicitation evicts the open modal through the production ext-method handler:
 /// it is a `BlockingCard` the modal intercept would otherwise key-starve.
 #[test]
 fn mcp_elicitation_ingress_displaces_feedback_modal() {
     use xai_acp_lib::AcpClientMessage;
-
     let mut app = test_app_with_agent();
     open_feedback_modal(&mut app, Some("unsent report"));
-
     let (tx, _rx) = tokio::sync::oneshot::channel();
     let raw = serde_json::value::to_raw_value(&serde_json::json!({
         "sessionId": "test-session",
@@ -1764,7 +1617,6 @@ fn mcp_elicitation_ingress_displaces_feedback_modal() {
         }),
         &mut app,
     );
-
     let agent = &agent_ref(&app, AgentId(0));
     assert!(
         agent.feedback_modal.is_none(),
@@ -1773,7 +1625,6 @@ fn mcp_elicitation_ingress_displaces_feedback_modal() {
     assert!(agent.elicitation_view.is_some(), "elicitation installed");
     assert!(last_system_text(&app, AgentId(0)).contains("Feedback closed"));
 }
-
 /// Confirm a trace choice through the production key layer, then dispatch the resulting submit.
 fn confirm_trace_choice(
     app: &mut AppView,
@@ -1783,7 +1634,6 @@ fn confirm_trace_choice(
         FeedbackModalOutcome, FeedbackTraceChoice as ModalTraceChoice,
     };
     use crossterm::event::{KeyCode, KeyEvent, KeyModifiers};
-
     let digit = match choice {
         ModalTraceChoice::SendThisSession => '1',
         ModalTraceChoice::FeedbackOnly => '2',
@@ -1805,10 +1655,8 @@ fn confirm_trace_choice(
     let modal_id = modal.id();
     dispatch(Action::SubmitFeedbackModal { modal_id }, app)
 }
-
 fn expect_single_modal_post(effects: &[Effect]) -> crate::app::actions::FeedbackSendOrigin {
     match effects {
-        // Exactly one effect: the POST may never bring the upload (or any persistence) along.
         [
             Effect::SendFeedback {
                 origin: origin @ crate::app::actions::FeedbackSendOrigin::Modal { .. },
@@ -1818,7 +1666,6 @@ fn expect_single_modal_post(effects: &[Effect]) -> crate::app::actions::Feedback
         other => panic!("expected only the modal-origin POST, got {other:?}"),
     }
 }
-
 /// Open, submit into the trace step, and confirm `SendThisSession`; returns the POST's origin.
 /// The empty first-submit effects prove the offer asks in-modal instead of sending, and the
 /// single-effect confirm proves POST and upload are never sibling effects.
@@ -1827,7 +1674,6 @@ fn park_send_this_session(
     text: &str,
 ) -> crate::app::actions::FeedbackSendOrigin {
     use crate::views::feedback_modal::FeedbackTraceChoice as ModalTraceChoice;
-
     app.shell_feedback_trace_offer = true;
     let modal_id = open_feedback_modal(app, Some(text));
     let effects = dispatch(Action::SubmitFeedbackModal { modal_id }, app);
@@ -1838,10 +1684,8 @@ fn park_send_this_session(
     let effects = confirm_trace_choice(app, ModalTraceChoice::SendThisSession);
     expect_single_modal_post(&effects)
 }
-
 /// One labelled arrangement of the app before a modal submit.
 type Arrange = (&'static str, fn(&mut AppView));
-
 /// The trace step needs the shell-advertised offer and none of its suppressors: ZDR, retention
 /// opt-out (this path does not re-enable sharing), or the session NeverAsk latch. Otherwise a
 /// validated Write submit sends directly.
@@ -1866,9 +1710,7 @@ fn write_submit_sends_directly_unless_the_trace_offer_applies() {
         let mut app = test_app_with_agent();
         arrange(&mut app);
         let modal_id = open_feedback_modal(&mut app, Some("direct send"));
-
         let effects = dispatch(Action::SubmitFeedbackModal { modal_id }, &mut app);
-
         assert!(
             matches!(effects.as_slice(), [Effect::SendFeedback { .. }]),
             "{label}: {effects:?}"
@@ -1879,13 +1721,11 @@ fn write_submit_sends_directly_unless_the_trace_offer_applies() {
         );
     }
 }
-
 /// With the offer on, a validated Write submit swaps to the in-modal trace step; POST and upload
 /// are never sibling effects, and only the matching success emits exactly one typed upload.
 #[test]
 fn trace_offer_sequences_post_then_exactly_one_upload() {
     use crate::views::feedback_modal::FeedbackTraceUploadIntent;
-
     let mut app = test_app_with_agent();
     let origin = park_send_this_session(&mut app, "send with trace");
     let crate::app::actions::FeedbackSendOrigin::Modal { submission_id, .. } = origin else {
@@ -1901,10 +1741,8 @@ fn trace_offer_sequences_post_then_exactly_one_upload() {
         .session_id
         .clone()
         .expect("the POST session must exist");
-    // A reconnect while the POST is in flight must not retarget the one-shot archive.
     app.agents.get_mut(&AgentId(0)).unwrap().session.session_id =
         Some(agent_client_protocol::SessionId::new("replaced-session"));
-
     let effects = dispatch(
         Action::TaskComplete(TaskResult::FeedbackComplete {
             agent_id: AgentId(0),
@@ -1935,11 +1773,9 @@ fn trace_offer_sequences_post_then_exactly_one_upload() {
         other => panic!("success must emit exactly one upload, got {other:?}"),
     }
 }
-
 #[test]
 fn terminal_feedback_outcomes_take_parked_consent_and_upload_only_remote_successes() {
     use crate::views::feedback_modal::FeedbackTraceUploadIntent;
-
     for (outcome, should_upload) in [
         (
             xai_grok_shell::session::FeedbackOutcome::SubmittedCleanupFailed,
@@ -1956,7 +1792,6 @@ fn terminal_feedback_outcomes_take_parked_consent_and_upload_only_remote_success
         let crate::app::actions::FeedbackSendOrigin::Modal { submission_id, .. } = origin else {
             unreachable!()
         };
-
         let effects = dispatch(
             Action::TaskComplete(TaskResult::FeedbackComplete {
                 agent_id: AgentId(0),
@@ -1966,7 +1801,6 @@ fn terminal_feedback_outcomes_take_parked_consent_and_upload_only_remote_success
             }),
             &mut app,
         );
-
         if should_upload {
             assert!(matches!(
                 effects.as_slice(),
@@ -1990,14 +1824,12 @@ fn terminal_feedback_outcomes_take_parked_consent_and_upload_only_remote_success
         );
     }
 }
-
 #[test]
 fn ninth_trace_submit_is_rejected_without_revoking_confirmed_consent() {
     let mut app = test_app_with_agent();
     let origins: Vec<_> = (0..8)
         .map(|index| park_send_this_session(&mut app, &format!("report {index}")))
         .collect();
-
     app.shell_feedback_trace_offer = true;
     let modal_id = open_feedback_modal(&mut app, Some("ninth report"));
     assert!(dispatch(Action::SubmitFeedbackModal { modal_id }, &mut app).is_empty());
@@ -2016,7 +1848,6 @@ fn ninth_trace_submit_is_rejected_without_revoking_confirmed_consent() {
             .len(),
         origins.len()
     );
-
     let Some(&origin) = origins.first() else {
         panic!("expected a parked origin");
     };
@@ -2055,7 +1886,6 @@ fn ninth_trace_submit_is_rejected_without_revoking_confirmed_consent() {
     );
     assert!(matches!(effects.as_slice(), [Effect::SendFeedback { .. }]));
 }
-
 /// A successful POST with no upload token must not pop the parked one-shot.
 /// A later completion that does carry a token can still start the upload.
 #[test]
@@ -2068,7 +1898,6 @@ fn feedback_complete_without_token_keeps_parked_consent() {
             .len(),
         1
     );
-
     let effects = dispatch(
         Action::TaskComplete(TaskResult::FeedbackComplete {
             agent_id: AgentId(0),
@@ -2086,7 +1915,6 @@ fn feedback_complete_without_token_keeps_parked_consent() {
         1,
         "consent stays parked until an upload actually starts"
     );
-
     let effects = dispatch(
         Action::TaskComplete(TaskResult::FeedbackComplete {
             agent_id: AgentId(0),
@@ -2106,7 +1934,6 @@ fn feedback_complete_without_token_keeps_parked_consent() {
             .is_empty()
     );
 }
-
 /// A failed POST yields zero uploads and drops the parked consent; a stale success arriving
 /// after the failure cannot resurrect the upload.
 #[test]
@@ -2117,7 +1944,6 @@ fn trace_post_failure_yields_zero_uploads() {
         agent_ref(&app, AgentId(0)).feedback_modal.is_none(),
         "the committed trace choice closes the modal at send time"
     );
-
     let effects = dispatch(
         Action::TaskComplete(TaskResult::FeedbackFailed {
             agent_id: AgentId(0),
@@ -2134,7 +1960,6 @@ fn trace_post_failure_yields_zero_uploads() {
         "the failure surfaces in the transcript, not a resurrected modal"
     );
     assert!(last_system_text(&app, AgentId(0)).contains("Couldn't send feedback"));
-
     let effects = dispatch(
         Action::TaskComplete(TaskResult::FeedbackComplete {
             agent_id: AgentId(0),
@@ -2149,19 +1974,16 @@ fn trace_post_failure_yields_zero_uploads() {
         "a stale success cannot upload: {effects:?}"
     );
 }
-
 /// A mandatory question arriving after the committed send cannot revoke the parked consent:
 /// the report already went out, and the upload still follows only the matching successful POST.
 #[test]
 fn mid_flight_question_does_not_drop_committed_trace_consent() {
     let mut app = test_app_with_agent();
     let origin = park_send_this_session(&mut app, "committed");
-
     let (args, _rx) = make_ask_user_question_args("mid-flight-question");
     assert!(crate::app::acp_handler::handle_ask_user_question(
         args, &mut app
     ));
-
     let effects = dispatch(
         Action::TaskComplete(TaskResult::FeedbackComplete {
             agent_id: AgentId(0),
@@ -2176,13 +1998,11 @@ fn mid_flight_question_does_not_drop_committed_trace_consent() {
         "the committed consent still uploads exactly once: {effects:?}"
     );
 }
-
 /// FeedbackOnly sends the report alone; NeverAsk additionally persists only the card latch.
 /// No modal path may ever write `[telemetry] trace_upload = true`.
 #[test]
 fn feedback_only_and_never_ask_upload_nothing_and_never_persist_trace_upload() {
     use crate::views::feedback_modal::FeedbackTraceChoice as ModalTraceChoice;
-
     let mut app = test_app_with_agent();
     app.shell_feedback_trace_offer = true;
     let modal_id = open_feedback_modal(&mut app, Some("no trace"));
@@ -2200,8 +2020,6 @@ fn feedback_only_and_never_ask_upload_nothing_and_never_persist_trace_upload() {
     );
     assert!(effects.is_empty(), "no consent, no upload: {effects:?}");
     assert!(agent_ref(&app, AgentId(0)).feedback_modal.is_none());
-
-    // Same app: the FeedbackOnly answer must not have latched the offer away.
     let modal_id = open_feedback_modal(&mut app, Some("never ask"));
     let _ = dispatch(Action::SubmitFeedbackModal { modal_id }, &mut app);
     let effects = confirm_trace_choice(&mut app, ModalTraceChoice::NeverAsk);
@@ -2231,7 +2049,6 @@ fn feedback_only_and_never_ask_upload_nothing_and_never_persist_trace_upload() {
         "the answer latches re-offers off for this session"
     );
 }
-
 /// A trace completion acts only on its registered pending submission, exactly once; a replay is a
 /// no-op and can never warn against (or otherwise touch) a later modal.
 #[test]
@@ -2254,9 +2071,7 @@ fn stale_trace_completion_cannot_touch_a_later_modal() {
         matches!(effects.as_slice(), [Effect::UploadFeedbackTrace { .. }]),
         "{effects:?}"
     );
-
     open_feedback_modal(&mut app, Some("second report"));
-
     let effects = dispatch(
         Action::TaskComplete(TaskResult::FeedbackTraceUploaded {
             agent_id: AgentId(0),
@@ -2270,7 +2085,6 @@ fn stale_trace_completion_cannot_touch_a_later_modal() {
         last_system_text(&app, AgentId(0)).contains("feedback was still sent"),
         "the matching pending completion warns once"
     );
-
     let scrollback_len = agent_ref(&app, AgentId(0)).scrollback.len();
     let _ = dispatch(
         Action::TaskComplete(TaskResult::FeedbackTraceUploaded {
@@ -2292,7 +2106,6 @@ fn stale_trace_completion_cannot_touch_a_later_modal() {
         "the later modal is untouched"
     );
 }
-
 fn composer_image() -> crate::prompt_images::PastedImage {
     crate::prompt_images::PastedImage {
         element_id: xai_ratatui_textarea::ElementId::from_raw(0),
@@ -2324,7 +2137,6 @@ fn btw_submit_sends_composer_images() {
     }
     let text = test_agent(&app, id).prompt.text().to_string();
     let effects = dispatch(Action::SendPrompt(text.clone()), &mut app);
-
     let images = effects.iter().find_map(|effect| match effect {
         Effect::SendBtw {
             images, question, ..
@@ -2370,7 +2182,6 @@ fn btw_submit_sends_composer_images() {
         "composer images are consumed by the side question"
     );
 }
-
 /// A plain `[Image #1]` with no record behind it rides the side question as text; the send goes out
 /// and the toast says the image is not attached, as it does for a queued prompt.
 #[test]
@@ -2382,12 +2193,10 @@ fn btw_with_unbound_placeholder_sends_and_toasts() {
         .unwrap()
         .prompt
         .set_text("/btw what is [Image #1]");
-
     let effects = dispatch(
         Action::SendPrompt("/btw what is [Image #1]".into()),
         &mut app,
     );
-
     assert!(
         matches!(
             effects.as_slice(),

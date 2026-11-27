@@ -36,9 +36,7 @@ pub(super) fn handle_models_update(notif: &acp::ExtNotification, app: &mut AppVi
                 .models
                 .update_catalog(new_models.available.clone());
             // A config edit can change the window. The bar must show it now, not after the next turn.
-            if let Some(used) = agent.context_state.as_ref().map(|c| c.used) {
-                super::session_notification::refresh_context_used(agent, used);
-            }
+            agent.refresh_context_total();
         }
         true
     } else {
@@ -65,11 +63,11 @@ pub(super) fn handle_settings_update(notif: &acp::ExtNotification, app: &mut App
         xai_grok_shell::util::config::set_remote_campaigns_from_settings(Some(&rs));
         // The settings row read its campaign layer at startup; the same re-read the shell does on `/new` keeps its value and lock current
         match xai_grok_shell::config::load_effective_config_with_layers() {
-            Ok((layers, _)) => {
-                app.subagent_model_inheritance.reseed_config_layers(&layers);
-                app.two_pass_compaction.reseed_config_layers(&layers);
-                app.compact_on_model_switch.reseed_config_layers(&layers);
-                app.session_recap.reseed_config_layers(&layers);
+            Ok(loaded) => {
+                app.subagent_model_inheritance.reseed_config_layers(&loaded);
+                app.two_pass_compaction.reseed_config_layers(&loaded);
+                app.compact_on_model_switch.reseed_config_layers(&loaded);
+                app.session_recap.reseed_config_layers(&loaded);
                 crate::app::dispatch::refresh_open_settings_modals(app);
             }
             Err(e) => {

@@ -240,11 +240,10 @@ fn init_tracing_simple(app_entrypoint: &'static str) {
         ),
     );
 }
-/// `grok setup`: rendering and exit codes only; fetch logic lives in `xai_grok_shell::managed_config`.
-/// `json` prints the served configuration instead of installing it.
+/// `json` prints the managed configuration without installing it.
 #[tracing::instrument(level = "debug", skip_all)]
 async fn run_setup_command(json: bool) {
-    use xai_grok_shell::managed_config::{self, SetupOutcome};
+    use xai_grok_cloud_config::managed_config::{self, SetupOutcome};
     if !managed_config::has_principal() {
         eprintln!("No team sign-in found.");
         eprintln!();
@@ -1950,7 +1949,8 @@ async fn async_main(mut args: PagerArgs) -> Result<()> {
                     agent_cfg.grok_com_config.auth_provider_command.clone(),
                     None,
                 );
-                xai_grok_shell::managed_config::ensure_managed_policy_present(&auth_manager).await;
+                xai_grok_cloud_config::managed_config::ensure_managed_policy_present(&auth_manager)
+                    .await;
             }
             Err(e) => {
                 tracing::warn!(

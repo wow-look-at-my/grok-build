@@ -9,6 +9,7 @@ use super::super::*;
 use super::{
     AutoCompactTriggerInfo, COMPACT_FAILURE_DETAIL_LIMIT, SuppressReason, compose_compact_failure,
 };
+use crate::session::SwitchContextWindow;
 use crate::session::acp_session::McpReminderMode;
 use crate::terminal::AsyncTerminalRunner;
 use crate::terminal::runner::{TerminalError, TerminalRunRequest, TerminalRunResult};
@@ -121,22 +122,7 @@ async fn create_test_actor(
         rewind_pending_prompt: std::sync::Mutex::new(None),
         startup_hints: StartupHints::default(),
         forked_tool_override: None,
-        compaction: crate::session::compaction_config::CompactionConfig {
-            threshold_percent: std::cell::Cell::new(threshold_percent),
-            force_compact: std::sync::Arc::new(std::sync::atomic::AtomicBool::new(false)),
-            context_window_override: None,
-            count: std::sync::atomic::AtomicU64::new(0),
-            auto_compact_suppressed: std::sync::atomic::AtomicU8::new(0),
-            previous_model: std::cell::Cell::new(None),
-            compaction_mode: xai_chat_state::CompactionMode::Transcript,
-            verbatim_input: true,
-            tool_choice: crate::util::config::CompactionToolChoice::Auto,
-            prefire: crate::session::compaction_config::PrefireState::default(),
-            prefix_released: std::sync::atomic::AtomicBool::new(false),
-            cancel: Default::default(),
-            pending_manual_compact: std::cell::Cell::new(None),
-            context_overflow_recovery: Default::default(),
-        },
+        compaction: test_compaction_config(threshold_percent),
         long_reasoning_reminder: crate::session::long_reasoning_reminder::LongReasoningReminder {
             enabled: false,
             tokens: crate::session::long_reasoning_reminder::DEFAULT_TOKENS,
@@ -394,6 +380,62 @@ async fn suppression_gates_and_reset_is_reason_scoped() {
                 .auto_compact_suppressed
                 .store(SUPPRESS_NONE, Relaxed);
             assert!(actor.check_auto_compact_needed().await.is_some());
+        })
+        .await;
+}
+#[tokio::test(flavor = "current_thread")]
+async fn schema_rejection_suppresses_auto_compaction_for_one_turn() {
+    use crate::session::compaction_config::{SUPPRESS_NONE, SUPPRESS_TURN};
+    let local = tokio::task::LocalSet::new();
+    local
+        .run_until(async {
+            let (gateway_tx, _gateway_rx) = mpsc::unbounded_channel();
+            let (persistence_tx, _persistence_rx) = mpsc::unbounded_channel();
+            let actor = create_test_actor(
+                    214_000,
+                    200_000,
+                    85,
+                    gateway_tx,
+                    persistence_tx,
+                )
+                .await;
+            let schema = r#"{"error":{"message":"the summary request does not match the schema","type":"invalid_request_error"}}"#;
+            assert_eq!(
+                SessionActor::classify_suppress_reason(schema),
+                SuppressReason::Schema
+            );
+            assert_eq!(
+                SessionActor::classify_suppress_reason("mock upstream failure 400"),
+                SuppressReason::Other
+            );
+            actor
+                .suppress_auto_compaction(SuppressReason::Schema, "", 1_000, 200_000)
+                .await;
+            assert_eq!(
+                actor.compaction.auto_compact_suppressed.load(Relaxed),
+                SUPPRESS_TURN
+            );
+            assert!(actor.check_auto_compact_needed().await.is_none());
+            let _ = actor
+                .compaction
+                .auto_compact_suppressed
+                .compare_exchange(SUPPRESS_TURN, SUPPRESS_NONE, Relaxed, Relaxed);
+            assert!(
+                actor.check_auto_compact_needed().await.is_some(),
+                "the next turn sends a different request, so it may compact again"
+            );
+            actor.compaction.auto_compact_suppressed.store(SUPPRESS_NONE, Relaxed);
+            actor
+                .suppress_auto_compaction(SuppressReason::Other, "", 1_000, 200_000)
+                .await;
+            let _ = actor
+                .compaction
+                .auto_compact_suppressed
+                .compare_exchange(SUPPRESS_TURN, SUPPRESS_NONE, Relaxed, Relaxed);
+            assert!(
+                actor.check_auto_compact_needed().await.is_some(),
+                "a plain summary failure must let the next turn compact"
+            );
         })
         .await;
 }
@@ -916,6 +958,8 @@ async fn family_switch_compacts_lossy_with_new_model() {
                     skip_prompt_rewrite: true,
                     auto_compact_threshold_percent: 85,
                     system_prompt_label: xai_grok_agent::DEFAULT_SYSTEM_PROMPT_LABEL.to_owned(),
+                    context_window_selection: SwitchContextWindow::Set(None),
+                    supported_context_windows: Vec::new(),
                 })
                 .await
                 .expect("compact failure is log-only; the switch must succeed");

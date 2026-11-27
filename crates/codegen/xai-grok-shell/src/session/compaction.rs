@@ -1883,8 +1883,12 @@ impl SessionActor {
         };
         let v2_memory_context = if self.memory.can_expose_v2() {
             if let Some(storage) = self.memory.storage() {
+                let compact_index = self.memory.v2_config.compact_index_enabled;
                 match xai_spawn::spawn_blocking(move || {
-                    crate::session::helpers::memory_context::format_v2_memory_context(&storage)
+                    crate::session::helpers::memory_context::format_v2_memory_context(
+                        &storage,
+                        compact_index,
+                    )
                 })
                 .await
                 {
@@ -1904,6 +1908,7 @@ impl SessionActor {
                                 ),
                                 global_entry_count: context.global_entry_count,
                                 workspace_entry_count: context.workspace_entry_count,
+                                compact_index,
                                 ..Default::default()
                             },
                         );
@@ -1918,7 +1923,10 @@ impl SessionActor {
                         crate::session::memory_observation::log_memory_injection(
                             self.session_info.id.to_string(),
                             xai_grok_telemetry::memory_telemetry::MemoryInjectionOutcome::Error,
-                            Default::default(),
+                            crate::session::memory_observation::MemoryInjectionMetrics {
+                                compact_index,
+                                ..Default::default()
+                            },
                         );
                         None
                     }
@@ -1931,7 +1939,10 @@ impl SessionActor {
                         crate::session::memory_observation::log_memory_injection(
                             self.session_info.id.to_string(),
                             xai_grok_telemetry::memory_telemetry::MemoryInjectionOutcome::Error,
-                            Default::default(),
+                            crate::session::memory_observation::MemoryInjectionMetrics {
+                                compact_index,
+                                ..Default::default()
+                            },
                         );
                         None
                     }

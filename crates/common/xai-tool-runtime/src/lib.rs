@@ -17,6 +17,7 @@
 pub mod context;
 pub mod dispatch;
 pub mod error;
+pub mod mcp_structured_content;
 pub mod notification;
 pub mod render;
 pub mod search;
@@ -29,6 +30,7 @@ pub use context::{
 };
 pub use dispatch::ToolDispatch;
 pub use error::{ToolError, ToolErrorKind};
+pub use mcp_structured_content::render_structured_content;
 pub use notification::{
     BashExecutionBackgrounded, BashExecutionComplete, BashExecutionFailed, BashExecutionTimeout,
     BashNotificationBase, BashOutputChunk, FileRead, FileWritten, LspServerCrashed,

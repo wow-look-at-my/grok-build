@@ -283,6 +283,7 @@ async fn thinking_only_reply_after_a_background_start_is_asked_again() {
             THOUGHT,
             "",
             "test-model",
+            None,
         )),
     );
     let _wait = content.expect_agent_turn("wait message", WAIT_MESSAGE);

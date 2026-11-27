@@ -1,4 +1,5 @@
 use super::*;
+use xai_grok_test_support::acp_fixtures::text_block;
 use xai_grok_tools::implementations::skills::types::SkillScope;
 
 /// Shadows [`super::resolve_human_intent`] for the cases that route something other than `/loop`.
@@ -119,10 +120,6 @@ fn product_skills_cache_after_untagged_recovery_keeps_primary_tenant() {
 
 fn all_gated() -> CommandAvailability {
     CommandAvailability::all_enabled()
-}
-
-fn text_block(s: &str) -> acp::ContentBlock {
-    acp::ContentBlock::Text(acp::TextContent::new(s.to_string()))
 }
 
 fn make_skill(name: &str, user_invocable: bool) -> SkillInfo {

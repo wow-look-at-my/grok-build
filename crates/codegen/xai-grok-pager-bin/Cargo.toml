@@ -1,6 +1,6 @@
 [package]
 name = "xai-grok-pager-bin"
-version = "1.0.41"
+version = "1.0.45"
 edition.workspace = true
 license = "Apache-2.0"
 authors = ["xAI"]
@@ -14,12 +14,13 @@ path = "src/main.rs"
 
 [dependencies]
 # The pager library (all application logic + the public API main.rs drives).
-xai-grok-pager = { path = "../xai-grok-pager" }
+xai-grok-pager = { path = "../xai-grok-pager", default-features = false }
 
 # Agent runtime + leader/stdio/headless entry points.
+xai-grok-cloud-config = { workspace = true }
 xai-grok-login = { workspace = true }
 xai-grok-pdf = { workspace = true }
-xai-grok-shell = { workspace = true }
+xai-grok-shell = { path = "../xai-grok-shell", default-features = false }
 xai-grok-version = { workspace = true }
 xai-grok-telemetry = { workspace = true }
 xai-grok-workspace = { workspace = true }
@@ -59,12 +60,20 @@ clap = { workspace = true, features = ["derive"] }
 
 [features]
 default = [
+    "stock",
     "sandbox-enforce",
     ]
 default-bazel = [
+    "stock",
     "sandbox-enforce",
     "local-workspace",
     ]
+# The defaults of the crates this binary builds on. `default` and `release-dist` turn them on; a
+# `--no-default-features` build that wants them names this feature.
+stock = [
+    "xai-grok-pager/default",
+    "xai-grok-shell/default",
+]
 # xai-grok-workspace no longer enables sandbox-enforce by default, so enable it here.
 sandbox-enforce = ["xai-grok-pager/sandbox-enforce", "xai-grok-workspace/sandbox-enforce"]
 local-workspace = ["xai-grok-pager/local-workspace"]
@@ -74,5 +83,6 @@ local-workspace = ["xai-grok-pager/local-workspace"]
 # `-c opt`/release builds). Never add this to a shipped feature set.
 test-seams = []
 release-dist = [
+    "stock",
     "xai-grok-pager/release-dist",
     ]

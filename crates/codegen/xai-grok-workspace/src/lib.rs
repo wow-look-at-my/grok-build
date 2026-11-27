@@ -27,10 +27,11 @@ pub mod export_github;
 pub mod file_system;
 pub mod folder_trust;
 pub mod fs_notify;
-pub(crate) mod git_content_filters;
+pub(crate) use xai_grok_permission_rules::git_content_filters;
 pub(crate) mod git_odb;
 pub mod git_repo;
 pub mod handle;
+pub mod hook_inputs;
 pub mod host_kind;
 pub mod hub;
 pub mod hub_auth;
@@ -42,20 +43,24 @@ pub mod mcp;
 pub(crate) mod mcp_claim;
 pub(crate) mod path_virtualization;
 pub mod permission;
-pub mod project_config;
+pub mod plugins;
+pub use xai_grok_permission_rules::project_config;
 pub mod publish;
 pub mod recovery;
 mod restore_fetch;
 pub mod scheduler_liveness;
 pub use restore_fetch::{EnsureCommitsOutcome, ensure_commits_reachable};
 pub use session::git::git_object_exists;
+pub(crate) mod bind_env;
 pub mod rpc_envelope;
+pub mod sandbox;
+pub mod sandbox_mode;
 pub mod session;
 pub mod status_config;
 pub(crate) mod telemetry;
-#[cfg(test)]
-pub(crate) mod test_git;
 pub use status_config::{ProactiveRefreshConfig, StatusConfig};
+#[cfg(test)]
+pub(crate) use xai_test_utils::test_git;
 pub mod trust;
 pub(crate) mod upload;
 pub mod util;
@@ -95,6 +100,7 @@ pub fn init_metrics() {
     session::swap_policy::init_metrics();
     upload::init_metrics();
     permission::init_metrics();
+    sandbox::metrics::init_metrics();
     hub_server::init_metrics();
     hub_auth::init_metrics();
 }

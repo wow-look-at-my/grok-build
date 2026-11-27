@@ -1793,8 +1793,10 @@ impl AgentView {
             {
                 // Arg picker: ModalWindow chrome and picker content
                 let title = match command.as_str() {
-                    "model" | "m" if !args_query.is_empty() => "Pick reasoning effort",
-                    "model" | "m" => "Pick model",
+                    "model" | "m" => crate::slash::commands::model::picker_title(
+                        &self.session.models,
+                        args_query,
+                    ),
                     "theme" | "t" => "Pick theme",
                     _ => "Pick option",
                 };

@@ -6,10 +6,6 @@ use schemars::JsonSchema;
 use serde::{Deserialize, Serialize};
 use xai_grok_shared::ui_config::UiConfig;
 
-// ============================================================================
-// Runtime Config (used by render code)
-// ============================================================================
-
 /// Background style for block content area.
 #[derive(Debug, Clone, Copy, Default, PartialEq, Eq, Hash)]
 pub enum BlockBackground {
@@ -1191,10 +1187,6 @@ impl From<RawBlockBackground> for BlockBackground {
     }
 }
 
-// ============================================================================
-// Raw → Runtime Conversion
-// ============================================================================
-
 impl From<RawAppearanceConfig> for AppearanceConfig {
     fn from(raw: RawAppearanceConfig) -> Self {
         Self {
@@ -1433,10 +1425,6 @@ impl From<RawThinkingConfig> for ThinkingConfig {
         }
     }
 }
-
-// ============================================================================
-// Color Parsing
-// ============================================================================
 
 /// An optional color that can be "none" or a color value.
 /// The string "none" is the explicit unset value.
@@ -1704,10 +1692,6 @@ fn lookup_named_color(name: &str) -> Result<Color, String> {
     Ok(color)
 }
 
-// ============================================================================
-// pager.json
-// ============================================================================
-
 /// Parse the text of the appearance file at `path`. A `.json` path is JSON,
 /// where a `null` member is unset. Any other path is the TOML.
 pub fn parse_appearance_config(
@@ -1813,13 +1797,40 @@ fn set_json_member(
     Ok(())
 }
 
-// ============================================================================
-// Tests
-// ============================================================================
-
 #[cfg(test)]
 mod tests {
     use super::*;
+
+    /// The `/settings` toggle on a dotfile-managed `~/.grok/pager.json` must reach the dotfile, not replace the link.
+    #[cfg(unix)]
+    #[test]
+    fn persist_respect_manual_folds_writes_through_symlink() {
+        let dir = tempfile::tempdir().unwrap();
+        let target = dir.path().join("dotfiles").join("pager.json");
+        std::fs::create_dir_all(target.parent().unwrap()).unwrap();
+        std::fs::write(
+            &target,
+            r#"{"scrollback": {"scroll": {"anchor_on_fold": false}}}"#,
+        )
+        .unwrap();
+        let link = dir.path().join("pager.json");
+        std::os::unix::fs::symlink(&target, &link).unwrap();
+
+        persist_respect_manual_folds_in(dir.path(), true).unwrap();
+
+        assert!(
+            std::fs::symlink_metadata(&link)
+                .unwrap()
+                .file_type()
+                .is_symlink(),
+            "pager.json must stay a symlink"
+        );
+        let raw =
+            parse_appearance_config(&target, &std::fs::read_to_string(&target).unwrap()).unwrap();
+        let cfg: AppearanceConfig = raw.into();
+        assert!(cfg.scrollback.scroll.respect_manual_folds);
+        assert!(!cfg.scrollback.scroll.anchor_on_fold, "siblings preserved");
+    }
 
     #[test]
     fn test_parse_hex_color() {
@@ -2100,8 +2111,6 @@ mod tests {
             "explicit no-diffstat beats the flag"
         );
     }
-
-    // ── Terminal config (alt_screen) parsing ─────────────────────
 
     #[test]
     fn terminal_alt_screen_auto_default() {

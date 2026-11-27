@@ -69,6 +69,7 @@ pub struct ModelProviderConfig {
     /// Extra top-level fields merged into every request body this provider serves.
     #[schemars(with = "IndexMap<String, serde_json::Value>")]
     pub extra_body: IndexMap<String, toml::Value>,
+    pub context_windows: Option<Vec<NonZeroU64>>,
     /// Request-body cap of this endpoint; inherited by models that set none of their own.
     pub max_request_bytes: Option<NonZeroU64>,
     /// The proxies between this client and the provider, client side first.
@@ -396,6 +397,7 @@ impl ConfigModelOverride {
             context_window_source: _,
             pricing_lookup_enabled: _,
             extra_body,
+            context_windows,
             max_request_bytes,
             // The chain is applied where a request is sent, so a model keeps the provider's own URL.
             hops: _,
@@ -413,7 +415,6 @@ impl ConfigModelOverride {
             merged.api_base_url = None;
         }
         merged.api_backend = merged.api_backend.or_else(|| api_backend.clone());
-        merged.context_window = merged.context_window.or(*context_window);
         merged.temperature = merged.temperature.or(*temperature);
         merged.top_p = merged.top_p.or(*top_p);
         merged.max_completion_tokens = merged.max_completion_tokens.or(*max_completion_tokens);
@@ -442,6 +443,11 @@ impl ConfigModelOverride {
             .or(*min_output_tokens_per_sec);
         merged.ttft_timeout_secs = merged.ttft_timeout_secs.or(*ttft_timeout_secs);
         merged.max_request_bytes = merged.max_request_bytes.or(*max_request_bytes);
+        // Inherited wholesale only when the model sets none of its own.
+        if merged.context_window.is_none() && merged.context_windows.is_none() {
+            merged.context_window = *context_window;
+            merged.context_windows = context_windows.clone();
+        }
         if merged.reasoning_efforts.is_empty() {
             merged.reasoning_efforts = reasoning_efforts.clone();
         }
@@ -627,6 +633,7 @@ mod tests {
             [model_providers.gateway]
             base_url = "https://gateway.example/v1"
             context_window = 100000
+            context_windows = [100000, 400000]
 
             [model.override-url]
             model = "m"
@@ -642,6 +649,7 @@ mod tests {
         let model = resolved.get("override-url").expect("model should exist");
         assert_eq!(model.info.base_url, "https://model-specific.example/v1");
         assert_eq!(model.info.context_window.get(), 200000);
+        assert!(model.info.context_windows.is_empty());
     }
 
     #[test]
