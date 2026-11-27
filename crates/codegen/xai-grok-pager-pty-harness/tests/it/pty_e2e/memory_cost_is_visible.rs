@@ -3,7 +3,7 @@
 #[allow(unused_imports)]
 use super::common::*;
 
-/// The price the mock reports for each Messages call: `$0.5`.
+/// The price the mock reports for each Messages call: `$0.50`.
 const CALL_COST_USD_TICKS: i64 = 5_000_000_000;
 const REPLY_MARK: &str = "MEMCOSTMARK";
 
@@ -87,7 +87,7 @@ async fn memory_cost_shows_in_the_status_bar_and_in_the_memory_browser() {
 
     // The turn makes one capture call, and nothing else spends on memory.
     harness
-        .wait_for_text("mem $0.5", Duration::from_secs(60))
+        .wait_for_text("mem $0.50", Duration::from_secs(60))
         .unwrap_or_else(|error| {
             panic!(
                 "the status bar must show what memory spent: {error}\nscreen:\n{}",
@@ -97,7 +97,10 @@ async fn memory_cost_shows_in_the_status_bar_and_in_the_memory_browser() {
 
     harness.inject_keys(b"/memory\r").expect("submit /memory");
     harness
-        .wait_for_text("Memory cost: $0.5 (capture $0.5)", Duration::from_secs(30))
+        .wait_for_text(
+            "Memory cost: $0.50 (capture $0.50)",
+            Duration::from_secs(30),
+        )
         .unwrap_or_else(|error| {
             panic!(
                 "the memory browser must show the cost by kind: {error}\nscreen:\n{}",

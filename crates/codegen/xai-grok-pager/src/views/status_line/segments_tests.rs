@@ -6,7 +6,7 @@ fn context() -> StatusLineContext {
     let mut ctx = crate::app::status_line::test_context(DIR);
     ctx.session_name = Some("status_line work".into());
     ctx.model.display_name = Some("Grok Build".into());
-    ctx.cost.total_cost_usd = Some(0.3745);
+    ctx.cost.total_cost_usd_ticks = Some(3_745_000_000);
     ctx.context_window.used_percentage = Some(42);
     ctx.context_window.auto_compact_threshold_percent = Some(80);
     ctx
@@ -31,13 +31,13 @@ fn composes_every_segment_in_order() {
 #[test]
 fn omits_segments_whose_data_is_missing_or_rounds_to_zero() {
     let mut ctx = context();
-    ctx.cost.total_cost_usd = Some(0.004);
+    ctx.cost.total_cost_usd_ticks = Some(40_000_000);
     assert_eq!(
         plain(&ctx, Some(Duration::from_millis(400))),
         "project │ Grok Build │ 42% ctx │ status_line work"
     );
 
-    ctx.cost.total_cost_usd = Some(0.006);
+    ctx.cost.total_cost_usd_ticks = Some(60_000_000);
     assert!(plain(&ctx, None).contains("$0.01"));
 
     ctx.context_window.used_percentage = None;
@@ -72,7 +72,7 @@ fn name_past_its_budget_is_cut_by_painted_columns() {
 #[test]
 fn cost_the_session_does_not_have_omits_its_segment() {
     let mut ctx = context();
-    ctx.cost.total_cost_usd = None;
+    ctx.cost.total_cost_usd_ticks = None;
     assert!(compose_builtin(&ctx, None, &[StatusLineItem::Cost]).is_empty());
 }
 

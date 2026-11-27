@@ -7,6 +7,7 @@ use ratatui::style::Style;
 use ratatui::text::{Line, Span};
 
 use crate::theme::Theme;
+use crate::usd::Usd;
 
 /// Credit balance state from the billing API.
 #[derive(Debug, Clone)]
@@ -79,16 +80,6 @@ pub enum AutoTopupFetch {
     Cleared,
 }
 
-/// Format `cents` as a dollar string: whole dollars as `$N`, otherwise `$N.NN`.
-fn fmt_dollars(cents: i64) -> String {
-    let dollars = cents as f64 / 100.0;
-    if dollars.fract() == 0.0 {
-        format!("${dollars:.0}")
-    } else {
-        format!("${dollars:.2}")
-    }
-}
-
 /// Build the `/usage` summary block shown in scrollback. Always shows usage % and (when known) the
 /// next reset time. The credits block is rendered only when the user has a positive prepaid
 /// balance.
@@ -110,15 +101,15 @@ pub fn format_usage_summary(balance: &CreditBalance, autotopup: Option<&AutoTopu
         .filter(|c| *c > 0)
     {
         lines.push(String::new());
-        lines.push(format!("Credits: {}", fmt_dollars(prepaid)));
+        lines.push(format!("Credits: {}", Usd::from_cents(prepaid)));
         match autotopup {
             Some(at) if at.enabled && at.topup_amount_cents.is_some() => {
                 lines.push(format!(
                     "Auto topup: {}",
-                    fmt_dollars(at.topup_amount_cents.unwrap().abs())
+                    Usd::from_cents(at.topup_amount_cents.unwrap().abs())
                 ));
                 if let Some(max) = at.max_amount_cents {
-                    lines.push(format!("Max monthly topup: {}", fmt_dollars(max.abs())));
+                    lines.push(format!("Max monthly topup: {}", Usd::from_cents(max.abs())));
                 }
             }
             _ => lines.push("Auto topup: disabled".to_string()),
@@ -126,12 +117,11 @@ pub fn format_usage_summary(balance: &CreditBalance, autotopup: Option<&AutoTopu
     }
 
     // Legacy on-demand (pay-as-you-go) billing, shown only when enabled, for users on the older monthly and on-demand model
-    // Amounts always carry cents (e.g. `$50.00`), matching the web client.
     if balance.pay_as_you_go {
-        let used = balance.on_demand_used_cents.unwrap_or(0).abs() as f64 / 100.0;
-        let cap = balance.on_demand_cap_cents.unwrap_or(0).abs() as f64 / 100.0;
+        let used = Usd::from_cents(balance.on_demand_used_cents.unwrap_or(0).abs());
+        let cap = Usd::from_cents(balance.on_demand_cap_cents.unwrap_or(0).abs());
         lines.push(String::new());
-        lines.push(format!("Pay-as-you-go: ${used:.2} used of ${cap:.2} limit"));
+        lines.push(format!("Pay-as-you-go: {used} used of {cap} limit"));
     }
 
     lines.join("\n")
@@ -177,7 +167,7 @@ pub fn usage_warning_for_session(
                 let used = balance.on_demand_used_cents.unwrap_or(0).abs();
                 let remaining = (cap - used).max(0);
                 if remaining <= LOW_BALANCE_CENTS {
-                    let text = format!("Pay-as-you-go limit left: {}", fmt_dollars(remaining));
+                    let text = format!("Pay-as-you-go limit left: {}", Usd::from_cents(remaining));
                     return Some((text, remaining <= PAY_AS_YOU_GO_CRITICAL_CENTS));
                 }
             }
@@ -201,7 +191,7 @@ pub fn usage_warning_for_session(
 
     let credits_warning = || {
         (
-            format!("Credits left: {}", fmt_dollars(credits_cents)),
+            format!("Credits left: {}", Usd::from_cents(credits_cents)),
             true,
         )
     };
@@ -298,12 +288,12 @@ mod tests {
         };
         assert_eq!(
             format_usage_summary(&b, None),
-            "Usage: 25%\n\nCredits: $100\nAuto topup: disabled"
+            "Usage: 25%\n\nCredits: $100.00\nAuto topup: disabled"
         );
         // A disabled rule renders the same.
         assert_eq!(
             format_usage_summary(&b, Some(&topup(false, Some(2000), Some(10000)))),
-            "Usage: 25%\n\nCredits: $100\nAuto topup: disabled"
+            "Usage: 25%\n\nCredits: $100.00\nAuto topup: disabled"
         );
     }
 
@@ -315,7 +305,7 @@ mod tests {
         };
         assert_eq!(
             format_usage_summary(&b, Some(&topup(true, Some(2000), None))),
-            "Usage: 25%\n\nCredits: $100\nAuto topup: $20"
+            "Usage: 25%\n\nCredits: $100.00\nAuto topup: $20.00"
         );
     }
 
@@ -328,7 +318,7 @@ mod tests {
         };
         assert_eq!(
             format_usage_summary(&b, Some(&topup(true, Some(2000), Some(10000)))),
-            "Usage: 25%\nNext reset: June 14, 16:00\n\nCredits: $100\nAuto topup: $20\nMax monthly topup: $100"
+            "Usage: 25%\nNext reset: June 14, 16:00\n\nCredits: $100.00\nAuto topup: $20.00\nMax monthly topup: $100.00"
         );
     }
 
@@ -353,7 +343,7 @@ mod tests {
         };
         assert_eq!(
             format_usage_summary(&b, Some(&topup(true, Some(-500), Some(-1000)))),
-            "Usage: 100%\n\nCredits: $5\nAuto topup: $5\nMax monthly topup: $10"
+            "Usage: 100%\n\nCredits: $5.00\nAuto topup: $5.00\nMax monthly topup: $10.00"
         );
     }
 
@@ -537,7 +527,7 @@ mod tests {
         };
         assert_eq!(
             usage_warning(&at_ten, Some(&disabled), true),
-            Some(("Credits left: $10".to_string(), true))
+            Some(("Credits left: $10.00".to_string(), true))
         );
     }
 
@@ -562,7 +552,7 @@ mod tests {
         };
         assert_eq!(
             usage_warning(&b, Some(&topup(true, Some(2000), Some(10000))), true),
-            Some(("Credits left: $15".to_string(), true))
+            Some(("Credits left: $15.00".to_string(), true))
         );
         let plenty = CreditBalance {
             prepaid_balance_cents: Some(2500),
@@ -625,13 +615,13 @@ mod tests {
         let grey = pay_as_you_go(100.0, 5000, 4200);
         assert_eq!(
             usage_warning(&grey, None, true),
-            Some(("Pay-as-you-go limit left: $8".to_string(), false))
+            Some(("Pay-as-you-go limit left: $8.00".to_string(), false))
         );
         // $50 cap, $46 used leaves $4, critical (yellow)
         let yellow = pay_as_you_go(100.0, 5000, 4600);
         assert_eq!(
             usage_warning(&yellow, None, true),
-            Some(("Pay-as-you-go limit left: $4".to_string(), true))
+            Some(("Pay-as-you-go limit left: $4.00".to_string(), true))
         );
     }
 
@@ -641,13 +631,13 @@ mod tests {
         let at_ten = pay_as_you_go(100.0, 5000, 4000);
         assert_eq!(
             usage_warning(&at_ten, None, true),
-            Some(("Pay-as-you-go limit left: $10".to_string(), false))
+            Some(("Pay-as-you-go limit left: $10.00".to_string(), false))
         );
         // Exactly $5 left is critical (yellow)
         let at_five = pay_as_you_go(100.0, 5000, 4500);
         assert_eq!(
             usage_warning(&at_five, None, true),
-            Some(("Pay-as-you-go limit left: $5".to_string(), true))
+            Some(("Pay-as-you-go limit left: $5.00".to_string(), true))
         );
     }
 

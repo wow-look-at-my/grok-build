@@ -138,6 +138,9 @@ pub struct StatusLineRepo {
 pub struct StatusLineCost {
     #[serde(skip_serializing_if = "Option::is_none")]
     pub total_cost_usd: Option<f64>,
+    /// The same cost as exact API ticks, 1e10 per USD.
+    #[serde(skip_serializing_if = "Option::is_none")]
+    pub total_cost_usd_ticks: Option<i64>,
     /// The clock starts when this process attached, not when the session was created.
     pub total_duration_ms: u64,
     #[serde(skip_serializing_if = "Option::is_none")]
