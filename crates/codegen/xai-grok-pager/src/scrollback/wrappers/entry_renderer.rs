@@ -330,17 +330,18 @@ impl<'a> EntryRenderer<'a> {
         if !self.should_show_cost() {
             return None;
         }
-        cost_ticks_to_display(self.entry.cost_usd_ticks)
+        crate::usd::Usd::reported(self.entry.cost_usd_ticks).map(|usd| usd.to_string())
     }
 
     /// Width reserved on the right for the per-message cost indicator, when
     /// this message block reports a cost.
     fn cost_reserved(&self) -> u16 {
-        if self.should_show_cost() {
-            cost_ticks_display_width(self.entry.cost_usd_ticks)
-        } else {
-            0
-        }
+        self.cost_display()
+            .map(|cost| {
+                u16::try_from(unicode_width::UnicodeWidthStr::width(cost.as_str()))
+                    .unwrap_or(u16::MAX)
+            })
+            .unwrap_or(0)
     }
 
     /// The per-message cache-hit-percent indicator shares the cost/timestamp
@@ -575,32 +576,6 @@ impl<'a> EntryRenderer<'a> {
             .partition_point(|&start| start <= row)
             .saturating_sub(1)
     }
-}
-
-/// Convert an API-reported server cost (in USD ticks, 1e10 per USD) to a
-/// readable display string such as `$0.12` or `$3.42`. # Honesty guarantees.
-pub(crate) fn cost_ticks_to_display(cost_usd_ticks: Option<i64>) -> Option<String> {
-    let ticks = cost_usd_ticks?;
-    if ticks <= 0 {
-        return None;
-    }
-    const PER_USD: i64 = 10_000_000_000;
-    const FRAC_SCALE: i64 = 10_000;
-    let whole = ticks / PER_USD;
-    let frac = (ticks % PER_USD) / FRAC_SCALE;
-    let frac_text = format!("{frac:06}");
-    let trimmed = frac_text.trim_end_matches('0');
-    if trimmed.is_empty() {
-        Some(format!("${whole}"))
-    } else {
-        Some(format!("${whole}.{trimmed}"))
-    }
-}
-
-pub(crate) fn cost_ticks_display_width(cost_usd_ticks: Option<i64>) -> u16 {
-    cost_ticks_to_display(cost_usd_ticks)
-        .map(|s| unicode_width::UnicodeWidthStr::width(s.as_str()) as u16)
-        .unwrap_or(0)
 }
 
 /// Format a response's prompt cache-read hit rate for display. Pure — no
@@ -1602,49 +1577,12 @@ mod tests {
 
     // ── per-message cost indicator ──
 
-    // The pure formatter: exact integer ticks → readable USD text. No floats,
-    // no terminal deps, so the strings are asserted exactly.
-    #[test]
-    fn cost_ticks_to_display_formats_representative_inputs() {
-        // Small fractional USD: 1e10 ticks = $1.
-        assert_eq!(
-            cost_ticks_to_display(Some(1_234_500_000)).as_deref(),
-            Some("$0.12345")
-        );
-        assert_eq!(
-            cost_ticks_to_display(Some(100_000_000)).as_deref(),
-            Some("$0.01")
-        );
-        // Whole dollars trim trailing zeros: 5e12 ticks → $500.
-        assert_eq!(
-            cost_ticks_to_display(Some(5_000_000_000_000)).as_deref(),
-            Some("$500")
-        );
-        assert_eq!(
-            cost_ticks_to_display(Some(342_000_000_000)).as_deref(),
-            Some("$34.2")
-        );
-        // A tiny-but-real reported cost (3e-6 USD) must NOT collapse to $0.
-        assert_eq!(
-            cost_ticks_to_display(Some(30_000)).as_deref(),
-            Some("$0.000003")
-        );
-    }
-
-    #[test]
-    fn cost_ticks_to_display_missing_and_non_positive_are_none() {
-        // Unreported → None (never a fabricated `$0.00`).
-        assert_eq!(cost_ticks_to_display(None), None);
-        assert_eq!(cost_ticks_to_display(Some(0)), None);
-        assert_eq!(cost_ticks_to_display(Some(-5)), None);
-    }
-
     #[test]
     fn cost_indicator_renders_next_to_timestamp_for_reported_cost() {
         // A message with a reported cost draws the cost.
         let theme = Theme::current();
         let entry = ScrollbackEntry::new(RenderBlock::agent_message("hello"))
-            .with_cost_usd_ticks(Some(1_234_500_000)); // $0.12345
+            .with_cost_usd_ticks(Some(1_234_500_000)); // $0.12
         let renderer = EntryRenderer::new(&entry, &theme);
 
         let width: u16 = 80;
@@ -1654,7 +1592,7 @@ mod tests {
         renderer.render(area, &mut buf);
 
         let row = collect_row_symbols(&buf, 0, 0, width);
-        let cost_str = "$0.12345";
+        let cost_str = "$0.12";
         let cost_pos = row.find(cost_str).expect("cost token must render");
         let ts_visible = entry.created_at.unwrap().format("%-I:%M %p").to_string();
         let after_cost = row[cost_pos + cost_str.len()..].trim_start();
@@ -1679,7 +1617,7 @@ mod tests {
             ..Default::default()
         };
         let entry = ScrollbackEntry::new(RenderBlock::agent_message("hello"))
-            .with_cost_usd_ticks(Some(1_234_500_000)); // $0.12345
+            .with_cost_usd_ticks(Some(1_234_500_000)); // $0.12
         let renderer = EntryRenderer::new(&entry, &theme).with_appearance(appearance);
 
         let width: u16 = 80;
@@ -1690,7 +1628,7 @@ mod tests {
 
         let row = collect_row_symbols(&buf, 0, 0, width);
         assert!(
-            row.contains("$0.12345"),
+            row.contains("$0.12"),
             "cost token must render with timestamps off: {row:?}"
         );
         // No timestamp is shown when the timestamp toggle is off.
@@ -1700,14 +1638,14 @@ mod tests {
         );
         // The cost lives in the reserved right gutter, right-aligned.
         let right = width - renderer.appearance().scrollback.layout.block_pad_right;
-        let cost_pos = row.find("$0.12345").expect("cost token present");
+        let cost_pos = row.find("$0.12").expect("cost token present");
         let gutter = gutter_band(&renderer, width);
         assert!(
             cost_pos >= gutter.start as usize,
             "cost must be inside the reserved gutter (pos {cost_pos}, gutter {gutter:?})"
         );
         assert_eq!(
-            (right - "$0.12345".len() as u16) as usize,
+            (right - "$0.12".len() as u16) as usize,
             cost_pos,
             "cost must be right-aligned in the gutter"
         );
@@ -1761,7 +1699,7 @@ mod tests {
         // A one-line agent message has no vpad.
         let theme = Theme::current();
         let entry = ScrollbackEntry::new(RenderBlock::agent_message("hello"))
-            .with_cost_usd_ticks(Some(1_234_500_000)) // $0.12345
+            .with_cost_usd_ticks(Some(1_234_500_000)) // $0.12
             .with_cache_hit_percent(Some(87));
         let renderer = EntryRenderer::new(&entry, &theme);
 
@@ -1776,7 +1714,7 @@ mod tests {
         renderer.render(area, &mut buf);
 
         let row0 = collect_row_symbols(&buf, 0, 0, width);
-        assert!(row0.contains("$0.12345"), "cost still renders on row 0");
+        assert!(row0.contains("$0.12"), "cost still renders on row 0");
         let row1 = collect_row_symbols(&buf, 1, 0, width);
         let cache_str = "cache 87%";
         let cache_pos = row1

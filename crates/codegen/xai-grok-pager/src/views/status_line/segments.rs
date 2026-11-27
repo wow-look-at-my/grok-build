@@ -15,8 +15,6 @@ const CWD_COLS: usize = 40;
 const MODEL_COLS: usize = 30;
 const SESSION_NAME_COLS: usize = 40;
 
-const MIN_DISPLAYED_COST_USD: f64 = 0.005;
-
 #[derive(Debug, Clone, Copy, PartialEq, Eq)]
 pub enum SegmentTone {
     Dim,
@@ -97,11 +95,10 @@ pub fn compose_builtin(
                 };
                 Some(StatusSegment::toned(format!("{pct}% ctx"), tone))
             }
-            StatusLineItem::Cost => ctx
-                .cost
-                .total_cost_usd
-                .filter(|usd| *usd >= MIN_DISPLAYED_COST_USD)
-                .map(|usd| StatusSegment::dim(format!("${usd:.2}"))),
+            // A cost that rounds to no cent takes no room on this row.
+            StatusLineItem::Cost => crate::usd::Usd::reported(ctx.cost.total_cost_usd_ticks)
+                .filter(|usd| usd.cents() > 0)
+                .map(|usd| StatusSegment::dim(usd.to_string())),
             StatusLineItem::TurnTimer => {
                 let secs = turn_elapsed?.as_secs();
                 if secs == 0 {

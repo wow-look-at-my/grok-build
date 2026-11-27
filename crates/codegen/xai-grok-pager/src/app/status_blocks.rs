@@ -225,11 +225,10 @@ fn format_by_model_row(
         format!("    {model}: {tokens} Tokens")
     }
 }
-/// Formats the cost cell. Ticks are 1e10 per USD; a partial sum is reported as absent.
+/// The cost cell. A partial sum is reported as absent.
 fn format_cost(m: &xai_grok_shell::extensions::notification::PromptUsageModel) -> String {
-    use xai_grok_shell::extensions::notification::ticks_to_usd;
     match m.cost_usd_ticks {
-        Some(ticks) => format!("${:.4}", ticks_to_usd(ticks)),
+        Some(ticks) => crate::usd::Usd::from_ticks(ticks).to_string(),
         None if m.cost_is_partial => "not available (not reported for some calls)".to_string(),
         None => "not available (not reported)".to_string(),
     }
@@ -343,7 +342,7 @@ mod tests {
         assert_eq!(
             rows,
             [
-                "    grok-4.7-build: 124,456 Tokens · $0.0020",
+                "    grok-4.7-build: 124,456 Tokens · <$0.01",
                 "    grok-4: 110 Tokens",
             ],
             "{text}"
