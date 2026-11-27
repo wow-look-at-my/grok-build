@@ -78,6 +78,10 @@ fn resolve_byok_context_window_on_request_path<'a>(
         &model.info().model,
         base_url,
         Some(&own_key),
+        &crate::remote::provider_headers(
+            &model.info().extra_headers,
+            &model.info().env_http_headers,
+        ),
     );
     match resolved {
         Some(cw) if cw != model.info().context_window => {
