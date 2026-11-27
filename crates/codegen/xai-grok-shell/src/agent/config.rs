@@ -3325,6 +3325,10 @@ pub(crate) fn resolve_model_list(
                     &entry.info.model,
                     &base_url,
                     api_key.as_deref(),
+                    &crate::remote::provider_headers(
+                        &entry.info.extra_headers,
+                        &entry.info.env_http_headers,
+                    ),
                 ) {
                     tracing::info!(
                         model = %entry.info.model,

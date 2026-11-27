@@ -543,16 +543,7 @@ fn normalize_url(url: &str) -> String {
 
 /// The provider's static headers, then each `env_http_headers` header whose variable is set.
 fn listing_headers(provider: &ModelProviderConfig) -> Vec<(String, String)> {
-    let from_env = provider
-        .env_http_headers
-        .iter()
-        .filter_map(|(name, var)| Some((name.clone(), std::env::var(var).ok()?)));
-    provider
-        .extra_headers
-        .iter()
-        .map(|(name, value)| (name.clone(), value.clone()))
-        .chain(from_env)
-        .collect()
+    crate::remote::provider_headers(&provider.extra_headers, &provider.env_http_headers)
 }
 
 /// `Anthropic: Claude Fable 5` becomes `Claude Fable 5`. An aggregator puts
