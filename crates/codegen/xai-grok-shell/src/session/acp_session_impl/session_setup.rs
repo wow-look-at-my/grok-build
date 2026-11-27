@@ -437,6 +437,10 @@ impl SessionActor {
                         current_model,
                         base_url,
                         Some(key),
+                        &crate::remote::provider_headers(
+                            &current_config.extra_headers,
+                            &current_config.env_http_headers,
+                        ),
                     )
                 }
                 _ => {

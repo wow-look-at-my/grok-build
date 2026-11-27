@@ -704,9 +704,53 @@ pub struct FetchModelsResult {
 pub(crate) fn fetch_models_for_api_base_blocking(
     base_url: &str,
     api_key: Option<&str>,
+    headers: &[(String, String)],
 ) -> Result<Vec<crate::agent::config::ModelEntryConfig>, BackendError> {
     let url = models_list_url_for_base(base_url.trim_end_matches('/'));
-    fetch_models_for_list_url_blocking(&url, api_key, &[])
+    fetch_models_for_list_url_blocking(&url, api_key, headers)
+}
+
+/// The headers a provider's own requests carry: its static headers, then each
+/// `env_http_headers` header whose variable holds a value.
+pub(crate) fn provider_headers(
+    extra_headers: &indexmap::IndexMap<String, String>,
+    env_http_headers: &indexmap::IndexMap<String, String>,
+) -> Vec<(String, String)> {
+    provider_headers_with(extra_headers, env_http_headers, |var| {
+        std::env::var(var).ok()
+    })
+}
+
+/// [`provider_headers`] with the environment passed in. A variable that is
+/// unset or blank sends no header, and the log names the header and the variable.
+pub(crate) fn provider_headers_with(
+    extra_headers: &indexmap::IndexMap<String, String>,
+    env_http_headers: &indexmap::IndexMap<String, String>,
+    getenv: impl Fn(&str) -> Option<String>,
+) -> Vec<(String, String)> {
+    let mut headers: Vec<(String, String)> = extra_headers
+        .iter()
+        .map(|(name, value)| (name.clone(), value.clone()))
+        .collect();
+    for (name, var) in env_http_headers {
+        let value = getenv(var).unwrap_or_default();
+        let value = value.trim();
+        if value.is_empty() {
+            tracing::warn!(
+                header = %name,
+                env_var = %var,
+                "env_http_headers variable is unset or blank; the header is not sent"
+            );
+            continue;
+        }
+        headers.push((name.clone(), value.to_owned()));
+    }
+    headers
+}
+
+/// The names of the headers a request carries, for a log line. Never the values.
+fn header_names(headers: &[(String, String)]) -> Vec<&str> {
+    headers.iter().map(|(name, _)| name.as_str()).collect()
 }
 
 /// Fetch and parse a listing from an exact URL.
@@ -725,7 +769,13 @@ pub(crate) fn fetch_models_for_list_url_blocking(
     // The listing carries no base of its own, so an entry that names none falls back to this.
     let base_url = url.trim_end_matches("/models").trim_end_matches('/');
     allow_endpoint(url)?;
-    tracing::debug!(models_url = %url, "Fetching models for BYOK/custom API base");
+    let has_api_key = api_key.is_some_and(|key| !key.is_empty());
+    tracing::debug!(
+        models_url = %url,
+        has_api_key,
+        provider_headers = ?header_names(headers),
+        "Fetching models for BYOK/custom API base"
+    );
     let (auth, plain) = provider_request_auth(api_key, headers);
     let mut request = client.get(url, auth);
     for (name, value) in &plain {
@@ -735,7 +785,14 @@ pub(crate) fn fetch_models_for_list_url_blocking(
     if !response.status().is_success() {
         let status = response.status().as_u16();
         let body = response.text().unwrap_or_default();
-        tracing::warn!("Failed to fetch models for base: {} - {}", status, body);
+        tracing::warn!(
+            models_url = %url,
+            has_api_key,
+            provider_headers = ?header_names(headers),
+            "Failed to fetch models for base: {} - {}",
+            status,
+            body
+        );
         return Err(BackendError::RequestFailed { status, body });
     }
     let models_response: ModelsResponse = response.json()?;
