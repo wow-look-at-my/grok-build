@@ -154,6 +154,14 @@ pub fn stream_messages<'a>(
                     final_message_id = Some(message.id.clone());
                     final_model = Some(message.model.clone());
                     final_usage.observe_start(&message.usage);
+                    if let Some(provider) =
+                        xai_grok_sampling_types::upstream_provider_of(message.provider.as_ref(), None)
+                    {
+                        yield SamplingEvent::UpstreamProvider {
+                            request_id: request_id.clone(),
+                            provider: provider.to_owned(),
+                        };
+                    }
                     // Yield the real id, model, and input usage before any content
                     // Partial-mode framing then emits them on the real `message_start` instead of a synthesized placeholder
                     yield SamplingEvent::ResponseStarted {

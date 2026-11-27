@@ -52,6 +52,7 @@ pub fn stream_chat_completions<'a>(
 
         // Per-response accumulators
         let mut first_chunk_seen = false;
+        let mut provider_reported = false;
         let mut first_choice_seen = false;
         let mut first_token_emitted = false;
         let mut model: String = String::new();
@@ -112,6 +113,15 @@ pub fn stream_chat_completions<'a>(
                     .clone()
                     .filter(|s| !s.is_empty());
                 first_chunk_seen = true;
+            }
+
+            // A gateway can name its upstream on a later chunk than the first.
+            if !provider_reported && let Some(provider) = chunk.upstream_provider() {
+                provider_reported = true;
+                yield SamplingEvent::UpstreamProvider {
+                    request_id: request_id.clone(),
+                    provider: provider.to_owned(),
+                };
             }
 
             if let Some(u) = chunk.usage.as_ref() {
@@ -355,6 +365,8 @@ mod tests {
                 .collect(),
             usage: None,
             system_fingerprint: None,
+            provider: None,
+            extra_fields: None,
         }
     }
 
@@ -384,6 +396,96 @@ mod tests {
             out.push(ev);
         }
         out
+    }
+
+    /// The provider events of a stream, in order.
+    fn providers(events: &[SamplingEvent]) -> Vec<&str> {
+        events
+            .iter()
+            .filter_map(|event| match event {
+                SamplingEvent::UpstreamProvider { provider, .. } => Some(provider.as_str()),
+                _ => None,
+            })
+            .collect()
+    }
+
+    /// A chunk as it comes off the wire, so the test reads what a gateway sends.
+    fn wire_chunk(json: serde_json::Value) -> Result<ChatCompletionChunk, SamplingError> {
+        Ok(serde_json::from_value(json).expect("the chunk parses"))
+    }
+
+    /// OpenRouter names the upstream on every chunk. The stream reports it one time.
+    #[tokio::test]
+    async fn the_upstream_openrouter_names_is_reported_one_time() {
+        let chunk = |text: &str| {
+            wire_chunk(serde_json::json!({
+                "id": "gen-1", "object": "chat.completion.chunk", "created": 1,
+                "model": "deepseek/deepseek-chat", "provider": "DeepInfra",
+                "choices": [{"index": 0, "delta": {"content": text}, "finish_reason": null}]
+            }))
+        };
+        let raw = stream::iter(vec![chunk("Hello, "), chunk("world!")]).boxed();
+        let events = collect(stream_chat_completions(
+            raw,
+            None,
+            rid(),
+            Duration::from_secs(60),
+        ))
+        .await;
+        assert_eq!(providers(&events), ["DeepInfra"]);
+    }
+
+    /// Bifrost sits before OpenRouter and reports itself as `openrouter`. With
+    /// its raw passthrough on, the real upstream is inside `raw_response`.
+    #[tokio::test]
+    async fn the_upstream_inside_a_bifrost_raw_response_wins_over_bifrost_s_own() {
+        let raw = stream::iter(vec![wire_chunk(serde_json::json!({
+            "id": "c1", "object": "chat.completion.chunk", "created": 1,
+            "model": "openrouter/deepseek/deepseek-chat",
+            "choices": [{"index": 0, "delta": {"content": "hi"}, "finish_reason": null}],
+            "extra_fields": {
+                "provider": "openrouter",
+                "latency": 12,
+                "raw_response": {"id": "gen-1", "provider": "Fireworks"}
+            }
+        }))])
+        .boxed();
+        let events = collect(stream_chat_completions(
+            raw,
+            None,
+            rid(),
+            Duration::from_secs(60),
+        ))
+        .await;
+        assert_eq!(providers(&events), ["Fireworks"]);
+    }
+
+    /// A gateway that names nothing produces no event, and a `provider` of another shape does not break the chunk.
+    #[tokio::test]
+    async fn a_chunk_with_no_usable_provider_reports_none() {
+        let raw = stream::iter(vec![
+            Ok(text_chunk("plain")),
+            wire_chunk(serde_json::json!({
+                "id": "c2", "object": "chat.completion.chunk", "created": 1, "model": "m",
+                "provider": {"order": ["a"]},
+                "choices": [{"index": 0, "delta": {"content": "x"}, "finish_reason": null}]
+            })),
+        ])
+        .boxed();
+        let events = collect(stream_chat_completions(
+            raw,
+            None,
+            rid(),
+            Duration::from_secs(60),
+        ))
+        .await;
+        assert!(providers(&events).is_empty());
+        assert!(
+            events
+                .iter()
+                .any(|event| matches!(event, SamplingEvent::Completed { .. })),
+            "the stream still completes"
+        );
     }
 
     #[tokio::test]
@@ -904,6 +1006,7 @@ mod tests {
             context_window: Some(8192),
             max_completion_tokens: Some(4096),
             models_etag: None,
+            transport: None,
         };
         let events = collect(stream_chat_completions(
             raw,

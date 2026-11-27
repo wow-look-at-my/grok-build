@@ -72,6 +72,36 @@ struct HttpRequest {
     invalid_header: Option<&'static str>,
     /// Set when the body went to a delta relay, which keeps it as the next base.
     delta: Option<DeltaPlan>,
+    /// The JSON body's size, set when `body` holds an encoded form of it.
+    plain_len: Option<usize>,
+}
+
+/// What one send put on the wire.
+struct SentBody {
+    encoding: xai_grok_sampling_types::BodyEncoding,
+    plain_bytes: u64,
+    wire_bytes: u64,
+}
+
+impl SentBody {
+    fn of(request: &HttpRequest) -> Self {
+        use xai_grok_sampling_types::BodyEncoding;
+        let wire = request.body.as_ref().map_or(0, Vec::len);
+        let zstd = request
+            .headers
+            .get(CONTENT_ENCODING)
+            .is_some_and(|value| value.as_bytes().eq_ignore_ascii_case(b"zstd"));
+        let encoding = match (zstd, request.headers.contains_key(BASE_HEADER)) {
+            (false, _) => BodyEncoding::Plain,
+            (true, false) => BodyEncoding::Zstd,
+            (true, true) => BodyEncoding::ZstdDelta,
+        };
+        Self {
+            encoding,
+            plain_bytes: request.plain_len.unwrap_or(wire) as u64,
+            wire_bytes: wire as u64,
+        }
+    }
 }
 
 /// What a delta relay keeps of one request, and how to resend it.
@@ -694,6 +724,7 @@ fn extract_model_metadata(
             context_window,
             max_completion_tokens,
             models_etag,
+            transport: None,
         })
     } else {
         None
@@ -817,6 +848,8 @@ impl std::fmt::Debug for SamplingClient {
 #[derive(Clone, Debug, Default)]
 struct ClientDefaults {
     model: String,
+    /// What the provider's proxy chain puts before a model id on the wire.
+    route_model_prefix: String,
     max_completion_tokens: Option<u32>,
     temperature: Option<f32>,
     top_p: Option<f32>,
@@ -999,10 +1032,13 @@ impl SamplingClient {
 
     /// Uses an identity-specific client for configured mTLS; otherwise grabs the process-wide shared client.
     /// This does not perform any network I/O.
-    pub fn new(config: SamplerConfig) -> Result<Self> {
+    pub fn new(mut config: SamplerConfig) -> Result<Self> {
         if config.base_url.trim().is_empty() {
             return Err(SamplingError::InvalidConfiguration(MISSING_BASE_URL));
         }
+        // From here on `base_url` is the first hop that is on, not the provider.
+        let route_model_prefix =
+            crate::provider_route::apply(&mut config).map_err(SamplingError::EndpointNotAllowed)?;
         xai_grok_extra_ca::endpoint_allowlist::check(&config.base_url)
             .map_err(|refusal| SamplingError::EndpointNotAllowed(refusal.to_string()))?;
         let api_backend = crate::backend_detect::effective_api_backend(&config);
@@ -1155,6 +1191,7 @@ impl SamplingClient {
 
         let defaults = ClientDefaults {
             model: config.model,
+            route_model_prefix,
             max_completion_tokens: config.max_completion_tokens,
             temperature: config.temperature,
             top_p: config.top_p,
@@ -1217,6 +1254,11 @@ impl SamplingClient {
         self.usage_sink.is_some()
     }
 
+    /// The id `model` goes out under: the provider chain's gateway prefix, then the model's own id.
+    fn wire_model(&self, model: String) -> String {
+        crate::provider_route::wire_model(&self.defaults.route_model_prefix, model)
+    }
+
     /// The meter for one request to `model`, or the client's model when `model` is empty.
     fn meter(&self, model: Option<&str>) -> crate::usage_sink::CallMeter {
         let model = model
@@ -1268,6 +1310,7 @@ impl SamplingClient {
                 body: None,
                 invalid_header: None,
                 delta: None,
+                plain_len: None,
             },
             sent_bearer,
         }
@@ -1416,6 +1459,7 @@ impl SamplingClient {
         if request.model.is_none() {
             request.model = Some(self.defaults.model.clone());
         }
+        request.model = request.model.map(|model| self.wire_model(model));
 
         if request.max_tokens.is_none() {
             request.max_tokens = self.defaults.max_completion_tokens;
@@ -1562,6 +1606,7 @@ impl SamplingClient {
             request.body = Some(json);
             return Ok(request);
         }
+        request.plain_len = Some(json.len());
         if !delta_capable(&request.url) {
             request.body = Some(match compress_body(&json).await {
                 Some(compressed) => {
@@ -1611,8 +1656,12 @@ impl SamplingClient {
     }
 
     /// Send `request`. A body the relay accepted becomes the next base.
-    async fn send_net(&self, mut request: HttpRequest) -> Result<xai_grok_net::Response> {
+    async fn send_net(
+        &self,
+        mut request: HttpRequest,
+    ) -> Result<(xai_grok_net::Response, SentBody)> {
         let plan = request.delta.take();
+        let mut sent = SentBody::of(&request);
         let resend = plan.as_ref().filter(|plan| plan.against_base).map(|_| {
             (
                 request.url.clone(),
@@ -1642,7 +1691,9 @@ impl SamplingClient {
                     body: Some(body),
                     invalid_header: None,
                     delta: None,
+                    plain_len: Some(plan.plain.len()),
                 };
+                sent = SentBody::of(&retry);
                 let response = self.net_request(retry)?.send().await?;
                 note_response_headers(response.url().as_str(), response.headers());
                 response
@@ -1652,7 +1703,7 @@ impl SamplingClient {
         if let Some(plan) = plan {
             remember_delta_base(plan.url, plan.plain);
         }
-        Ok(response)
+        Ok((response, sent))
     }
 
     /// Hand `request` to `xai-grok-net`, which writes its credential.
@@ -1682,6 +1733,7 @@ impl SamplingClient {
     async fn send(&self, request: HttpRequest) -> Result<xai_grok_net::Response> {
         self.send_net(request)
             .await
+            .map(|(response, _sent)| response)
             .inspect_err(|e| tracing::debug!("HTTP request failed: {}", e))
     }
 
@@ -1691,11 +1743,26 @@ impl SamplingClient {
         span_timing: &mut StreamSpanTiming,
     ) -> Result<xai_grok_net::Response> {
         span_timing.record_request_build();
-        let response = self.send_net(built_request).await.inspect_err(|e| {
+        let sent_at = std::time::Instant::now();
+        let (response, sent) = self.send_net(built_request).await.inspect_err(|e| {
             tracing::debug!("HTTP request failed: {}", e);
             span_timing.record_transport_failure(&e.to_string());
         })?;
         span_timing.record_response_headers();
+        let server_timing = xai_grok_sampling_types::parse_server_timing(
+            response
+                .headers()
+                .get_all("server-timing")
+                .iter()
+                .filter_map(|value| value.to_str().ok()),
+        );
+        span_timing.set_transport(xai_grok_sampling_types::RequestTransport {
+            encoding: sent.encoding,
+            plain_bytes: sent.plain_bytes,
+            wire_bytes: sent.wire_bytes,
+            headers_ms: u64::try_from(sent_at.elapsed().as_millis()).unwrap_or(u64::MAX),
+            server_timing,
+        });
         Ok(response)
     }
 
@@ -1800,7 +1867,7 @@ impl SamplingClient {
             .span()
             .record(STATUS_CODE, status.as_u16() as i64);
         span_timing.span().record(SUCCESS, status.is_success());
-        let model_metadata = extract_model_metadata(response.headers());
+        let model_metadata = span_timing.with_transport(extract_model_metadata(response.headers()));
         let retry_after_secs = extract_retry_after(response.headers());
         let should_retry = extract_should_retry(response.headers());
         if !status.is_success() {
@@ -1921,6 +1988,11 @@ impl SamplingClient {
         if request.inner.model.is_none() {
             request.inner.model = Some(self.defaults.model.clone());
         }
+        request.inner.model = request
+            .inner
+            .model
+            .take()
+            .map(|model| self.wire_model(model));
 
         if request.inner.temperature.is_none() {
             request.inner.temperature = self.defaults.temperature;
@@ -2245,7 +2317,7 @@ impl SamplingClient {
             });
         }
 
-        let model_metadata = extract_model_metadata(response.headers());
+        let model_metadata = span_timing.with_transport(extract_model_metadata(response.headers()));
 
         // Strip UTF-8 BOM if present
         const UTF8_BOM: &[u8] = &[0xEF, 0xBB, 0xBF];
@@ -2329,6 +2401,7 @@ impl SamplingClient {
         if request.inner.model.is_empty() {
             request.inner.model = self.defaults.model.clone();
         }
+        request.inner.model = self.wire_model(std::mem::take(&mut request.inner.model));
 
         if request.inner.max_tokens == 0 {
             request.inner.max_tokens = self
@@ -2612,7 +2685,7 @@ impl SamplingClient {
             });
         }
 
-        let model_metadata = extract_model_metadata(response.headers());
+        let model_metadata = span_timing.with_transport(extract_model_metadata(response.headers()));
 
         // Strip UTF-8 BOM if present
         const UTF8_BOM: &[u8] = &[0xEF, 0xBB, 0xBF];
@@ -4352,6 +4425,191 @@ mod tests {
 
     fn header<'a>(headers: &'a axum::http::HeaderMap, name: HeaderName) -> Option<&'a str> {
         headers.get(name).and_then(|v| v.to_str().ok())
+    }
+
+    fn large_user_request() -> ConversationRequest {
+        use xai_grok_sampling_types::{ContentPart, ConversationItem, UserItem};
+        ConversationRequest {
+            items: vec![ConversationItem::User(UserItem {
+                content: vec![ContentPart::Text {
+                    text: Arc::from(large_input().as_str()),
+                }],
+                ..Default::default()
+            })],
+            ..Default::default()
+        }
+    }
+
+    /// The record a streaming request reports of its own trip: plain at
+    /// first, zstd once the server said it takes it. The streaming
+    /// request also reports what a hop said about its own time.
+    #[tokio::test]
+    async fn a_streaming_request_reports_how_its_body_travelled() {
+        use xai_grok_sampling_types::BodyEncoding;
+
+        let handler = post(|| async {
+            axum::response::Response::builder()
+                .header("content-type", "text/event-stream")
+                .header("accept-encoding", "zstd")
+                .header(
+                    "server-timing",
+                    r#"ai-proxy;dur=12.5;desc="upstream, first byte", edge;dur=3"#,
+                )
+                .body(axum::body::Body::from("data: [DONE]\n\n"))
+                .unwrap()
+        });
+        let app = Router::new().route("/v1/chat/completions", handler);
+        let listener = TcpListener::bind("127.0.0.1:0").await.unwrap();
+        let addr = listener.local_addr().unwrap();
+        let server = xai_spawn::spawn(async move {
+            let _ = axum::serve(listener, app).await;
+        });
+        let client = SamplingClient::new(SamplerConfig {
+            base_url: format!("http://{addr}/v1"),
+            api_backend: ApiBackend::ChatCompletions,
+            ..minimal_config()
+        })
+        .unwrap();
+
+        let mut seen = Vec::new();
+        for _ in 0..2 {
+            let (_chunks, metadata) = client
+                .conversation_stream(large_user_request())
+                .await
+                .expect("the request is answered");
+            seen.push(
+                metadata
+                    .and_then(|metadata| metadata.transport)
+                    .expect("a streaming response carries its transport record"),
+            );
+        }
+        server.abort();
+
+        assert_eq!(seen[0].encoding, BodyEncoding::Plain);
+        assert_eq!(seen[0].plain_bytes, seen[0].wire_bytes);
+        assert!(seen[0].wire_bytes as usize > large_input().len());
+        assert_eq!(seen[0].saved_percent(), None);
+
+        assert_eq!(seen[1].encoding, BodyEncoding::Zstd);
+        assert_eq!(seen[1].plain_bytes, seen[0].plain_bytes);
+        assert!(
+            seen[1].wire_bytes * 10 < seen[1].plain_bytes,
+            "a repeated letter compresses well: {} of {} bytes",
+            seen[1].wire_bytes,
+            seen[1].plain_bytes
+        );
+        assert!(seen[1].saved_percent().is_some_and(|saved| saved >= 90));
+
+        let timing = &seen[0].server_timing;
+        assert_eq!(timing.len(), 2, "{timing:?}");
+        assert_eq!(timing[0].name, "ai-proxy");
+        assert_eq!(timing[0].dur_ms, Some(12.5));
+        assert_eq!(timing[0].desc.as_deref(), Some("upstream, first byte"));
+        assert_eq!(timing[1].name, "edge");
+        assert_eq!(timing[1].dur_ms, Some(3.0));
+        assert_eq!(timing[1].desc, None);
+    }
+
+    /// The route table is one per process. A test that sets it builds its client under this lock.
+    static ROUTE_TABLE: std::sync::Mutex<()> = std::sync::Mutex::new(());
+
+    /// A client built for a provider with a chain sends to the first hop. The
+    /// hop's model prefix, header and key go with it.
+    #[tokio::test]
+    async fn a_provider_route_moves_the_request_to_its_first_hop() {
+        use crate::provider_route::{ProviderRoute, RouteTarget, set_provider_routes};
+
+        let (tx, rx) = tokio::sync::oneshot::channel();
+        let tx = Arc::new(std::sync::Mutex::new(Some(tx)));
+        let handler = post(move |headers: axum::http::HeaderMap, body: Bytes| {
+            let tx = tx.clone();
+            async move {
+                let _ = tx.lock().unwrap().take().unwrap().send((headers, body));
+                axum::response::Response::builder()
+                    .header("content-type", "text/event-stream")
+                    .body(axum::body::Body::from("data: [DONE]\n\n"))
+                    .unwrap()
+            }
+        });
+        // Only the hop's path exists.
+        let app = Router::new().route("/bifrost/v1/chat/completions", handler);
+        let listener = TcpListener::bind("127.0.0.1:0").await.unwrap();
+        let addr = listener.local_addr().unwrap();
+        let server = xai_spawn::spawn(async move {
+            let _ = axum::serve(listener, app).await;
+        });
+        let provider_base_url = format!("http://{addr}/provider/v1");
+
+        let client = {
+            let _table = ROUTE_TABLE
+                .lock()
+                .unwrap_or_else(|poisoned| poisoned.into_inner());
+            let mut extra_headers = IndexMap::new();
+            extra_headers.insert("x-hop".to_owned(), "on".to_owned());
+            set_provider_routes(vec![ProviderRoute {
+                provider_id: "openrouter".to_owned(),
+                provider_base_url: provider_base_url.clone(),
+                target: Ok(RouteTarget {
+                    base_url: format!("http://{addr}/bifrost/v1"),
+                    model_prefix: "openrouter/".to_owned(),
+                    extra_headers,
+                    env_http_headers: IndexMap::new(),
+                    api_key: Some("hop-key".to_owned()),
+                }),
+                hop_names: vec!["Bifrost".to_owned()],
+            }]);
+            SamplingClient::new(SamplerConfig {
+                // The trailing slash and the case differ from the table's entry. The match ignores both.
+                base_url: format!("HTTP://{addr}/provider/v1/"),
+                api_backend: ApiBackend::ChatCompletions,
+                model: "deepseek/deepseek-chat".to_owned(),
+                ..minimal_config()
+            })
+            .expect("the route resolves")
+        };
+        let (_chunks, _metadata) = client
+            .conversation_stream(large_user_request())
+            .await
+            .expect("the hop answers");
+        let (headers, body) = rx.await.expect("the hop got the request");
+        server.abort();
+
+        let body: serde_json::Value = serde_json::from_slice(&body).unwrap();
+        assert_eq!(body["model"], "openrouter/deepseek/deepseek-chat");
+        assert_eq!(header(&headers, "x-hop".parse().unwrap()), Some("on"));
+        assert_eq!(
+            header(&headers, xai_grok_net::header::AUTHORIZATION),
+            Some("Bearer hop-key")
+        );
+    }
+
+    /// A chain that cannot resolve sends nothing, and says why.
+    #[test]
+    fn a_broken_provider_route_refuses_the_client() {
+        use crate::provider_route::{ProviderRoute, set_provider_routes};
+
+        let _table = ROUTE_TABLE
+            .lock()
+            .unwrap_or_else(|poisoned| poisoned.into_inner());
+        set_provider_routes(vec![ProviderRoute {
+            provider_id: "openrouter".to_owned(),
+            provider_base_url: "http://127.0.0.1:9/broken/v1".to_owned(),
+            target: Err("relay `nas` has no `routes.bifrost` entry".to_owned()),
+            hop_names: Vec::new(),
+        }]);
+        let refusal = SamplingClient::new(SamplerConfig {
+            base_url: "http://127.0.0.1:9/broken/v1".to_owned(),
+            ..minimal_config()
+        })
+        .err()
+        .expect("a broken chain refuses the client");
+        let text = refusal.to_string();
+        assert!(
+            matches!(refusal, SamplingError::EndpointNotAllowed(_)),
+            "{text}"
+        );
+        assert!(text.contains("models.providers.openrouter.hops"), "{text}");
+        assert!(text.contains("routes.bifrost"), "{text}");
     }
 
     #[tokio::test]

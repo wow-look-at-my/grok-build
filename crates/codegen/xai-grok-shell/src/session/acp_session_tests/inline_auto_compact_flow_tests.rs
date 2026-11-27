@@ -406,6 +406,7 @@ async fn test_response_header_context_window_downgrade_rejected() {
                     context_window: Some(256_000),
                     max_completion_tokens: None,
                     models_etag: None,
+                    transport: None,
                 })
                 .await;
             let cfg_after = actor.chat_state_handle.get_sampling_config().await.unwrap();
@@ -419,6 +420,7 @@ async fn test_response_header_context_window_downgrade_rejected() {
                     context_window: Some(1_000_000),
                     max_completion_tokens: None,
                     models_etag: None,
+                    transport: None,
                 })
                 .await;
             let cfg_upgraded = actor.chat_state_handle.get_sampling_config().await.unwrap();
@@ -969,6 +971,7 @@ fn api_error_with_message(
             context_window: Some(context_window),
             max_completion_tokens: None,
             models_etag: None,
+            transport: None,
         }),
         empty_response_context: None,
         doom_loop_triggers: None,

@@ -99,7 +99,57 @@ fn is_inference(path: &str) -> bool {
     path.ends_with("/messages") || path.ends_with("/chat/completions")
 }
 
-async fn run_round_through_relay(api_backend: &str, upstream_path: &str) {
+/// How the config names the relay.
+#[derive(Clone, Copy, PartialEq)]
+enum Path {
+    /// The provider's `base_url` is the relay's own URL.
+    BaseUrl,
+    /// The provider's `base_url` is the provider. The relay is a hop of its chain.
+    Hop,
+}
+
+/// What a round left behind for a test to read.
+struct Round {
+    /// One `shell.turn.request_transport` context per model request, in order.
+    transports: Vec<serde_json::Value>,
+    /// The relay build reports its own share of the wait in `Server-Timing`.
+    relay_reports_timing: bool,
+}
+
+/// Ask the relay for one upstream answer and read its `Server-Timing` header.
+async fn relay_reports_timing(relay_origin: &str) -> bool {
+    use tokio::io::{AsyncReadExt, AsyncWriteExt};
+    let authority = relay_origin.trim_start_matches("http://");
+    let mut stream = tokio::net::TcpStream::connect(authority)
+        .await
+        .expect("connect to the relay");
+    let request =
+        format!("GET /up/v1/models HTTP/1.1\r\nHost: {authority}\r\nConnection: close\r\n\r\n");
+    stream
+        .write_all(request.as_bytes())
+        .await
+        .expect("send to the relay");
+    let mut answer = Vec::new();
+    let _ = stream.read_to_end(&mut answer).await;
+    let answer = String::from_utf8_lossy(&answer).to_ascii_lowercase();
+    let head = answer.split("\r\n\r\n").next().unwrap_or_default();
+    head.lines()
+        .any(|line| line.starts_with("server-timing:") && line.contains("relay-upstream"))
+}
+
+/// The transport record the shell logged for each model request.
+fn logged_transports(sandbox: &TestSandbox) -> Vec<serde_json::Value> {
+    let path = sandbox.grok_home().join("logs").join("unified.jsonl");
+    let log = std::fs::read_to_string(&path)
+        .unwrap_or_else(|error| panic!("no unified log at {}: {error}", path.display()));
+    log.lines()
+        .filter_map(|line| serde_json::from_str::<serde_json::Value>(line).ok())
+        .filter(|entry| entry["msg"] == "shell.turn.request_transport")
+        .map(|entry| entry["ctx"].clone())
+        .collect()
+}
+
+async fn run_round_through_relay(api_backend: &str, upstream_path: &str, path: Path) -> Round {
     let provider = MockInferenceServer::start_with_models(vec![
         MockModelEntry::new(MODEL).with_api_backend(api_backend),
     ])
@@ -128,17 +178,24 @@ async fn run_round_through_relay(api_backend: &str, upstream_path: &str) {
     std::fs::write(sandbox.workspace().join("first.txt"), FIRST_MARKER).expect("write first.txt");
     std::fs::write(sandbox.workspace().join("second.txt"), SECOND_MARKER)
         .expect("write second.txt");
+    let provider_block = match path {
+        Path::BaseUrl => format!(
+            "base_url = \"{tap}/up/v1\"\napi_key = \"{PROVIDER_KEY}\"\n",
+            tap = tap.origin()
+        ),
+        // The chain puts the relay's route in place of the provider's origin.
+        Path::Hop => format!(
+            "base_url = \"{provider}/v1\"\napi_key = \"{PROVIDER_KEY}\"\n\n\
+             [[model_providers.relay.hops]]\nid = \"nas\"\nkind = \"relay\"\noptional = true\n\
+             base_url = \"{tap}\"\nroutes = {{ relay = \"up\" }}\n",
+            provider = provider.origin(),
+            tap = tap.origin()
+        ),
+    };
     std::fs::write(
         sandbox.grok_home().join("config.toml"),
         format!(
-            r#"[models]
-default = "relay/{MODEL}"
-
-[model_providers.relay]
-base_url = "{tap}/up/v1"
-api_key = "{PROVIDER_KEY}"
-"#,
-            tap = tap.origin()
+            "[models]\ndefault = \"relay/{MODEL}\"\n\n[model_providers.relay]\n{provider_block}"
         ),
     )
     .expect("write config.toml");
@@ -240,14 +297,80 @@ api_key = "{PROVIDER_KEY}"
             r.zstd_base.as_deref().unwrap_or("none")
         );
     }
+    Round {
+        transports: logged_transports(&sandbox),
+        relay_reports_timing: relay_reports_timing(&relay.origin).await,
+    }
 }
 
 #[tokio::test]
 async fn messages_round_rides_zstd_deltas_through_ai_proxy() {
-    run_round_through_relay("messages", "/v1/messages").await;
+    run_round_through_relay("messages", "/v1/messages", Path::BaseUrl).await;
 }
 
 #[tokio::test]
 async fn chat_completions_round_rides_zstd_deltas_through_ai_proxy() {
-    run_round_through_relay("chat_completions", "/v1/chat/completions").await;
+    run_round_through_relay("chat_completions", "/v1/chat/completions", Path::BaseUrl).await;
+}
+
+/// The relay is a hop of the provider's chain. Every request still reaches
+/// the provider through it, and the shell records how each travelled.
+#[tokio::test]
+async fn a_hop_chain_sends_the_round_through_ai_proxy_and_records_its_transport() {
+    let round =
+        run_round_through_relay("chat_completions", "/v1/chat/completions", Path::Hop).await;
+    let transports = &round.transports;
+    let summary = format!("{transports:#?}");
+
+    let deltas: Vec<&serde_json::Value> = transports
+        .iter()
+        .filter(|transport| transport["encoding"] == "zstd_delta")
+        .collect();
+    assert!(
+        deltas.len() >= 2,
+        "each turn after the first must be recorded as a delta:\n{summary}"
+    );
+    for delta in &deltas {
+        let plain = delta["plain_bytes"].as_u64().unwrap_or(0);
+        let wire = delta["wire_bytes"].as_u64().unwrap_or(u64::MAX);
+        assert!(
+            plain > COMPRESSION_FLOOR as u64 && wire.saturating_mul(4) < plain,
+            "a delta record must show what the link saved:\n{summary}"
+        );
+    }
+    assert!(
+        transports
+            .iter()
+            .any(|transport| transport["encoding"] == "zstd"),
+        "the first request past the floor is a full zstd frame:\n{summary}"
+    );
+
+    // An older relay sends no `Server-Timing`. The record then has no link time.
+    for transport in transports.iter().filter(|t| t["encoding"] != "plain") {
+        let names: Vec<&str> = transport["server_timing"]
+            .as_array()
+            .map(|metrics| metrics.iter().filter_map(|m| m["name"].as_str()).collect())
+            .unwrap_or_default();
+        if round.relay_reports_timing {
+            assert!(
+                names.contains(&"relay-upstream") && names.contains(&"relay-decode"),
+                "the relay's own share of the wait must be recorded:\n{summary}"
+            );
+            let link = transport["link_ms"].as_u64();
+            let headers = transport["headers_ms"].as_u64().unwrap_or(0);
+            assert!(
+                link.is_some_and(|link| link <= headers),
+                "the link time is the part of the header wait the relay did not spend:\n{summary}"
+            );
+        } else {
+            assert!(
+                !names.contains(&"relay-upstream") && transport["link_ms"].is_null(),
+                "a relay that reports no timing gives no link time:\n{summary}"
+            );
+        }
+    }
+    eprintln!(
+        "relay reports timing: {}; transports:\n{summary}",
+        round.relay_reports_timing
+    );
 }

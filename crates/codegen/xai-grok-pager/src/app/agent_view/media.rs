@@ -346,15 +346,17 @@ impl AgentView {
         // Also proceed when only playback state remains (`inline_video` Some with no active placements)
         // That happens when frames finish loading after the media scrolled off
         // The drain must still stop the ticking video, or it keeps holding the animation gate open invisibly and its eventual drop is never purged
+        // The provider marks leave with the view's other pixels.
+        let icons = self.icon_layer.sync(&[]);
         if !self.inline_media_active
             && self.inline_media_ids.is_empty()
             && self.inline_video.is_none()
         {
-            return None;
+            return (!icons.is_empty()).then_some(icons);
         }
         self.inline_media_active = false;
         self.stop_inline_playback();
-        let mut clear_esc = String::new();
+        let mut clear_esc = icons;
         for &id in self.inline_media_ids.values() {
             clear_esc.push_str(&crate::terminal::image::clear_kitty_image(id));
         }
@@ -370,6 +372,7 @@ impl AgentView {
         self.inline_media_ids.clear();
         self.inline_media_iterm_emitted.clear();
         self.last_placed_ids.clear();
+        self.icon_layer = Default::default();
         for child in self.subagent_views.values_mut() {
             child.forget_transmitted_inline_media();
         }

@@ -2381,6 +2381,7 @@ fn api_error_with_message(
             context_window: Some(context_window),
             max_completion_tokens: None,
             models_etag: None,
+            transport: None,
         }),
         empty_response_context: None,
         doom_loop_triggers: None,

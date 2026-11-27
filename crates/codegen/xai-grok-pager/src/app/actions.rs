@@ -715,6 +715,16 @@ pub enum Action {
     ShowQueue,
     /// Commit a read-only list of background tasks, subagents, and scheduled tasks as a system block (`/tasks`).
     ShowTasks,
+    /// Open the route dialog: the proxy hops to the session model's provider (`/hops`).
+    OpenHopsDialog,
+    /// Measure every link of the open route dialog again.
+    ProbeRoute,
+    /// Turn one optional hop of a provider's chain on or off, and save it.
+    ToggleHop {
+        provider_id: String,
+        hop_id: String,
+        enabled: bool,
+    },
     /// Toggle the todo pane: show and focus it, focus it, or hide it (`/todo` with no arguments).
     ToggleTodos,
     /// Show the current plan: preview popover if exists, toast if not.
@@ -1750,6 +1760,25 @@ pub enum Effect {
     /// (see `AgentView::reset_wedged_mouse_reporting`). An effect so it rides the escape
     /// writer; `process_effects` re-checks capture so a toggle-off in the same batch wins.
     ResetMouseReporting,
+    /// Read the chain of `provider_id` from config; completes as [`TaskResult::RouteLoaded`].
+    LoadRoute {
+        agent_id: AgentId,
+        provider_id: String,
+    },
+    /// Time one round trip to each link of a route. Each completes as [`TaskResult::RouteLinkProbed`].
+    ProbeRouteLinks {
+        agent_id: AgentId,
+        /// Link id and the URL to measure.
+        links: Vec<(String, String)>,
+    },
+    /// Write `enabled` on one hop of `models.providers.<provider_id>.hops`; completes as
+    /// [`TaskResult::HopEnabledPersisted`].
+    PersistHopEnabled {
+        agent_id: AgentId,
+        provider_id: String,
+        hop_id: String,
+        enabled: bool,
+    },
     /// Send structured prompt blocks to the agent.
     /// Used for skill injection where the prompt consists of multiple content blocks (metadata plus skill body).
     SendPromptBlocks {
@@ -3317,6 +3346,25 @@ pub enum TaskResult {
     /// One [`Effect::PersistModelContextWindow`] write finished.
     ModelContextWindowPersisted {
         write: ModelContextWindowWrite,
+        result: Result<(), String>,
+    },
+    /// One [`Effect::LoadRoute`] read finished. `Ok(None)` is a provider that declares no hop.
+    RouteLoaded {
+        agent_id: AgentId,
+        provider_id: String,
+        result: Result<Option<xai_grok_shell::agent::model_route::RouteView>, String>,
+    },
+    /// One link of an [`Effect::ProbeRouteLinks`] answered, or did not. `Ok` is milliseconds.
+    RouteLinkProbed {
+        agent_id: AgentId,
+        link_id: String,
+        result: Result<u64, String>,
+    },
+    /// One [`Effect::PersistHopEnabled`] write finished.
+    HopEnabledPersisted {
+        agent_id: AgentId,
+        hop_id: String,
+        enabled: bool,
         result: Result<(), String>,
     },
     /// Off-thread clipboard attachment probe finished (see [`Effect::ProbeClipboardAttachment`]); dispatch attaches the chip.

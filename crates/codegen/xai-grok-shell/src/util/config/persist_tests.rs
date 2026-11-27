@@ -1,7 +1,7 @@
 use super::super::load::load_config_from_toml;
 use super::super::mcp::McpConfig;
 use super::super::settings_writes::{
-    write_dashboard_preview, write_feature_override, write_model_context_window,
+    write_dashboard_preview, write_feature_override, write_hop_enabled, write_model_context_window,
     write_notifications_keep_awake,
 };
 use super::*;
@@ -655,6 +655,80 @@ fn feature_override_writer_inserts_replaces_and_removes_the_key() {
         "an emptied [features] table is dropped"
     );
 }
+/// The toggle a user makes in the hops dialog is what the next config load routes by.
+#[test]
+fn hop_toggle_write_changes_the_route_the_loader_resolves() {
+    let directory = tempfile::tempdir().unwrap();
+    let path = directory.path().join("config.json");
+    std::fs::write(
+        &path,
+        r#"{"models": {"providers": {"openrouter": {
+            "base_url": "https://openrouter.ai/api/v1",
+            "hops": [
+                {"id": "nas", "kind": "relay", "optional": true, "base_url": "http://nas.lan:8317",
+                 "routes": {"bifrost": "bifrost", "edge": "edge"}},
+                {"id": "bifrost", "optional": true, "base_url": "http://bifrost.lan:8080/v1"},
+                {"id": "edge", "base_url": "http://edge.lan/v1"}
+            ]}}}}"#,
+    )
+    .unwrap();
+    let entry_url = || -> String {
+        let raw = xai_grok_config::load_toml_file(&path).unwrap();
+        let cfg = crate::agent::config::Config::new_from_toml_cfg(&raw).unwrap();
+        crate::agent::model_route::route_view("openrouter", &cfg.model_providers["openrouter"])
+            .unwrap()
+            .entry_url
+    };
+    assert_eq!(entry_url(), "http://nas.lan:8317/bifrost/v1");
+
+    write_hop_enabled(&path, "openrouter", "nas", false, atomic_write_follow_bound).unwrap();
+    assert_eq!(entry_url(), "http://bifrost.lan:8080/v1");
+
+    write_hop_enabled(
+        &path,
+        "openrouter",
+        "bifrost",
+        false,
+        atomic_write_follow_bound,
+    )
+    .unwrap();
+    assert_eq!(entry_url(), "http://edge.lan/v1");
+
+    write_hop_enabled(&path, "openrouter", "nas", true, atomic_write_follow_bound).unwrap();
+    assert_eq!(entry_url(), "http://nas.lan:8317/edge/v1");
+
+    let refused = write_hop_enabled(
+        &path,
+        "openrouter",
+        "edge",
+        false,
+        atomic_write_follow_bound,
+    )
+    .unwrap_err();
+    assert!(
+        format!("{refused:#}").contains("not optional"),
+        "{refused:#}"
+    );
+    let missing = write_hop_enabled(
+        &path,
+        "openrouter",
+        "absent",
+        false,
+        atomic_write_follow_bound,
+    )
+    .unwrap_err();
+    assert!(
+        format!("{missing:#}").contains("no hop `absent`"),
+        "{missing:#}"
+    );
+    let no_provider =
+        write_hop_enabled(&path, "other", "nas", false, atomic_write_follow_bound).unwrap_err();
+    assert!(
+        format!("{no_provider:#}").contains("not in the user config"),
+        "{no_provider:#}"
+    );
+}
+
 #[test]
 fn model_context_window_write_round_trips_through_the_loader() {
     let directory = tempfile::tempdir().unwrap();

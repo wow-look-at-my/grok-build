@@ -3,6 +3,7 @@ mod auth;
 mod billing;
 mod cta_e2e;
 mod dashboard;
+mod hops;
 mod jump;
 mod mid_text_btw;
 mod mid_text_goal;

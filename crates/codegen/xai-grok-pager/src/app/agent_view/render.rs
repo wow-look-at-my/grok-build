@@ -612,6 +612,9 @@ impl AgentView {
             crate::views::announcements::promo_cta(banner_announcements, hidden_announcement_ids)
                 .is_some_and(|(owner, _, _)| !crate::views::announcements::is_dismissible(owner));
         self.frame_occluder_rects.clear();
+        // Where this frame wants a provider mark: on the turn row, and in the route dialog.
+        let mut turn_row_icon: Option<crate::views::icon_label::IconSlot> = None;
+        let mut dialog_icon: Option<crate::views::icon_label::IconSlot> = None;
         self.clear_scrollback_selection_state();
         self.refresh_prompt_suggestion_gate();
         let theme = Theme::current();
@@ -1353,6 +1356,16 @@ impl AgentView {
         ) {
             status.push("context", ctx_line);
         }
+        if let Some(line) = self
+            .session
+            .tracker
+            .request_transport()
+            .and_then(|transport| {
+                crate::views::agent_status::transport_status_line(transport, &theme)
+            })
+        {
+            status.push("transport", line);
+        }
         let hover_or = |hovered: bool, resting: Style| {
             if hovered {
                 bg.fg(theme.text_primary)
@@ -1431,6 +1444,7 @@ impl AgentView {
         self.hit_goal_status.rect = areas.get("goal").copied();
         self.hit_context.rect = areas.get("context").copied();
         self.hit_credits.rect = areas.get("credits").copied();
+        self.hit_transport.rect = areas.get("transport").copied();
         self.hit_badge.rect = areas.get("badge").copied();
         let dropdown_open = self.prompt.any_dropdown_open();
         let switcher_rect = areas.get("switcher").copied();
@@ -2163,6 +2177,7 @@ impl AgentView {
                     .and_then(turn_status::GoalHarnessActivity::from_goal);
                 let held_queue = if dock_on { 0 } else { self.held_queue_count() };
                 let held_queue_top_sendable = !dock_on && self.held_queue_top_sendable();
+                let serving_provider = self.serving_provider();
                 let turn_output = turn_status::render_turn_status(
                     buf,
                     turn_area,
@@ -2181,6 +2196,7 @@ impl AgentView {
                         has_running_execute,
                         total_tokens: self.context_state.as_ref().map(|c| c.used),
                         output_rate: self.session.tracker.output_rate(),
+                        provider: serving_provider.as_ref(),
                         session_starting_since: self.session_starting_since,
                         is_bash_turn: self.bash_turn,
                         is_pending_user_input,
@@ -2193,6 +2209,8 @@ impl AgentView {
                         compaction_model: self.session.compaction_model.as_deref(),
                     },
                 );
+                // A dropdown paints over this row, so the mark under it is not placed.
+                turn_row_icon = turn_output.provider_icon.filter(|_| !dropdown_open);
                 self.hit_cancel_button
                     .set_unless_dropdown(turn_output.cancel_button, dropdown_open);
                 self.hit_bg_button
@@ -4371,6 +4389,35 @@ impl AgentView {
             );
             self.frame_occluder_rects.push(rect);
         }
+        self.hit_hops_close.rect = None;
+        self.hops_dialog_rows.clear();
+        if self.hops_dialog.is_some() {
+            use crate::views::hops_dialog;
+            let provider = self.serving_provider();
+            if let Some(dialog) = self.hops_dialog.as_ref() {
+                let live = hops_dialog::HopsDialogLive {
+                    transport: self.session.tracker.request_transport(),
+                    provider: provider.as_ref(),
+                    tokens_per_sec: self
+                        .session
+                        .tracker
+                        .output_rate()
+                        .map(|rate| rate.tokens_per_sec),
+                };
+                let rect = hops_dialog::hops_dialog_area(area, dialog, live);
+                let output = hops_dialog::render_hops_dialog(
+                    buf,
+                    rect,
+                    dialog,
+                    live,
+                    self.hit_hops_close.hovered,
+                );
+                self.hit_hops_close.rect = output.close;
+                self.hops_dialog_rows = output.rows;
+                dialog_icon = output.icon;
+                self.frame_occluder_rects.push(rect);
+            }
+        }
         if self.show_workflows {
             let runs = self.workflow_runs_newest_first();
             let mut view = self.workflows_view.clone();
@@ -4462,6 +4509,36 @@ impl AgentView {
                 Some(ref mut existing) => existing.append_plain(&seq),
                 None => {
                     prompt_post_flush = Some(crate::terminal::overlay::PostFlush::plain(seq));
+                }
+            }
+        }
+        // The provider marks go out after the frame, like inline media. The
+        // dialog's mark wins: both would share one image placement. A modal or
+        // an overlay over the turn row hides the row's mark with the row.
+        let icon_slots: Vec<crate::views::icon_label::IconSlot> = if self.active_modal.is_some() {
+            Vec::new()
+        } else if let Some(slot) = dialog_icon {
+            vec![slot]
+        } else {
+            turn_row_icon
+                .filter(|slot| {
+                    !self
+                        .frame_occluder_rects
+                        .iter()
+                        .any(|occluder| occluder.intersects(slot.rect))
+                })
+                .into_iter()
+                .collect()
+        };
+        if !icon_slots.is_empty() || !self.icon_layer.is_empty() {
+            let escapes = self.icon_layer.sync(&icon_slots);
+            if !escapes.is_empty() {
+                match prompt_post_flush {
+                    Some(ref mut existing) => existing.append_plain(&escapes),
+                    None => {
+                        prompt_post_flush =
+                            Some(crate::terminal::overlay::PostFlush::plain(escapes));
+                    }
                 }
             }
         }

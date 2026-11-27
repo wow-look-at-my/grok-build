@@ -150,6 +150,63 @@ pub(crate) fn execute(
             return (true, meta);
         }
         Effect::ResetMouseReporting => {}
+        Effect::LoadRoute {
+            agent_id,
+            provider_id,
+        } => {
+            tasks.spawn(async move {
+                let wanted = provider_id.clone();
+                let result = tokio::task::spawn_blocking(move || {
+                    xai_grok_shell::agent::model_route::load_route_views().map(|views| {
+                        views
+                            .into_iter()
+                            .find(|view| view.provider_id == wanted)
+                    })
+                })
+                .await
+                .unwrap_or_else(|error| Err(format!("route read task failed: {error}")));
+                TaskResult::RouteLoaded {
+                    agent_id,
+                    provider_id,
+                    result,
+                }
+            });
+        }
+        Effect::ProbeRouteLinks { agent_id, links } => {
+            // One task per link, so a slow link does not hold back the others' numbers.
+            for (link_id, url) in links {
+                tasks.spawn(async move {
+                    let result = xai_grok_shell::agent::model_route::probe_link(&url).await;
+                    TaskResult::RouteLinkProbed {
+                        agent_id,
+                        link_id,
+                        result,
+                    }
+                });
+            }
+        }
+        Effect::PersistHopEnabled {
+            agent_id,
+            provider_id,
+            hop_id,
+            enabled,
+        } => {
+            tasks.spawn(async move {
+                let result = xai_grok_shell::util::config::set_hop_enabled(
+                    provider_id,
+                    hop_id.clone(),
+                    enabled,
+                )
+                .await
+                .map_err(|e| format!("{e:#}"));
+                TaskResult::HopEnabledPersisted {
+                    agent_id,
+                    hop_id,
+                    enabled,
+                    result,
+                }
+            });
+        }
         Effect::SetWorkingDir { path } => {
             if let Err(e) = std::env::set_current_dir(&path) {
                 tracing::warn!(error = %e, "change location: failed to set_current_dir");
@@ -5454,8 +5511,12 @@ fn session_info_fields(
     {
         push("Model Hash", fp.to_string(), true);
     }
+    // The dialect is the request shape, not where the request goes. The route line says where.
     if let Some(b) = info.data.api_backend.as_deref() {
-        push("API Backend", b.to_string(), true);
+        push("API dialect", b.to_string(), true);
+    }
+    if let Some(route) = info.data.route.as_deref() {
+        push("Route", route.to_string(), true);
     }
     if let Some(profile) = xai_grok_sandbox::profile_name() {
         push("Sandbox", profile.to_string(), true);

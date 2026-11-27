@@ -25,7 +25,7 @@ pub struct ModelCommand;
 impl SlashCommand for ModelCommand {
     slash_meta! {
         name: "model",
-        aliases: ["m"],
+        aliases: ["m", "models"],
         description: "Switch the active model",
         usage: "/model <name> [window] [effort]",
         takes_args: true,
@@ -44,7 +44,11 @@ impl SlashCommand for ModelCommand {
         match sub_phase(ctx.models, args_query) {
             Some(SubPhase::Rows(items)) => Some(items),
             Some(SubPhase::Done) => None,
-            None => Some(build_model_items(ctx.models)),
+            None => {
+                let mut items = build_model_items(ctx.models);
+                items.extend(route_item(ctx.models));
+                Some(items)
+            }
         }
     }
 
@@ -90,6 +94,10 @@ impl SlashCommand for ModelCommand {
         }
         if let Some(id) = ctx.models.resolve_by_name_or_id(trimmed) {
             return CommandResult::Action(Action::SetDefaultModel(id));
+        }
+        // The picker's last row. A model of that name was matched above.
+        if trimmed.eq_ignore_ascii_case(ROUTE_ARG) {
+            return CommandResult::Action(Action::OpenHopsDialog);
         }
 
         // `/model <name> <provider>` picks one of several providers serving a
@@ -500,6 +508,22 @@ fn build_route_items(models: &ModelState, group: &[&acp::ModelId]) -> Vec<ArgIte
         });
     }
     items
+}
+
+const ROUTE_ARG: &str = "route";
+
+/// The picker's last row: the proxy hops to the session model's provider. A
+/// model with no provider block has no chain to show.
+fn route_item(models: &ModelState) -> Option<ArgItem> {
+    let provider = models.current_model_provider()?;
+    Some(ArgItem {
+        display: format!("{ROUTE_ARG}\u{2026}"),
+        match_text: format!("{ROUTE_ARG} hops proxies"),
+        insert_text: ROUTE_ARG.to_owned(),
+        description: format!("Proxy hops to {provider}: show, measure, toggle"),
+        loaded_in_vram: None,
+        favorite: false,
+    })
 }
 
 /// One row per model name. A model with a window or effort sub-menu gets a trailing space in `insert_text`, so the prompt widget chains into it.

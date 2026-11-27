@@ -27,6 +27,7 @@ pub mod gboom;
 pub mod help;
 pub mod history;
 pub mod home;
+pub mod hops;
 pub mod imagine;
 pub mod imagine_video;
 pub mod import_claude;
@@ -118,6 +119,7 @@ pub fn builtin_commands() -> Vec<Arc<dyn SlashCommand>> {
         Arc::new(find::FindCommand),
         Arc::new(usage::UsageCommand),
         Arc::new(tasks::TasksCommand),
+        Arc::new(hops::HopsCommand),
         // Extending the agent.
         Arc::new(plugin::SkillsCommand),
         Arc::new(mcps::McpsCommand),

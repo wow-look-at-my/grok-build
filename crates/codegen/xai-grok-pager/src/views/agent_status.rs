@@ -300,6 +300,31 @@ pub fn mcp_status_line(
     ]))
 }
 
+/// The item that says the last model request went out compressed. A plain
+/// request draws nothing: the item marks the low-bandwidth format, not its absence.
+pub fn transport_status_line(
+    transport: &xai_grok_sampling_types::RequestTransport,
+    theme: &Theme,
+) -> Option<Line<'static>> {
+    use xai_grok_sampling_types::BodyEncoding;
+    let label = match transport.encoding {
+        BodyEncoding::Plain => return None,
+        BodyEncoding::Zstd => "zstd",
+        BodyEncoding::ZstdDelta => "zstd \u{394}",
+    };
+    let mut spans = vec![Span::styled(
+        label,
+        Style::default().fg(theme.accent_success).bg(theme.bg_base),
+    )];
+    if let Some(saved) = transport.saved_percent() {
+        spans.push(Span::styled(
+            format!(" -{saved}%"),
+            Style::default().fg(theme.gray_dim).bg(theme.bg_base),
+        ));
+    }
+    Some(Line::from(spans))
+}
+
 #[cfg(test)]
 #[path = "agent_status_task_tests.rs"]
 mod task_tests;
@@ -307,6 +332,63 @@ mod task_tests;
 #[cfg(test)]
 mod tests {
     use super::*;
+
+    fn transport(
+        encoding: xai_grok_sampling_types::BodyEncoding,
+        plain_bytes: u64,
+        wire_bytes: u64,
+    ) -> xai_grok_sampling_types::RequestTransport {
+        xai_grok_sampling_types::RequestTransport {
+            encoding,
+            plain_bytes,
+            wire_bytes,
+            ..Default::default()
+        }
+    }
+
+    fn text_of(line: Option<Line<'static>>) -> Option<String> {
+        line.map(|line| {
+            line.spans
+                .iter()
+                .map(|span| span.content.as_ref())
+                .collect()
+        })
+    }
+
+    #[test]
+    fn a_plain_request_draws_no_transport_item() {
+        use xai_grok_sampling_types::BodyEncoding;
+        let theme = Theme::default();
+        assert_eq!(
+            text_of(transport_status_line(
+                &transport(BodyEncoding::Plain, 4096, 4096),
+                &theme
+            )),
+            None
+        );
+    }
+
+    #[test]
+    fn a_compressed_request_names_its_format_and_what_it_saved() {
+        use xai_grok_sampling_types::BodyEncoding;
+        let theme = Theme::default();
+        assert_eq!(
+            text_of(transport_status_line(
+                &transport(BodyEncoding::Zstd, 200_000, 50_000),
+                &theme
+            ))
+            .as_deref(),
+            Some("zstd -75%")
+        );
+        assert_eq!(
+            text_of(transport_status_line(
+                &transport(BodyEncoding::ZstdDelta, 400_000, 4_000),
+                &theme
+            ))
+            .as_deref(),
+            Some("zstd \u{394} -99%")
+        );
+    }
 
     #[test]
     fn tokens_compact_sub_thousand() {

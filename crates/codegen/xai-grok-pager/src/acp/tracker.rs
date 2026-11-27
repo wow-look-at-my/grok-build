@@ -499,6 +499,10 @@ pub struct AcpUpdateTracker {
     replayed_cost_seen: bool,
     /// The model's live output rate, as last reported by the agent's own meter.
     output_rate: Option<OutputRate>,
+    /// How the last live model request travelled. It stays until the next request reports.
+    request_transport: Option<xai_grok_sampling_types::RequestTransport>,
+    /// The upstream a gateway named for the last live model call.
+    upstream_provider: Option<String>,
     /// The model request waits for a slot under the agent's request cap.
     request_queued: Option<RequestQueued>,
     /// The total prompt tokens of the last live model call.
@@ -1563,6 +1567,39 @@ impl AcpUpdateTracker {
     /// The model's live output rate, or `None` between responses.
     pub fn output_rate(&self) -> Option<OutputRate> {
         self.output_rate
+    }
+
+    /// Record how a new model request travelled. The provider of the call
+    /// before it is dropped: the gateway may pick another upstream this time.
+    /// Returns whether the screen changed.
+    pub fn set_request_transport(
+        &mut self,
+        transport: xai_grok_sampling_types::RequestTransport,
+    ) -> bool {
+        let provider_cleared = self.upstream_provider.take().is_some();
+        let changed = self.request_transport.as_ref() != Some(&transport);
+        self.request_transport = Some(transport);
+        changed || provider_cleared
+    }
+
+    /// How the last live model request travelled.
+    pub fn request_transport(&self) -> Option<&xai_grok_sampling_types::RequestTransport> {
+        self.request_transport.as_ref()
+    }
+
+    /// Record the upstream a gateway named. Returns whether the name changed.
+    pub fn set_upstream_provider(&mut self, provider: String) -> bool {
+        let provider = provider.trim();
+        if provider.is_empty() || self.upstream_provider.as_deref() == Some(provider) {
+            return false;
+        }
+        self.upstream_provider = Some(provider.to_owned());
+        true
+    }
+
+    /// The upstream a gateway named for the last live model call.
+    pub fn upstream_provider(&self) -> Option<&str> {
+        self.upstream_provider.as_deref()
     }
 
     /// Record that the session's model request waits for a slot. Returns

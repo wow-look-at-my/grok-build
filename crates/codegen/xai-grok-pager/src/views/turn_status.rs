@@ -32,6 +32,11 @@ pub(crate) const MONITOR_PULSE_DIVISOR: u64 = 8;
 /// Rows narrower than this hide the phase timer, which would sit beside the right-aligned turn
 /// timer and read as one confusing pair of numbers. The turn timer stays.
 pub(crate) const PHASE_TIMER_MIN_WIDTH: u16 = 60;
+/// Below this width the provider's name gives its cells back to the activity text.
+pub(crate) const PROVIDER_MIN_WIDTH: u16 = 80;
+/// The blank cell between the rate and the provider.
+const PROVIDER_LEAD: usize = 1;
+
 /// Pulse speed for every "waiting on you" diamond. Always route diamond rendering through
 /// [`pending_diamond_color`] so the three call sites can never silently drift apart.
 pub(crate) const USER_WAITING_PULSE_SPEED: f32 = 0.08;
@@ -51,6 +56,8 @@ pub struct TurnStatusOutput {
     /// Hit area for the still-running watcher cue (click opens the tasks pane).
     /// `None` on keyboard-only hosts.
     pub watching_cue: Option<Rect>,
+    /// Where the provider's mark goes, when the row drew one.
+    pub provider_icon: Option<crate::views::icon_label::IconSlot>,
 }
 /// Hover state for the turn-status row's mouse affordances (`[stop]`, `[↓]`, the still-running watcher cue).
 /// `Some(_)` renders them; `None` marks a keyboard-only host (minimal mode, no mouse capture) and suppresses all.
@@ -155,6 +162,8 @@ pub struct TurnStatusArgs<'a> {
     pub total_tokens: Option<u64>,
     /// The model's live output rate, shown as `N tok/s` beside the timers.
     pub output_rate: Option<crate::acp::tracker::OutputRate>,
+    /// The upstream that serves the response, drawn after the rate in its own colour.
+    pub provider: Option<&'a crate::views::provider_brand::ProviderBrand>,
     /// When the session create was dispatched; `Some` until the id binds or the create fails
     pub session_starting_since: Option<Instant>,
     pub is_bash_turn: bool,
@@ -190,6 +199,7 @@ pub fn render_turn_status(
         has_running_execute,
         total_tokens,
         output_rate,
+        provider,
         session_starting_since,
         is_bash_turn,
         is_pending_user_input,
@@ -319,6 +329,20 @@ pub fn render_turn_status(
     let rate_str = output_rate.map(format_output_rate).unwrap_or_default();
     let rate_width = rate_str.width();
 
+    // The provider is the usual bottleneck for the rate, so it is named beside it.
+    let provider = provider.filter(|_| !rate_str.is_empty() && area.width >= PROVIDER_MIN_WIDTH);
+    let provider_icon = provider
+        .and_then(|brand| brand.icon.as_ref())
+        .filter(|_| crate::views::icon_label::icons_supported());
+    let provider_width = provider.map_or(0, |brand| {
+        let label = crate::views::icon_label::IconLabel {
+            label: &brand.name,
+            style: Style::default(),
+            icon: provider_icon,
+        };
+        usize::from(label.width()) + PROVIDER_LEAD
+    });
+
     // Bg button: [↓] normally, [send to bg] when hovered. Running execute
     // tools only, and never while cancelling (demote no-ops there).
     let show_bg = show_cancel
@@ -344,7 +368,7 @@ pub fn render_turn_status(
     };
     let cancel_width = cancel_str.width();
 
-    let right_width = turn_timer_width + rate_width + bg_width + cancel_width;
+    let right_width = turn_timer_width + rate_width + provider_width + bg_width + cancel_width;
 
     // While a tool is blocked on a permission prompt or `ask_user_question`, swap the running braille spinner for a pulsing `◆`
     // The drain-blocked and plan-approval indicators already use this animation, so every "your turn" status reads with one consistent visual cue
@@ -497,6 +521,22 @@ pub fn render_turn_status(
         x += rate_width as u16;
     }
 
+    // The provider, in its own colour, with its mark when the terminal draws pixels.
+    let mut provider_icon_slot = None;
+    if let Some(brand) = provider {
+        let lead = Span::styled(" ", right_style(theme.gray));
+        buf.set_span(x, area.y, &lead, PROVIDER_LEAD as u16);
+        x += PROVIDER_LEAD as u16;
+        let label = crate::views::icon_label::IconLabel {
+            label: &brand.name,
+            style: right_style(crate::theme::quantize(brand.color)),
+            icon: provider_icon,
+        };
+        let width = label.width();
+        provider_icon_slot = label.render(buf, x, area.y, width, right_style(theme.gray));
+        x += width;
+    }
+
     // Bg button — accent_running on hover
     let bg_button_rect = if show_bg && !bg_str.is_empty() {
         let bg_x = x;
@@ -529,6 +569,7 @@ pub fn render_turn_status(
         cancel_button: cancel_button_rect,
         bg_button: bg_button_rect,
         watching_cue: None,
+        provider_icon: provider_icon_slot,
     }
 }
 
@@ -905,6 +946,7 @@ pub(crate) fn render_running_row(
         has_running_execute: false,
         total_tokens: None,
         output_rate: rate,
+        provider: None,
         session_starting_since: None,
         is_bash_turn: false,
         is_pending_user_input: false,
@@ -982,6 +1024,7 @@ mod tests {
                 has_running_execute: false,
                 total_tokens: None,
                 output_rate: None,
+                provider: None,
                 session_starting_since: None,
                 is_bash_turn: false,
                 is_pending_user_input: false,
@@ -1321,6 +1364,7 @@ mod tests {
                 has_running_execute: false,
                 total_tokens: None,
                 output_rate: None,
+                provider: None,
                 session_starting_since: None,
                 is_bash_turn: false,
                 is_pending_user_input: false,
@@ -1427,6 +1471,7 @@ mod tests {
             has_running_execute: false,
             total_tokens: None,
             output_rate: None,
+            provider: None,
             session_starting_since: None,
             is_bash_turn: false,
             is_pending_user_input: false,
@@ -1468,6 +1513,87 @@ mod tests {
             .position(|c| *c == 'k')
             .and_then(|x| buf.cell((x as u16, 0)).map(|c| c.fg));
         (text, fg)
+    }
+
+    /// A running turn with a healthy rate and the provider `brand`.
+    fn render_with_provider(
+        brand: &crate::views::provider_brand::ProviderBrand,
+        rate: bool,
+        width: u16,
+    ) -> (TurnStatusOutput, Buffer) {
+        let mut args = idle_args(Watchers::default());
+        args.state = &AgentState::TurnRunning;
+        args.turn_elapsed = Some(Duration::from_secs(30));
+        args.output_rate = rate.then_some(crate::acp::tracker::OutputRate {
+            tokens_per_sec: 120.0,
+            window_secs: 10,
+            floor_tokens_per_sec: None,
+            slow_for: None,
+        });
+        args.provider = Some(brand);
+        render_row(args, width)
+    }
+
+    fn brand(name: &str, color: Color) -> crate::views::provider_brand::ProviderBrand {
+        crate::views::provider_brand::ProviderBrand {
+            name: name.to_owned(),
+            color,
+            icon: None,
+        }
+    }
+
+    /// The provider's name follows the rate, in the provider's own colour.
+    #[test]
+    fn the_provider_is_named_after_the_rate_in_its_own_colour() {
+        let color = Color::Rgb(0xD9, 0x77, 0x57);
+        let brand = brand("Anthropic", color);
+        let (output, buf) = render_with_provider(&brand, true, 100);
+        let text = buffer_text(&buf, buf.area);
+        assert!(text.contains("120 tok/s Anthropic"), "got: {text:?}");
+        assert!(
+            output.provider_icon.is_none(),
+            "a brand with no mark has no slot"
+        );
+
+        let row: Vec<char> = text.chars().collect();
+        let at = text
+            .find("Anthropic")
+            .map(|byte| text[..byte].chars().count());
+        let at = at.expect("the name is drawn");
+        assert_eq!(row.get(at), Some(&'A'));
+        let fg = buf.cell((at as u16, 0)).map(|cell| cell.fg);
+        assert_eq!(fg, Some(crate::theme::quantize(color)));
+        // The rate keeps its own colour.
+        let rate_at = row
+            .iter()
+            .position(|c| *c == 'k')
+            .expect("the rate is drawn");
+        let rate_fg = buf.cell((rate_at as u16, 0)).map(|cell| cell.fg);
+        assert_eq!(rate_fg, Some(Theme::current().gray));
+    }
+
+    /// A narrow row gives the provider's cells back. The rate stays.
+    #[test]
+    fn a_narrow_row_drops_the_provider_and_keeps_the_rate() {
+        let brand = brand("Anthropic", Color::Rgb(0xD9, 0x77, 0x57));
+        let (_, buf) = render_with_provider(&brand, true, PROVIDER_MIN_WIDTH - 1);
+        let text = buffer_text(&buf, buf.area);
+        assert!(text.contains("120 tok/s"), "got: {text:?}");
+        assert!(!text.contains("Anthropic"), "got: {text:?}");
+
+        let (_, buf) = render_with_provider(&brand, true, PROVIDER_MIN_WIDTH);
+        let text = buffer_text(&buf, buf.area);
+        assert!(text.contains("120 tok/s Anthropic"), "got: {text:?}");
+    }
+
+    /// The name explains the rate. With no rate on the row it is not drawn.
+    #[test]
+    fn the_provider_is_not_drawn_with_no_rate() {
+        let brand = brand("Anthropic", Color::Rgb(0xD9, 0x77, 0x57));
+        let (output, buf) = render_with_provider(&brand, false, 100);
+        let text = buffer_text(&buf, buf.area);
+        assert!(!text.contains("Anthropic"), "got: {text:?}");
+        assert!(output.provider_icon.is_none());
     }
 
     /// A healthy rate renders gray; near the floor amber; under it red, with

@@ -161,6 +161,12 @@ pub enum SamplingEvent {
         metadata: ResponseModelMetadata,
     },
 
+    /// A gateway named the upstream that serves this request. Sent at most once per stream.
+    UpstreamProvider {
+        request_id: RequestId,
+        provider: String,
+    },
+
     /// A backend-hosted tool call has started execution on the server (e.g., web search is in progress).
     /// The client does NOT execute these; the backend's agentic sampler handles them.
     BackendToolCallStarted {
@@ -199,6 +205,7 @@ impl SamplingEvent {
             | Self::Dequeued { request_id, .. }
             | Self::Failed { request_id, .. }
             | Self::ModelMetadata { request_id, .. }
+            | Self::UpstreamProvider { request_id, .. }
             | Self::BackendToolCallStarted { request_id, .. }
             | Self::BackendToolCallCompleted { request_id, .. } => request_id,
         }

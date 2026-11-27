@@ -124,6 +124,7 @@ mod model_notice_tests;
 mod rewind;
 mod role;
 pub(crate) use role::{AgentRole, ChildLink, ComposerRoute, ViewSurface};
+mod hops_overlay;
 mod selection;
 mod session;
 mod session_mode;
@@ -793,6 +794,17 @@ pub struct AgentView {
     /// The todo detail popup, opened by a double-click or `Enter` on a todo pane row.
     pub todo_detail: Option<crate::views::todo_detail::TodoDetailState>,
     pub hit_todo_detail_close: HitArea,
+    /// The route dialog, opened by `/hops` or a click on the top bar's transport item.
+    pub hops_dialog: Option<crate::views::hops_dialog::HopsDialogState>,
+    pub hit_hops_close: HitArea,
+    /// The link rows the last frame of the route dialog drew, for the pointer.
+    pub hops_dialog_rows: Vec<(usize, Rect)>,
+    /// The chain of the session model's provider, as last read from config.
+    pub route_view: Option<xai_grok_shell::agent::model_route::RouteView>,
+    /// The top bar's transport item. A click opens the route dialog.
+    pub hit_transport: HitArea,
+    /// The provider marks the terminal shows now.
+    pub icon_layer: crate::views::icon_label::IconLayer,
     /// UTC ms when the current turn started (`turnStartMs` from notification meta). Used for turn elapsed display.
     pub turn_start_ms: Option<i64>,
     /// Prompt id the stored `turn_start_ms` belongs to (stamped together from the same delta meta).

@@ -16,6 +16,7 @@ pub mod media_tool_config;
 pub(crate) mod model_pricing;
 pub(crate) mod model_provider_discovery;
 pub mod model_providers;
+pub mod model_route;
 pub mod mvp_agent;
 pub(crate) mod otel_gate;
 pub(crate) mod proxy;

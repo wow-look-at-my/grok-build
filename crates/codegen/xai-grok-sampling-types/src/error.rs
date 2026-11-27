@@ -1,6 +1,7 @@
 //! TODO: Move from xai-grok-shell/src/sampling/error.rs
 
 use std::fmt;
+use std::time::Duration;
 
 use serde::{Deserialize, Serialize};
 use thiserror::Error;
@@ -66,6 +67,132 @@ pub struct ResponseModelMetadata {
     pub max_completion_tokens: Option<u32>,
     /// `x-models-etag`: triggers model catalog refresh when changed.
     pub models_etag: Option<String>,
+    /// How the request that got these headers travelled. Streaming requests set it.
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    pub transport: Option<RequestTransport>,
+}
+
+/// The form a request body went out in.
+#[derive(Debug, Clone, Copy, Default, PartialEq, Eq, Serialize, Deserialize)]
+#[serde(rename_all = "snake_case")]
+pub enum BodyEncoding {
+    #[default]
+    Plain,
+    /// A full zstd frame.
+    Zstd,
+    /// A zstd frame against the body the relay kept from the request before.
+    ZstdDelta,
+}
+
+impl BodyEncoding {
+    pub fn is_compressed(self) -> bool {
+        !matches!(self, Self::Plain)
+    }
+}
+
+/// One `Server-Timing` metric: a hop's own account of the time it spent.
+#[derive(Debug, Clone, PartialEq, Serialize, Deserialize)]
+pub struct ServerTiming {
+    pub name: String,
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    pub dur_ms: Option<f64>,
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    pub desc: Option<String>,
+}
+
+/// How one request travelled: the body it sent and the wait for the response headers.
+#[derive(Debug, Clone, Default, PartialEq, Serialize, Deserialize)]
+pub struct RequestTransport {
+    pub encoding: BodyEncoding,
+    /// The JSON body's size before any encoding.
+    pub plain_bytes: u64,
+    /// The size that went on the wire.
+    pub wire_bytes: u64,
+    /// From the send to the response headers, a resend after a lost delta base included.
+    pub headers_ms: u64,
+    #[serde(default, skip_serializing_if = "Vec::is_empty")]
+    pub server_timing: Vec<ServerTiming>,
+}
+
+/// The `Server-Timing` metric a relay reports for its body decode.
+pub const RELAY_DECODE_METRIC: &str = "relay-decode";
+/// The `Server-Timing` metric a relay reports for its wait on the upstream's headers.
+pub const RELAY_UPSTREAM_METRIC: &str = "relay-upstream";
+
+impl RequestTransport {
+    /// The part of the header wait that a relay did not spend: the round trip
+    /// on the link to it. `None` when no relay reported its own share.
+    pub fn link_ms(&self) -> Option<u64> {
+        let metric = |name: &str| {
+            self.server_timing
+                .iter()
+                .find(|metric| metric.name == name)
+                .and_then(|metric| metric.dur_ms)
+        };
+        let upstream = metric(RELAY_UPSTREAM_METRIC)?;
+        let relay = upstream + metric(RELAY_DECODE_METRIC).unwrap_or(0.0);
+        // The relay's durations are fractional milliseconds, so `Duration` carries them without a truncating cast.
+        let relay = Duration::try_from_secs_f64(relay / 1000.0).ok()?;
+        let link = Duration::from_millis(self.headers_ms).checked_sub(relay)?;
+        u64::try_from((link.as_nanos() + 500_000) / 1_000_000).ok()
+    }
+
+    pub fn saved_percent(&self) -> Option<u8> {
+        if !self.encoding.is_compressed() || self.plain_bytes == 0 {
+            return None;
+        }
+        let saved = self.plain_bytes.saturating_sub(self.wire_bytes);
+        u8::try_from((saved.saturating_mul(100) / self.plain_bytes).min(100)).ok()
+    }
+}
+
+/// Read every `Server-Timing` header line. A metric with no name is dropped.
+pub fn parse_server_timing<'a>(lines: impl IntoIterator<Item = &'a str>) -> Vec<ServerTiming> {
+    let mut out = Vec::new();
+    for line in lines {
+        for metric in split_outside_quotes(line, ',') {
+            let mut parts = split_outside_quotes(metric, ';').into_iter();
+            let name = parts.next().unwrap_or_default().trim();
+            if name.is_empty() {
+                continue;
+            }
+            let mut entry = ServerTiming {
+                name: name.to_owned(),
+                dur_ms: None,
+                desc: None,
+            };
+            for param in parts {
+                let Some((key, value)) = param.split_once('=') else {
+                    continue;
+                };
+                let value = value.trim().trim_matches('"');
+                match key.trim().to_ascii_lowercase().as_str() {
+                    "dur" => entry.dur_ms = value.parse::<f64>().ok().filter(|d| d.is_finite()),
+                    "desc" if !value.is_empty() => entry.desc = Some(value.to_owned()),
+                    _ => {}
+                }
+            }
+            out.push(entry);
+        }
+    }
+    out
+}
+
+/// Split on `separator`, leaving one inside a quoted string alone.
+fn split_outside_quotes(text: &str, separator: char) -> Vec<&str> {
+    let mut parts = Vec::new();
+    let mut start = 0;
+    let mut quoted = false;
+    for (index, ch) in text.char_indices() {
+        if ch == '"' {
+            quoted = !quoted;
+        } else if ch == separator && !quoted {
+            parts.push(&text[start..index]);
+            start = index + ch.len_utf8();
+        }
+    }
+    parts.push(&text[start..]);
+    parts
 }
 
 /// Wire-credential provenance of a request that failed authentication. A 401 for a request that went out with no
@@ -1101,6 +1228,58 @@ fn message_looks_overloaded(message: &str) -> bool {
 #[cfg(test)]
 mod tests {
     use super::*;
+
+    #[test]
+    fn server_timing_reads_every_metric_of_every_line() {
+        let metrics = parse_server_timing([
+            "upstream;dur=412.5;desc=\"openrouter, via relay\", cache;desc=miss",
+            "edge; DUR=3",
+        ]);
+        let read: Vec<_> = metrics
+            .iter()
+            .map(|m| (m.name.as_str(), m.dur_ms, m.desc.as_deref()))
+            .collect();
+        assert_eq!(
+            read,
+            [
+                ("upstream", Some(412.5), Some("openrouter, via relay")),
+                ("cache", None, Some("miss")),
+                ("edge", Some(3.0), None),
+            ]
+        );
+    }
+
+    #[test]
+    fn server_timing_drops_what_it_cannot_read() {
+        let metrics = parse_server_timing([";dur=4, , slow;dur=fast;desc=\"\", nan;dur=NaN"]);
+        let read: Vec<_> = metrics
+            .iter()
+            .map(|m| (m.name.as_str(), m.dur_ms, m.desc.as_deref()))
+            .collect();
+        assert_eq!(read, [("slow", None, None), ("nan", None, None)]);
+    }
+
+    #[test]
+    fn saved_percent_is_for_a_compressed_body_only() {
+        let sent = |encoding, plain_bytes, wire_bytes| RequestTransport {
+            encoding,
+            plain_bytes,
+            wire_bytes,
+            ..Default::default()
+        };
+        assert_eq!(sent(BodyEncoding::Plain, 1000, 1000).saved_percent(), None);
+        assert_eq!(sent(BodyEncoding::Zstd, 0, 0).saved_percent(), None);
+        assert_eq!(
+            sent(BodyEncoding::Zstd, 1000, 250).saved_percent(),
+            Some(75)
+        );
+        assert_eq!(
+            sent(BodyEncoding::ZstdDelta, 100_000, 400).saved_percent(),
+            Some(99)
+        );
+        // A frame can be larger than a body that does not compress.
+        assert_eq!(sent(BodyEncoding::Zstd, 100, 130).saved_percent(), Some(0));
+    }
 
     #[test]
     fn overloaded_detects_stream_and_api_shapes() {

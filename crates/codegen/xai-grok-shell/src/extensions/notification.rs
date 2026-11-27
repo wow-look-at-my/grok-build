@@ -1341,6 +1341,13 @@ pub enum SessionUpdate {
         #[serde(default, skip_serializing_if = "Option::is_none")]
         slow_for_ms: Option<u64>,
     },
+    /// How the model request in flight travelled: its body encoding, its
+    /// sizes and its wait for the response headers.
+    RequestTransport {
+        transport: xai_grok_sampling_types::RequestTransport,
+    },
+    /// The upstream a gateway named for the response in flight. Fire-and-forget, **never persisted**.
+    UpstreamProvider { provider: String },
     /// A model request waits for a slot under `[ui].max_parallel_requests`.
     RequestQueued { ahead: u64, limit: u32 },
     /// The queued request got its slot and is on its way to the model.

@@ -1423,6 +1423,16 @@ impl Config {
         } = super::config_model_override_parse::parse_model_overrides(raw_config);
         let (mut auth_providers, auth_provider_warnings) = parse_auth_providers(raw_config);
         let (model_providers, mut model_provider_warnings) = parse_model_providers(raw_config);
+        for (provider_id, reason) in super::model_route::publish_provider_routes(&model_providers) {
+            model_provider_warnings.push(
+                super::config_model_override_parse::ConfigWarning::model_provider(
+                    &provider_id,
+                    Some("hops"),
+                    super::config_model_override_parse::ConfigWarningKind::InvalidValue,
+                    format!("{reason}; requests to this provider are refused"),
+                ),
+            );
+        }
         for (model_id, model) in &config_models {
             let Some(cert_dir) = model.mtls_cert_dir.as_deref() else {
                 continue;
