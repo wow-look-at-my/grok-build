@@ -246,6 +246,9 @@ pub struct MessagesResponse {
     pub model: String,
     pub stop_reason: Option<StopReason>,
     pub usage: MessagesUsage,
+    /// OpenRouter's name of the upstream that served the request.
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    pub provider: Option<serde_json::Value>,
 }
 
 #[derive(Debug, Clone, Serialize, Deserialize)]

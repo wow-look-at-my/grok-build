@@ -2246,5 +2246,21 @@ pub(super) fn dispatch_task_result(result: TaskResult, app: &mut AppView) -> Vec
         TaskResult::ModelContextWindowPersisted { write, result } => {
             settings::handle_model_context_window_persisted(app, write, result)
         }
+        TaskResult::RouteLoaded {
+            agent_id,
+            provider_id,
+            result,
+        } => super::hops::handle_route_loaded(app, agent_id, provider_id, result),
+        TaskResult::RouteLinkProbed {
+            agent_id,
+            link_id,
+            result,
+        } => super::hops::handle_route_link_probed(app, agent_id, link_id, result),
+        TaskResult::HopEnabledPersisted {
+            agent_id,
+            hop_id,
+            enabled,
+            result,
+        } => super::hops::handle_hop_enabled_persisted(app, agent_id, hop_id, enabled, result),
     }
 }

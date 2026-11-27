@@ -15,6 +15,7 @@ mod cta;
 mod ctx;
 mod dashboard;
 mod dashboard_telemetry;
+mod hops;
 mod import_claude;
 mod inline_feedback;
 mod interject;

@@ -39,9 +39,13 @@ Grok also auto-compacts once the context window hits 85% (tune it with `session.
 
 Show the context window split into System prompt, Messages, Overhead, and Free. Messages is itemized into user, assistant, reasoning, tool-call and tool-result rows. Rows for Tool definitions, Skills, and MCP servers are already counted in those totals.
 
+### `/hops`
+
+Open the route dialog: every proxy between Grok and the model's provider, its address and its round-trip time. Space turns an optional hop on or off, and `r` measures again. `/route` and `/proxies` open the same dialog. See [Proxy Hops](11-custom-models.md#proxy-hops).
+
 ### `/session-info`
 
-Show session details — auth method, model, turn count, and context usage. Aliases: `/status`, `/info`. Click a value or drag to select and copy; `c` copies the session ID and `y` copies the whole block.
+Show session details — auth method, model, API dialect, route, turn count, and context usage. Aliases. Click a value or drag to select and copy. `c` copies the session ID and `y` copies the whole block.
 
 ### `/fork`
 

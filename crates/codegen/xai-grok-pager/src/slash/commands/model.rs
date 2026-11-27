@@ -22,7 +22,7 @@ pub struct ModelCommand;
 impl SlashCommand for ModelCommand {
     slash_meta! {
         name: "model",
-        aliases: ["m"],
+        aliases: ["m", "models"],
         description: "Switch the active model",
         usage: "/model <name> [effort]",
         takes_args: true,
@@ -41,7 +41,9 @@ impl SlashCommand for ModelCommand {
         if let Some(items) = sub_phase_items(ctx.models, args_query) {
             return Some(items);
         }
-        Some(build_model_items(ctx.models))
+        let mut items = build_model_items(ctx.models);
+        items.extend(route_item(ctx.models));
+        Some(items)
     }
 
     fn search_args(&self, ctx: &AppCtx, args_query: &str) -> Option<Vec<ArgItem>> {
@@ -80,6 +82,10 @@ impl SlashCommand for ModelCommand {
         }
         if let Some(id) = ctx.models.resolve_by_name_or_id(trimmed) {
             return CommandResult::Action(Action::SetDefaultModel(id));
+        }
+        // The picker's last row. A model of that name was matched above.
+        if trimmed.eq_ignore_ascii_case(ROUTE_ARG) {
+            return CommandResult::Action(Action::OpenHopsDialog);
         }
 
         // `/model <name> <provider>` picks one of several providers serving a
@@ -339,12 +345,23 @@ fn build_route_items(models: &ModelState, group: &[&acp::ModelId]) -> Vec<ArgIte
     items
 }
 
-/// One row per model name. Reasoning models get a trailing space in
-/// `insert_text` so the prompt widget chains into the effort sub-menu. A name
-/// that several models share is one row. It inserts the name and a space,
-/// which opens the route phase: one row per provider serving it.
-/// Every model is listed, except a batch route the session is not running.
-/// The ones the config marked come first, then the newest of each family.
+/// One row per model name.
+const ROUTE_ARG: &str = "route";
+
+/// The picker's last row: the proxy hops to the session model's provider. A
+/// model with no provider block has no chain to show.
+fn route_item(models: &ModelState) -> Option<ArgItem> {
+    let provider = models.current_model_provider()?;
+    Some(ArgItem {
+        display: format!("{ROUTE_ARG}\u{2026}"),
+        match_text: format!("{ROUTE_ARG} hops proxies"),
+        insert_text: ROUTE_ARG.to_owned(),
+        description: format!("Proxy hops to {provider}: show, measure, toggle"),
+        loaded_in_vram: None,
+        favorite: false,
+    })
+}
+
 fn build_model_items(models: &ModelState) -> Vec<ArgItem> {
     let current_id = models.current.as_ref();
     let mut items: Vec<ArgItem> = Vec::with_capacity(models.available.len());

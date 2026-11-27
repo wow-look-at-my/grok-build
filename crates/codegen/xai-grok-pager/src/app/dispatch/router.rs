@@ -1070,6 +1070,13 @@ fn dispatch_inner(action: Action, app: &mut AppView) -> Vec<Effect> {
         Action::ManageBilling => dispatch_manage_billing(app),
         Action::ShowQueue => dispatch_show_queue(app),
         Action::ShowTasks => dispatch_show_tasks(app),
+        Action::OpenHopsDialog => super::hops::open_hops_dialog(app),
+        Action::ProbeRoute => super::hops::probe_route(app),
+        Action::ToggleHop {
+            provider_id,
+            hop_id,
+            enabled,
+        } => super::hops::toggle_hop(app, provider_id, hop_id, enabled),
         Action::ToggleTodos => dispatch_toggle_todos(app),
         Action::ShowPlan => dispatch_show_plan(app),
         Action::EnterPlanMode { description } => dispatch_enter_plan_mode(app, description),

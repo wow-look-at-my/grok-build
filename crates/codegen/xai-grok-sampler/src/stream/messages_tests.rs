@@ -31,6 +31,7 @@ fn message_start() -> MessageStreamEvent {
             content: vec![],
             model: "messages-compatible-model".into(),
             stop_reason: None,
+            provider: None,
             usage: MessagesUsage {
                 input_tokens: 10,
                 output_tokens: 0,
@@ -121,6 +122,50 @@ async fn empty_stream_yields_started_then_completed() {
         SamplingEvent::StreamStarted { .. }
     ));
     assert!(matches!(nth(&events, 1), SamplingEvent::Completed { .. }));
+}
+
+/// The provider events of a stream, in order.
+fn providers(events: &[SamplingEvent]) -> Vec<&str> {
+    events
+        .iter()
+        .filter_map(|event| match event {
+            SamplingEvent::UpstreamProvider { provider, .. } => Some(provider.as_str()),
+            _ => None,
+        })
+        .collect()
+}
+
+/// A gateway that speaks Messages names the upstream on `message_start`.
+#[tokio::test]
+async fn the_upstream_on_message_start_is_reported_before_the_response_starts() {
+    let MessageStreamEvent::MessageStart { mut message } = message_start() else {
+        panic!("message_start builds a MessageStart");
+    };
+    message.provider = Some(serde_json::json!("Amazon Bedrock"));
+    let raw = stream::iter(vec![
+        Ok(MessageStreamEvent::MessageStart { message }),
+        Ok(text_block_start(0)),
+        Ok(text_delta(0, "hi")),
+        Ok(block_stop(0)),
+    ])
+    .boxed();
+    let events = collect(stream_messages(raw, None, rid(), Duration::from_secs(60))).await;
+    assert_eq!(providers(&events), ["Amazon Bedrock"]);
+    let provider_at = events
+        .iter()
+        .position(|event| matches!(event, SamplingEvent::UpstreamProvider { .. }));
+    let started_at = events
+        .iter()
+        .position(|event| matches!(event, SamplingEvent::ResponseStarted { .. }));
+    assert!(provider_at < started_at, "the provider comes first");
+}
+
+/// Anthropic's own API names no provider, so no event is sent.
+#[tokio::test]
+async fn a_message_start_with_no_provider_reports_none() {
+    let raw = stream::iter(vec![Ok(message_start())]).boxed();
+    let events = collect(stream_messages(raw, None, rid(), Duration::from_secs(60))).await;
+    assert!(providers(&events).is_empty());
 }
 
 #[tokio::test]
@@ -808,6 +853,7 @@ fn message_start_with_cache(
             content: vec![],
             model: "messages-compatible-model".into(),
             stop_reason: None,
+            provider: None,
             usage: MessagesUsage {
                 input_tokens: input,
                 output_tokens: 0,

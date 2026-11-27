@@ -3,7 +3,7 @@
 use super::common::*;
 use xai_grok_pager_pty_harness::EnvOp;
 
-const FIRST_PARTY_ENV: &[&str] = &[
+pub(super) const FIRST_PARTY_ENV: &[&str] = &[
     "GROK_CLI_CHAT_PROXY_BASE_URL",
     "GROK_XAI_API_BASE_URL",
     "GROK_MODELS_BASE_URL",

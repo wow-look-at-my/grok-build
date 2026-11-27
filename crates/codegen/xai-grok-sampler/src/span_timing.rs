@@ -127,9 +127,28 @@ pub(crate) struct StreamSpanTiming {
     names: SegmentNames,
     last_mark_at: Instant,
     stage: Stage,
+    /// Kept apart from the span: the caller needs it with tracing off too.
+    transport: Option<xai_grok_sampling_types::RequestTransport>,
 }
 
 impl StreamSpanTiming {
+    pub(crate) fn set_transport(&mut self, transport: xai_grok_sampling_types::RequestTransport) {
+        self.transport = Some(transport);
+    }
+
+    /// Put the request's transport record on the metadata its response headers gave.
+    pub(crate) fn with_transport(
+        &mut self,
+        metadata: Option<xai_grok_sampling_types::ResponseModelMetadata>,
+    ) -> Option<xai_grok_sampling_types::ResponseModelMetadata> {
+        let Some(transport) = self.transport.take() else {
+            return metadata;
+        };
+        let mut metadata = metadata.unwrap_or_default();
+        metadata.transport = Some(transport);
+        Some(metadata)
+    }
+
     pub(crate) fn start(region: Region) -> Self {
         if region.span().is_disabled() {
             drop(region);
@@ -144,6 +163,7 @@ impl StreamSpanTiming {
             names,
             last_mark_at: Instant::now(),
             stage: Stage::Start,
+            transport: None,
         };
         let request_build = this.names.request_build;
         this.open_segment(request_build);
@@ -158,6 +178,7 @@ impl StreamSpanTiming {
             names: SegmentNames::generic(),
             last_mark_at: Instant::now(),
             stage: Stage::Start,
+            transport: None,
         }
     }
 
