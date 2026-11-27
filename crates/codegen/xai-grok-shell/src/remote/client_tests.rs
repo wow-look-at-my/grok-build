@@ -1456,7 +1456,7 @@ async fn fetch_models_for_api_base_blocking_parses_per_model_windows() {
     let mock_url = format!("{base}/v1");
 
     let entries = xai_spawn::spawn_blocking(move || {
-        fetch_models_for_api_base_blocking(&mock_url, Some("test-key"))
+        fetch_models_for_api_base_blocking(&mock_url, Some("test-key"), &[])
             .expect("mock /v1/models should be reachable")
     })
     .await
@@ -1522,6 +1522,7 @@ async fn resolve_context_window_from_provider_reads_openrouter_context_length() 
                 "deepseek/deepseek-v4-pro-0813",
                 &api_base,
                 Some("sk-or-v1-test"),
+                &[],
             )
         })
         .await
@@ -1534,6 +1535,105 @@ async fn resolve_context_window_from_provider_reads_openrouter_context_length() 
         cw.get(),
         1_000_000,
         "resolve_context_window_from_provider must return the OpenRouter context_length"
+    );
+}
+
+async fn start_header_gated_listing_server(
+    header: &'static str,
+    expected: &'static str,
+    body: serde_json::Value,
+) -> (String, tokio::task::JoinHandle<()>) {
+    use axum::http::{HeaderMap, StatusCode};
+    use axum::response::IntoResponse;
+    use axum::routing::get;
+    let listener = tokio::net::TcpListener::bind("127.0.0.1:0").await.unwrap();
+    let base = format!("http://127.0.0.1:{}", listener.local_addr().unwrap().port());
+    let app = axum::Router::new().route(
+        "/v1/models",
+        get(move |headers: HeaderMap| async move {
+            let sent = headers.get(header).and_then(|value| value.to_str().ok());
+            if sent == Some(expected) {
+                axum::Json(body).into_response()
+            } else {
+                StatusCode::UNAUTHORIZED.into_response()
+            }
+        }),
+    );
+    let handle = xai_spawn::spawn(async move { axum::serve(listener, app).await.unwrap() });
+    (base, handle)
+}
+
+/// The context-window resolver sends the provider's own headers. A gateway
+/// that authenticates by header answers the listing only with them.
+#[tokio::test(flavor = "multi_thread", worker_threads = 2)]
+async fn resolve_context_window_from_provider_sends_provider_headers() {
+    let (base, server) = start_header_gated_listing_server(
+        "x-relay-token",
+        "relay-secret",
+        serde_json::json!({
+            "data": [ { "id": "gated/model", "context_length": 640_000 } ]
+        }),
+    )
+    .await;
+    let api_base = format!("{base}/v1");
+    let resolve = |headers: Vec<(String, String)>| {
+        let api_base = api_base.clone();
+        xai_spawn::spawn_blocking(move || {
+            crate::agent::remote_config::resolve_context_window_from_provider(
+                "gated/model",
+                &api_base,
+                Some("sk-test"),
+                &headers,
+            )
+        })
+    };
+
+    let without = resolve(Vec::new()).await.unwrap();
+    let with = resolve(vec![(
+        "x-relay-token".to_owned(),
+        "relay-secret".to_owned(),
+    )])
+    .await
+    .unwrap();
+    server.abort();
+
+    assert_eq!(without, None, "the relay refuses a request with no header");
+    assert_eq!(
+        with.map(std::num::NonZeroU64::get),
+        Some(640_000),
+        "the provider's header reaches the listing request"
+    );
+}
+
+/// A static header is sent as written. An `env_http_headers` header is sent
+/// with its variable's trimmed value, and not at all when the variable is
+/// unset or blank.
+#[test]
+fn provider_headers_resolves_static_and_environment_headers() {
+    let extra: indexmap::IndexMap<String, String> = [("X-Route".to_owned(), "eu".to_owned())]
+        .into_iter()
+        .collect();
+    let from_env: indexmap::IndexMap<String, String> = [
+        ("X-Relay-Token".to_owned(), "RELAY_TOKEN".to_owned()),
+        ("X-Unset".to_owned(), "UNSET_VAR".to_owned()),
+        ("X-Blank".to_owned(), "BLANK_VAR".to_owned()),
+    ]
+    .into_iter()
+    .collect();
+    let getenv = |var: &str| match var {
+        "RELAY_TOKEN" => Some(" relay-secret\n".to_owned()),
+        "BLANK_VAR" => Some("  ".to_owned()),
+        _ => None,
+    };
+
+    let headers = provider_headers_with(&extra, &from_env, getenv);
+
+    assert_eq!(
+        headers,
+        vec![
+            ("X-Route".to_owned(), "eu".to_owned()),
+            ("X-Relay-Token".to_owned(), "relay-secret".to_owned()),
+        ]
     );
 }
 
@@ -1554,6 +1654,7 @@ async fn resolve_context_window_from_provider_absent_slug_returns_none() {
                 "deepseek/deepseek-v4-pro-0813",
                 &api_base,
                 Some("sk-or-v1-test"),
+                &[],
             )
         })
         .await
@@ -1606,6 +1707,7 @@ async fn resolve_all(api_base: &str, models: &[&str]) -> Vec<Option<std::num::No
                     &model,
                     &api_base,
                     Some("sk-test"),
+                    &[],
                 )
             })
             .await
